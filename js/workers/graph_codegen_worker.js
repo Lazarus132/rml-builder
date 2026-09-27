@@ -1,9 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
-const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
-  38;
+  "1.21.76-custom-csharp-catalog-provenance";
 
 self.window = self;
 
@@ -715,16 +713,16 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_registry.js?v=1-physical-modules-v750-offline-core-types"
+      "../graph/node_graph_registry.js?v=1-physical-modules-v752-catalog-cache-equivalent"
     );
     importScripts(
       "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=85-contextual-csharp-api"
+      "../compiler/visual_csharp.js?v=1.21.76-custom-csharp-catalog-provenance"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.24-contextual-csharp-api"
+      "../catalog/api_nodes.js?v=1.21.76-custom-csharp-catalog-provenance"
     );
 
     if (
@@ -738,49 +736,27 @@ async function ensureRuntime(
 
     const factoryController =
       self.RMLApiNodeFactoryController;
-    const factoryReport =
-      self.RMLApiNodeFactoryReport;
-    const activeFactoryVersion = Number(
-      self.__RMLApiNodeFactoryVersion
-    );
     if (
-      factoryController?.moduleId !==
-        GRAPH_CODEGEN_WORKER_MODULE_ID ||
-      Number(
-        factoryController?.factoryVersion
-      ) !==
-        GRAPH_CODEGEN_WORKER_FACTORY_VERSION ||
-      (
-        hasCatalog &&
-        (
-          activeFactoryVersion !==
-            GRAPH_CODEGEN_WORKER_FACTORY_VERSION ||
-          factoryReport?.moduleId !==
-            GRAPH_CODEGEN_WORKER_MODULE_ID ||
-          Number(factoryReport?.factoryVersion) !==
-            GRAPH_CODEGEN_WORKER_FACTORY_VERSION
-        )
-      )
+      !factoryController ||
+      typeof factoryController.rebuild !==
+        "function"
     ) {
       throw new Error(
-        `Runtime module version mismatch in graph-codegen worker: API factory v${activeFactoryVersion || 0} cannot be used with ${GRAPH_CODEGEN_WORKER_MODULE_ID} (factory v${GRAPH_CODEGEN_WORKER_FACTORY_VERSION} required). Reload the Builder without cached files.`
+        "The graph-codegen worker API factory does not expose the required rebuild capability."
       );
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle"
+      "../graph/node_graph_codegen.js?v=1.21.76-custom-csharp-catalog-provenance"
     );
 
     if (
       !self.RMLTypedNodeGraphGenerator ||
-      self.RMLTypedNodeGraphGenerator
-        .moduleId !==
-        GRAPH_CODEGEN_WORKER_MODULE_ID ||
       typeof self.RMLTypedNodeGraphGenerator.build !==
         "function"
     ) {
       throw new Error(
-        `Runtime module version mismatch in graph-codegen worker: the typed graph generator is not the ${GRAPH_CODEGEN_WORKER_MODULE_ID} module. Reload the Builder without cached files.`
+        "The graph-codegen worker did not expose a usable typed graph generator."
       );
     }
       runtimeProjectionKey =
@@ -812,13 +788,9 @@ async function ensureRuntime(
   });
   const report = self.RMLApiNodeFactoryReport;
   if (
-    Number(self.__RMLApiNodeFactoryVersion) !==
-      GRAPH_CODEGEN_WORKER_FACTORY_VERSION ||
-    report?.moduleId !==
-      GRAPH_CODEGEN_WORKER_MODULE_ID ||
-    Number(report?.factoryVersion) !==
-      GRAPH_CODEGEN_WORKER_FACTORY_VERSION ||
-    report?.verificationPassed !== true
+    report?.verificationPassed !== true ||
+    String(report?.catalogFingerprint || "") !==
+      String(catalog?.catalogFingerprint || "")
   ) {
     throw new Error(
       "The graph-codegen worker could not verify its projected API factory."
@@ -862,6 +834,134 @@ function portableNormalizeCsType(value) {
     .replace(/\s+/g, " ");
 }
 
+function portableContractType(value) {
+  return String(value || "System.Object")
+    .trim()
+    .replace(/^global::/, "")
+    .replace(/\s+/g, "")
+    .replace(/&$/, "");
+}
+
+function portableContractPortRole(
+  contract,
+  direction,
+  port
+) {
+  const explicit = String(
+    port?.role || port?.roleKey || ""
+  ).trim();
+  if (explicit) return explicit;
+  const id = String(port?.id || "").trim();
+  const fixed = new Set([
+    "call", "done", "success", "exception",
+    "target", "result", "value"
+  ]);
+  if (fixed.has(id)) return `${direction}:${id}`;
+  let match = /^arg(\d+)$/.exec(id);
+  if (match) {
+    return `parameter:${Number(match[1])}:input`;
+  }
+  match = /^out(\d+)$/.exec(id);
+  if (match) {
+    return `parameter:${Number(match[1])}:output`;
+  }
+  match = /^generic(\d+)$/.exec(id);
+  if (match) {
+    return `generic:${Number(match[1])}:input`;
+  }
+  const parameter = (
+    Array.isArray(contract?.parameters)
+      ? contract.parameters
+      : []
+  ).find(value =>
+    String(value?.name || "") === id
+  );
+  if (parameter) {
+    return `parameter:${Math.max(
+      0,
+      Number(parameter.position) || 0
+    )}:${direction}`;
+  }
+  return `${String(
+    contract?.kind || "api"
+  )}:${direction}:${id}`;
+}
+
+function portableContractSemanticKey(contract) {
+  if (
+    !contract ||
+    typeof contract !== "object" ||
+    Array.isArray(contract)
+  ) {
+    return "";
+  }
+  const kind = String(
+    contract.kind || ""
+  ).trim();
+  const ownerType = portableContractType(
+    contract.ownerType
+  );
+  if (!kind || !ownerType) return "";
+  const parameters = (
+    Array.isArray(contract.parameters)
+      ? contract.parameters
+      : []
+  ).map((parameter, index) => ({
+    position: Math.max(
+      0,
+      Number(parameter?.position) || index
+    ),
+    type: portableContractType(
+      parameter?.elementType ||
+      parameter?.type
+    ),
+    isByRef:
+      parameter?.isByRef === true ||
+      parameter?.isOut === true,
+    isIn: parameter?.isIn === true,
+    isOut: parameter?.isOut === true
+  }));
+  const ports = (direction, key) => (
+    Array.isArray(contract[key])
+      ? contract[key]
+      : []
+  ).map(port => ({
+    id: String(port?.id || "").trim(),
+    role: portableContractPortRole(
+      contract,
+      direction,
+      port
+    ),
+    type: String(port?.type || "").trim(),
+    typeVar: String(
+      port?.typeVar || ""
+    ).trim(),
+    generic: port?.generic === true,
+    optional: port?.optional === true
+  }));
+  return JSON.stringify({
+    kind,
+    ownerType,
+    memberName: String(
+      contract.memberName || ""
+    ),
+    parameters,
+    returnType: portableContractType(
+      contract.returnType || "System.Void"
+    ),
+    isStatic: contract.isStatic === true,
+    genericArity: Math.max(
+      0,
+      Number(contract.genericArity) || 0
+    ),
+    runtimeBound:
+      contract.runtimeBound === true,
+    inputPorts: ports("input", "inputPorts"),
+    outputPorts:
+      ports("output", "outputPorts")
+  });
+}
+
 function portableContractMatchesDefinition(
   contract,
   definition
@@ -874,39 +974,14 @@ function portableContractMatchesDefinition(
   ) {
     return false;
   }
-  const expectedFingerprint = String(
-    contract?.contractFingerprint || ""
-  );
-  const availableFingerprint = String(
-    available.contractFingerprint || ""
-  );
-  if (expectedFingerprint && availableFingerprint) {
-    return expectedFingerprint === availableFingerprint;
-  }
-  const expectedKind = String(contract?.kind || "");
-  const expectedMemberName = String(
-    contract?.memberName || ""
-  );
-  const memberNameMayBeEmpty =
-    expectedKind === "type" ||
-    expectedKind === "enum";
-  const expectedOwnerType = portableNormalizeCsType(
-    contract?.ownerType
-  );
+  const expectedKey =
+    portableContractSemanticKey(contract);
+  const availableKey =
+    portableContractSemanticKey(available);
   return Boolean(
-    expectedKind &&
-    expectedKind ===
-      String(available.kind || "") &&
-    expectedOwnerType &&
-    expectedOwnerType === portableNormalizeCsType(
-      available.ownerType
-    ) &&
-    (memberNameMayBeEmpty || expectedMemberName) &&
-    expectedMemberName ===
-      String(available.memberName || "") &&
-    String(contract?.signature || "") &&
-    String(contract?.signature || "") ===
-      String(available.signature || "")
+    expectedKey &&
+    availableKey &&
+    expectedKey === availableKey
   );
 }
 
@@ -951,10 +1026,12 @@ function installStreamedApiRequirements(support) {
     );
     const contract =
       requirement?.apiContract || {};
+    const availability = String(
+      requirement?.availability ||
+      "pending"
+    );
     const requiresUnavailable =
-      !hasCatalog ||
-      requirement?.availability ===
-        "unavailable";
+      availability === "unavailable";
     if (requiresUnavailable) {
       const installed =
         controller?.ensureUnavailableOperator?.(
@@ -968,6 +1045,14 @@ function installStreamedApiRequirements(support) {
         );
       }
       continue;
+    }
+    if (
+      availability !== "verified" ||
+      !hasCatalog
+    ) {
+      throw new Error(
+        `The verified catalog support for '${operatorId || "<missing>"}' is still pending.`
+      );
     }
     let definition = definitions[operatorId];
     if (!portableContractMatchesDefinition(

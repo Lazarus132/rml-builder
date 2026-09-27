@@ -1,9 +1,8 @@
 (() => {
   "use strict";
 
-  const BRIDGE_VERSION = 10;
+  const BRIDGE_VERSION = 14;
   const BRIDGE_PROTOCOL_VERSION = 1;
-  const PROBE_TIMEOUT_MS = 3000;
   const STREAM_OPEN_TIMEOUT_MS = 5000;
   const SNAPSHOT_TIMEOUT_MS = 5000;
   const PROJECT_RESERVED_IDENTIFIERS = new Set(["Class", "Namespace", "Event",
@@ -13,6 +12,7 @@
 
   const channels = new Map();
   let activeStreamState = null;
+  let activeBindingContractState = null;
   let channelRequestSequence = 0;
   let epoch = 0;
   let mode = "cached";
@@ -21,46 +21,6 @@
   let health = null;
   let lastError = "";
   let controller = null;
-  let connectPromise = null;
-  let connectionHealthCheckPromise = null;
-
-  function safeLocalStorageValue(key) {
-    try { return window.localStorage?.getItem(key) || ""; }
-    catch { return ""; }
-  }
-
-  function normalizeBaseUrl(value) {
-    try {
-      if (!String(value || "").trim()) return "";
-      const url = new URL(String(value).trim(), window.location.href);
-      if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return "";
-      return url.origin;
-    } catch { return ""; }
-  }
-
-  function scannerBaseCandidates() {
-    const configured = new URLSearchParams(window.location.search).get("catalogUrl") ||
-      safeLocalStorageValue("rml-resonite-api-catalog-url");
-    const preferred = configured ? normalizeBaseUrl(configured)
-      : normalizeBaseUrl(safeLocalStorageValue("rml-resonite-api-last-scanner-url")) ||
-        normalizeBaseUrl(window.RMLResoniteApiCatalog?.catalogSourceUrl) ||
-        normalizeBaseUrl(window.RMLFrooxComponentCatalog?.catalogSourceUrl) ||
-        "http://127.0.0.1:42719";
-    if (!preferred) return [];
-    const candidates = new Set([preferred]);
-    const url = new URL(preferred);
-
-    const first = 42719;
-    const last = 42729;
-    const port = Number(url.port);
-    if (port >= first && port <= last) {
-      for (let candidate = first; candidate <= last; candidate += 1) {
-        url.port = String(candidate);
-        candidates.add(url.origin);
-      }
-    }
-    return [...candidates];
-  }
 
   function getConnectionState() {
     return Object.freeze({ mode, phase, connected: mode === "live", scannerBaseUrl,
@@ -70,57 +30,15 @@
   function renderStatus() {
     const element = document.getElementById("api-catalog-state");
     if (!element) return;
-    const catalog = window.RMLResoniteApiCatalog || window.RMLFrooxComponentCatalog;
-    if (
-      mode === "cached" &&
-      !catalog &&
-      ["cache", "updating"].includes(
-        String(element.dataset.source || "")
-      )
-    ) {
-      return;
-    }
-    const version = String(catalog?.engineVersion || "");
-    const prefix = "Resonite API";
-    const checking = mode === "checking" ||
-      (mode === "live" && phase === "checking");
-    const live = mode === "live" && !checking;
-    const cached = Boolean(catalog) && !checking && !live;
-    element.textContent = checking
-      ? `${prefix} · checking…`
-      : live
-        ? `${prefix} · Live`
-        : cached
-          ? `${prefix} · Cached`
-          : "Resonite API · Unavailable";
-    element.dataset.source = checking
-      ? "updating"
-      : live
-        ? "scanner"
-        : cached
-          ? "cache"
-          : "unavailable";
-    element.setAttribute("aria-pressed", String(live));
-    element.setAttribute("aria-busy", String(checking));
-    const action = checking ? "Click to cancel the connection attempt."
-      : live ? "Click to disconnect and use Cached mode."
-      : cached
-        ? "Click to find the scanner once and connect. Each candidate port is checked at most once; no automatic retries."
-        : "Click to find the scanner and load a verified Live catalog into IndexedDB.";
-    const report = window.RMLApiNodeFactoryReport;
-    let statistics = "";
-    if (catalog && report && String(report.engineVersion || "") === version &&
-        Number.isFinite(Number(report.totalGeneratedNodes))) {
-      const types = Array.isArray(catalog.types) ? catalog.types : [];
-      const count = value => Math.max(0, Number(value) || 0).toLocaleString(window.RMLI18n?.language || undefined);
-      statistics = `${count(types.filter(type => type?.isAttachableComponent === true).length)} attachable components · ${count(types.length)} API types · ${count(report.totalGeneratedNodes)} generated nodes`;
-    }
-    element.title = [statistics, action, lastError].filter(Boolean).join(" · ");
-    element.setAttribute("aria-label", `${element.textContent}. ${element.title}`);
+    element.dataset.bridgeMode = mode;
+    element.dataset.bridgePhase = phase;
+    element.dataset.bridgeError = lastError;
+    element.dataset.scannerBaseUrl = scannerBaseUrl;
   }
 
   function publishConnection() {
     renderStatus();
+    publishLiveReadiness();
     window.dispatchEvent(new CustomEvent("rml-scanner-connection", {
       detail: getConnectionState()
     }));
@@ -155,16 +73,198 @@
       active: false, scannerBaseUrl: "", sessionId: "", lastSeenUtc: "",
       eventSource: null, generation: 0, streamTimer: null, requestController: null,
       refreshPromise: null, phase: mode === "checking" ? phase : "cached",
-      lastError, disposed: false, requestOrder: 0 };
+      lastError, disposed: false, requestOrder: 0, failedEpoch: -1,
+      expectedBindings: new Map(), bindingContractRevision: 0,
+      snapshotReceived: false, contractRegistered: false };
+  }
+
+  function liveReadinessForState(state) {
+    const bindings = state
+      ? [...state.expectedBindings.values()]
+      : [];
+    const bound = bindings.filter(binding =>
+      binding.bound === true
+    );
+    const received = state?.snapshotReceived === true
+      ? bound.filter(binding =>
+          state.values.has(binding.monitorId)
+        )
+      : [];
+    const unbound = bindings
+      .filter(binding => binding.bound !== true)
+      .map(binding => binding.monitorId);
+    const missing = bound
+      .filter(binding =>
+        !state?.values.has(binding.monitorId)
+      )
+      .map(binding => binding.monitorId);
+    const unexpected = state?.snapshotReceived === true
+      ? [...state.values.keys()].filter(
+          monitorId =>
+            !state.expectedBindings.has(
+              monitorId
+            )
+        )
+      : [];
+    const contractRegistered = Boolean(
+      state &&
+      state.contractRegistered === true &&
+      state === activeBindingContractState
+    );
+    const selected = Boolean(
+      contractRegistered &&
+      (
+        bindings.length === 0 ||
+        state === activeStreamState
+      )
+    );
+    const ready = Boolean(
+      mode === "live" &&
+      selected &&
+      (
+        bindings.length === 0 ||
+        (
+          state.connected === true &&
+          state.snapshotReceived === true &&
+          String(state.sessionId || "").trim() &&
+          bound.length === bindings.length &&
+          unexpected.length === 0
+        )
+      )
+    );
+    let reason = "ready";
+    if (!contractRegistered) reason = "contract-unregistered";
+    else if (mode !== "live") reason = "scanner-cached";
+    else if (!selected) reason = "channel-not-selected";
+    else if (bindings.length > 0) {
+      if (!state.connected) reason = state.phase || "channel-disconnected";
+      else if (!state.snapshotReceived) reason = "snapshot-pending";
+      else if (!String(state.sessionId || "").trim()) reason = "session-missing";
+      else if (unbound.length > 0) reason = "graph-bindings-incomplete";
+      else if (unexpected.length > 0) reason = "unexpected-runtime-values";
+    }
+    return Object.freeze({
+      ready,
+      reason,
+      channel: String(state?.channel || ""),
+      scannerMode: mode,
+      scannerBaseUrl,
+      contractRegistered,
+      selected,
+      connected: state?.connected === true,
+      active: state?.active === true,
+      snapshotReceived:
+        state?.snapshotReceived === true,
+      sessionId: String(state?.sessionId || ""),
+      expectedCount: bindings.length,
+      boundCount: bound.length,
+      receivedCount: received.length,
+      missingCount: missing.length,
+      unboundCount: unbound.length,
+      unexpectedCount: unexpected.length,
+      missingMonitorIds: Object.freeze(
+        missing.slice(0, 64)
+      ),
+      unboundMonitorIds: Object.freeze(
+        unbound.slice(0, 64)
+      ),
+      unexpectedMonitorIds: Object.freeze(
+        unexpected.slice(0, 64)
+      ),
+      truncated:
+        missing.length > 64 ||
+        unbound.length > 64 ||
+        unexpected.length > 64,
+      contractRevision:
+        Number(state?.bindingContractRevision) || 0
+    });
+  }
+
+  function getLiveReadiness(channel = "") {
+    const key = normalizeChannel(channel);
+    const state = key
+      ? channels.get(key) || null
+      : activeBindingContractState;
+    return liveReadinessForState(state);
+  }
+
+  function publishLiveReadiness(
+    state = activeBindingContractState
+  ) {
+    const readiness = liveReadinessForState(
+      state === activeBindingContractState
+        ? state
+        : activeBindingContractState
+    );
+    const diagnostic = {
+      ...readiness,
+      missingMonitorIds:
+        [...readiness.missingMonitorIds],
+      unboundMonitorIds:
+        [...readiness.unboundMonitorIds],
+      unexpectedMonitorIds:
+        [...readiness.unexpectedMonitorIds]
+    };
+    const root = document.documentElement;
+    if (root?.dataset) {
+      root.dataset.rmlRuntimeLiveReadiness =
+        JSON.stringify(diagnostic);
+      root.dataset.rmlRuntimeExpectedBindings =
+        String(readiness.expectedCount);
+      root.dataset.rmlRuntimeBoundBindings =
+        String(readiness.boundCount);
+      root.dataset.rmlRuntimeReceivingBindings =
+        String(readiness.receivedCount);
+      root.dataset.rmlRuntimeUnexpectedBindings =
+        String(readiness.unexpectedCount);
+      root.dataset.rmlRuntimeSnapshotReceived =
+        String(readiness.snapshotReceived);
+      root.dataset.rmlRuntimeContractRegistered =
+        String(readiness.contractRegistered);
+    }
+    const element = document.getElementById(
+      "api-catalog-state"
+    );
+    if (element?.dataset) {
+      element.dataset.runtimeReady =
+        String(readiness.ready);
+      element.dataset.runtimeReadinessReason =
+        readiness.reason;
+      element.dataset.runtimeChannel =
+        readiness.channel;
+      element.dataset.runtimeExpectedBindings =
+        String(readiness.expectedCount);
+      element.dataset.runtimeBoundBindings =
+        String(readiness.boundCount);
+      element.dataset.runtimeReceivingBindings =
+        String(readiness.receivedCount);
+      element.dataset.runtimeUnexpectedBindings =
+        String(readiness.unexpectedCount);
+      element.dataset.runtimeSnapshotReceived =
+        String(readiness.snapshotReceived);
+      element.dataset.runtimeContractRegistered =
+        String(readiness.contractRegistered);
+    }
+    window.dispatchEvent(new CustomEvent(
+      "rml-runtime-readiness",
+      { detail: readiness }
+    ));
+    return readiness;
   }
 
   function publicState(state) {
+    const readiness = liveReadinessForState(state);
     return Object.freeze({ channel: state.channel,
       connected: mode === "live" && state.connected,
       active: mode === "live" && state.connected && state.active,
       scannerBaseUrl: state.scannerBaseUrl, sessionId: state.sessionId,
       lastSeenUtc: state.lastSeenUtc, valueCount: state.values.size,
-      phase: state.phase, lastError: state.lastError, retrying: false });
+      phase: state.phase, lastError: state.lastError, retrying: false,
+      snapshotReceived: state.snapshotReceived === true,
+      liveReady: readiness.ready,
+      expectedBindingCount: readiness.expectedCount,
+      boundBindingCount: readiness.boundCount,
+      receivingBindingCount: readiness.receivedCount });
   }
 
   function notify(state, kind = "state", record = null) {
@@ -174,6 +274,7 @@
       catch (error) { console.error("RML runtime bridge listener failed.", error); }
     }
     window.dispatchEvent(new CustomEvent("rml-runtime-bridge", { detail }));
+    publishLiveReadiness(state);
   }
 
   function clearStreamTimer(state) {
@@ -198,6 +299,10 @@
     state.refreshPromise = null;
     state.connected = false;
     state.active = false;
+    state.snapshotReceived = false;
+    state.values.clear();
+    state.sessionId = "";
+    state.lastSeenUtc = "";
     state.scannerBaseUrl = "";
     state.phase = "cached";
     state.lastError = lastError;
@@ -214,11 +319,16 @@
     state.refreshPromise = null;
     state.connected = false;
     state.active = false;
+    state.snapshotReceived = false;
+    state.values.clear();
+    state.sessionId = "";
+    state.lastSeenUtc = "";
     state.scannerBaseUrl = scannerBaseUrl;
     state.phase = "unavailable";
     state.lastError = String(
       reason?.message || reason || ""
     );
+    state.failedEpoch = epoch;
     if (!state.disposed) {
       notify(state, "connection");
     }
@@ -243,7 +353,8 @@
     if (next && mode === "live") openChannel(next);
   }
 
-  function disconnect(reason = "") {
+  function disconnect(reason = "", options = {}) {
+    const silent = options?.silent === true;
     ++epoch;
     mode = "cached";
     phase = "cached";
@@ -252,11 +363,20 @@
     health = null;
     controller?.abort();
     controller = null;
-    connectPromise = null;
 
     const affected = [...channels.values()];
     for (const state of affected) stopChannel(state);
-    publishConnection();
+    if (!silent) {
+      publishConnection();
+    } else {
+      const element = document.getElementById("api-catalog-state");
+      if (element) {
+        element.dataset.bridgeMode = mode;
+        element.dataset.bridgePhase = phase;
+        element.dataset.bridgeError = lastError;
+        element.dataset.scannerBaseUrl = scannerBaseUrl;
+      }
+    }
     for (const state of affected) if (!state.disposed) notify(state, "connection");
     return false;
   }
@@ -297,39 +417,15 @@
       state.eventSource === source && state.generation === generation;
   }
 
-  function confirmScannerConnection(token) {
-    if (connectionHealthCheckPromise) return connectionHealthCheckPromise;
-    const base = scannerBaseUrl;
-    phase = "checking";
-    renderStatus();
-    const pending = fetchJson(`${base}/health`, 1000, controller?.signal)
-      .then(result => {
-        if (!isCurrent(token)) return false;
-        if (result.ok !== true || result.runtimeBridgeReady !== true ||
-            Number(result.runtimeBridgeVersion) !== BRIDGE_PROTOCOL_VERSION) {
-          return disconnect("Scanner connection lost.");
-        }
-        health = Object.freeze({ ...result });
-        phase = "connected";
-        renderStatus();
-        return true;
-      })
-      .catch(() => {
-        if (isCurrent(token)) disconnect("Scanner connection lost.");
-        return false;
-      })
-      .finally(() => {
-        if (connectionHealthCheckPromise === pending) connectionHealthCheckPromise = null;
-      });
-    connectionHealthCheckPromise = pending;
-    return pending;
-  }
-
   function openChannel(state) {
     if (mode !== "live" || state !== activeStreamState || state.disposed ||
-        !state.listeners.size || state.eventSource) return;
+        !state.listeners.size || state.eventSource || state.failedEpoch === epoch) return;
     const token = epoch;
     const generation = ++state.generation;
+    state.snapshotReceived = false;
+    state.values.clear();
+    state.sessionId = "";
+    state.lastSeenUtc = "";
     state.phase = "connecting";
     state.lastError = "";
     state.scannerBaseUrl = scannerBaseUrl;
@@ -359,76 +455,72 @@
     source.onerror = () => {
       if (!channelIsCurrent(state, source, token, generation)) return;
       failChannel(state, "Runtime value stream interrupted.");
-      void confirmScannerConnection(token);
     };
     state.streamTimer = window.setTimeout(() => {
       if (channelIsCurrent(state, source, token, generation) && !state.connected) {
         failChannel(state, "Runtime value stream did not open.");
-        void confirmScannerConnection(token);
       }
     }, STREAM_OPEN_TIMEOUT_MS);
     notify(state, "connection");
   }
 
-  function connect() {
-    if (connectPromise) return connectPromise;
-    if (mode === "live") return Promise.resolve(true);
-    const token = ++epoch;
+  function adoptScannerSession(session) {
+    const port = Number(session?.port);
+    const selectedHealth = session?.health;
+    const expectedBase = `http://127.0.0.1:${port}`;
+    if (
+      !Number.isInteger(port) ||
+      port < 42719 ||
+      port > 42725 ||
+      session?.scannerBaseUrl !== expectedBase ||
+      selectedHealth?.ok !== true
+    ) {
+      console.error(
+        "[RML BUILDER INTERNAL FAILURE] The runtime bridge received an invalid health-selected scanner session.",
+        session
+      );
+      return false;
+    }
+    if (
+      selectedHealth.runtimeBridgeReady !== true ||
+      Number(
+        selectedHealth.runtimeBridgeVersion
+      ) !== BRIDGE_PROTOCOL_VERSION
+    ) {
+      disconnect(
+        "The selected scanner exposes a catalog but no compatible Live runtime bridge.",
+        { silent: true }
+      );
+      return false;
+    }
+    ++epoch;
+    controller?.abort();
     controller = new AbortController();
-    mode = "checking";
-    phase = "checking";
+    scannerBaseUrl = expectedBase;
+    health = Object.freeze({ ...selectedHealth });
+    mode = "live";
+    phase = "connected";
     lastError = "";
-    health = null;
-    const candidates = scannerBaseCandidates();
-    const sessionSignal = controller.signal;
-    for (const state of channels.values()) { state.phase = "checking"; state.lastError = ""; }
-
-    const pending = Promise.resolve().then(async () => {
-      if (!isCurrent(token)) return false;
-      try {
-        if (!candidates.length) throw new Error("The configured scanner URL is not a valid HTTP(S) endpoint.");
-        if (typeof EventSource !== "function") throw new Error("This browser does not provide EventSource.");
-        let base = "";
-        let result = null;
-        let probeError = "";
-        for (const candidate of candidates) {
-          if (!isCurrent(token)) return false;
-          try {
-            const response = await fetchJson(`${candidate}/health`, PROBE_TIMEOUT_MS, sessionSignal);
-            if (!isCurrent(token)) return false;
-            if (response.ok !== true || response.runtimeBridgeReady !== true ||
-                Number(response.runtimeBridgeVersion) !== BRIDGE_PROTOCOL_VERSION) {
-              throw new Error("Scanner does not expose the required runtime bridge protocol.");
-            }
-            base = candidate;
-            result = response;
-            break;
-          } catch (error) {
-            if (!isCurrent(token)) return false;
-            probeError = `${candidate}: ${error?.message || String(error)}`;
-          }
-        }
-        if (!base) throw new Error(`No compatible scanner found after checking ${candidates.length} endpoint(s). ${probeError}`);
-        health = Object.freeze({ ...result });
-        scannerBaseUrl = base;
-        mode = "live";
-        phase = "connected";
-        try { window.localStorage?.setItem("rml-resonite-api-last-scanner-url", `${base}/resonite_api_catalog.json`); } catch {}
-        publishConnection();
-        if (!isCurrent(token)) return false;
-        reconcileActiveStream();
-        return isCurrent(token);
-      } catch (error) {
-        if (isCurrent(token)) disconnect(error?.message || "Scanner health check failed.");
-        return false;
-      } finally {
-        if (token === epoch) connectPromise = null;
-      }
-    });
-    connectPromise = pending;
+    for (const state of channels.values()) stopChannel(state);
     publishConnection();
-    for (const state of [...channels.values()]) if (!state.disposed) notify(state, "connection");
-    return pending;
+    reconcileActiveStream();
+    return true;
+  }
+
+  function connect(options = {}) {
+    if (mode === "live") return Promise.resolve(true);
+    const selected =
+      options?.session ||
+      window.RMLScannerHealthSession;
+    if (!selected) {
+      disconnect(
+        "Use the Resonite API button or import a project before opening a Live runtime stream."
+      );
+      return Promise.resolve(false);
+    }
+    return Promise.resolve(
+      adoptScannerSession(selected)
+    );
   }
 
   function normalizeRecord(
@@ -496,7 +588,6 @@
       String(
         envelope.sessionId || ""
       );
-
     if (
       state.sessionId &&
       sessionId &&
@@ -530,6 +621,7 @@
 
     state.active =
       envelope.active === true;
+    state.snapshotReceived = true;
     state.lastSeenUtc =
       String(
         envelope.lastSeenUtc || ""
@@ -548,6 +640,16 @@
       String(
         envelope.sessionId || ""
       );
+    const establishesBaseline = Boolean(
+      sessionId &&
+      (
+        envelope.reset === true ||
+        (
+          state.sessionId &&
+          state.sessionId !== sessionId
+        )
+      )
+    );
 
     if (
       envelope.reset === true ||
@@ -559,6 +661,7 @@
       )
     ) {
       state.values.clear();
+      state.snapshotReceived = false;
     }
 
     state.sessionId =
@@ -575,6 +678,10 @@
         record.monitorId,
         record
       );
+    }
+
+    if (establishesBaseline) {
+      state.snapshotReceived = true;
     }
 
     state.active = true;
@@ -649,6 +756,106 @@
       (kind ? envelope.kind === kind : ["snapshot", "display"].includes(envelope.kind));
   }
 
+  function normalizedExpectedBinding(value) {
+    const monitorId = String(
+      value?.monitorId || value?.nodeId || ""
+    ).trim();
+    if (!monitorId) return null;
+    return Object.freeze({
+      monitorId,
+      nodeId: String(
+        value?.nodeId || monitorId
+      ).trim(),
+      inputPort: String(
+        value?.inputPort || ""
+      ).trim(),
+      sourceNodeId: String(
+        value?.sourceNodeId || ""
+      ).trim(),
+      sourcePort: String(
+        value?.sourcePort || ""
+      ).trim(),
+      bound: value?.bound === true
+    });
+  }
+
+  function setExpectedBindings(channel, values) {
+    const key = normalizeChannel(channel);
+    if (!key) {
+      throw new TypeError(
+        "Runtime binding channel must be a non-empty project channel."
+      );
+    }
+    let state = channels.get(key);
+    if (!state || state.disposed) {
+      state = createChannelState(key);
+      channels.set(key, state);
+    }
+    state.contractRegistered = true;
+    activeBindingContractState = state;
+    const next = new Map();
+    for (const value of
+      Array.isArray(values) ? values : []) {
+      const binding = normalizedExpectedBinding(
+        value
+      );
+      if (binding) {
+        next.set(binding.monitorId, binding);
+      }
+    }
+    const previousSignature = JSON.stringify(
+      [...state.expectedBindings.values()]
+    );
+    const nextSignature = JSON.stringify(
+      [...next.values()]
+    );
+    if (previousSignature === nextSignature) {
+      publishLiveReadiness(state);
+      return getLiveReadiness(key);
+    }
+    state.expectedBindings = next;
+    state.bindingContractRevision += 1;
+    state.values.clear();
+    state.snapshotReceived = false;
+    state.sessionId = "";
+    state.lastSeenUtc = "";
+    notify(state, "bindings");
+    if (
+      mode === "live" &&
+      state === activeStreamState &&
+      state.connected === true &&
+      state.listeners.size > 0
+    ) {
+      queueMicrotask(() => {
+        void refresh(key);
+      });
+    }
+    return getLiveReadiness(key);
+  }
+
+  function clearExpectedBindings(channel) {
+    const key = normalizeChannel(channel);
+    const state = channels.get(key);
+    if (!state) {
+      publishLiveReadiness();
+      return getLiveReadiness(key);
+    }
+    state.expectedBindings.clear();
+    state.contractRegistered = false;
+    if (activeBindingContractState === state) {
+      activeBindingContractState = null;
+    }
+    state.bindingContractRevision += 1;
+    notify(state, "bindings");
+    if (!state.listeners.size) {
+      state.disposed = true;
+      if (channels.get(key) === state) {
+        channels.delete(key);
+      }
+    }
+    return getLiveReadiness(key);
+  }
+
   function subscribe(channel, listener) {
     if (typeof listener !== "function") throw new TypeError("Runtime bridge listener must be a function.");
     const key = normalizeChannel(channel);
@@ -674,12 +881,19 @@
       unsubscribed = true;
       state.listeners.delete(listener);
       if (!state.listeners.size) {
-        state.disposed = true;
         stopChannel(state);
-        if (channels.get(key) === state) channels.delete(key);
         if (activeStreamState === state) {
           activeStreamState = null;
           reconcileActiveStream();
+        }
+        if (state.contractRegistered) {
+          state.disposed = false;
+          publishLiveReadiness(state);
+        } else {
+          state.disposed = true;
+          if (channels.get(key) === state) {
+            channels.delete(key);
+          }
         }
       }
     };
@@ -692,9 +906,20 @@
 
   function getValue(channel, monitorId) {
     const state = channels.get(normalizeChannel(channel));
+    const key = String(monitorId || "");
 
-    if (mode !== "live" || !state?.connected || !state.active) return null;
-    return state.values.get(String(monitorId || "")) || null;
+    if (
+      !state ||
+      mode !== "live" ||
+      state.connected !== true ||
+      (
+        state.contractRegistered === true &&
+        !state.expectedBindings.has(key)
+      )
+    ) {
+      return null;
+    }
+    return state.values.get(key) || null;
   }
 
   function refresh(channel) {
@@ -732,7 +957,24 @@
     return mode === "cached" ? connect() : Promise.resolve(disconnect());
   }
 
+  function refreshHealth(options = {}) {
+    return Promise.resolve(
+      mode === "live" &&
+      Boolean(health)
+    );
+  }
+
   document.addEventListener("rml-catalog:loaded", renderStatus);
+  document.addEventListener(
+    "rml-scanner:selected",
+    event => {
+      adoptScannerSession(event?.detail);
+    }
+  );
+  document.addEventListener(
+    "rml-scanner:unavailable",
+    () => disconnect("", { silent: true })
+  );
 
   window.addEventListener("offline", () => { if (mode !== "cached") disconnect("The browser is offline. Click Cached to reconnect."); });
   window.addEventListener("pagehide", () => { if (mode !== "cached") disconnect(); });
@@ -743,11 +985,18 @@
   }
 
   Object.defineProperty(window, "RMLRuntimeBridge", {
-    value: Object.freeze({ version: BRIDGE_VERSION, subscribe, getState, getValue, refresh, debugSnapshot,
-      connect, disconnect, toggle, renderStatus, getConnectionState, projectChannel,
+    value: Object.freeze({ version: BRIDGE_VERSION, subscribe, getState, getValue, refresh, refreshHealth, debugSnapshot,
+      setExpectedBindings, clearExpectedBindings, getLiveReadiness,
+      connect, disconnect, toggle, adoptScannerSession, renderStatus, getConnectionState, projectChannel,
       getSessionSignal: () => controller?.signal || null,
       discoverScanner: () => Promise.resolve(mode === "live" ? scannerBaseUrl : "") }),
     writable: false, enumerable: true, configurable: true
   });
+  if (window.RMLScannerHealthSession) {
+    adoptScannerSession(
+      window.RMLScannerHealthSession
+    );
+  }
   renderStatus();
+  publishLiveReadiness();
 })();

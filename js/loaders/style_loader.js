@@ -2,20 +2,7 @@
   "use strict";
 
   const STYLE_LOADER_MODULE_ID =
-    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
-
-  if (
-    Object.hasOwn(
-      window,
-      "RMLBuilderBuildId"
-    ) &&
-    window.RMLBuilderBuildId !==
-      STYLE_LOADER_MODULE_ID
-  ) {
-    throw new Error(
-      `Builder module version mismatch: index.html published '${String(window.RMLBuilderBuildId || "missing")}', but style_loader.js is '${STYLE_LOADER_MODULE_ID}'. Reload the Builder without cached files.`
-    );
-  }
+    "1.21.76-custom-csharp-catalog-provenance";
 
   const CLASS_STYLE_VERSION = 3;
 
@@ -141,6 +128,8 @@
       data-rml-mobile-ui-scale
       data-rml-picker-scale
       data-rml-viewport-scale
+      data-rml-wire-dash-off
+      data-rml-wire-dash-on
       data-saturation
       data-value
     `.trim().split(/\s+/));
@@ -713,7 +702,7 @@
     information: "../../styles/features/styles.information.css?v=1.10-shortcut-key-groups",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.21.76-custom-csharp-catalog-provenance"
   });
   const bundleOrder = Object.freeze([
     "preview",

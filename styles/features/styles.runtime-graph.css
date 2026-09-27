@@ -1196,6 +1196,16 @@ button.rml-graph-navigation-level:disabled {
   opacity: 1;
 }
 
+.rml-graph-label-canvas {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
 .rml-graph-stage {
   position: absolute;
   z-index: 1;
@@ -1318,7 +1328,9 @@ button.rml-graph-navigation-level:disabled {
 }
 
 .rml-graph-wire.impulse {
-  stroke-dasharray: 10 7;
+  stroke-dasharray:
+    var(--rml-attr-rml-wire-dash-on, 10)
+    var(--rml-attr-rml-wire-dash-off, 7);
 }
 
 .rml-graph-wire.selected {
@@ -1364,8 +1376,22 @@ button.rml-graph-navigation-level:disabled {
   fill: none;
   stroke-width: 4;
   stroke-linecap: round;
-  stroke-dasharray: 8 6;
+  stroke-dasharray: none;
   pointer-events: none;
+}
+
+.rml-graph-wire-preview-shadow {
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.72);
+  stroke-width: 8;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.rml-graph-wire-preview.impulse {
+  stroke-dasharray:
+    var(--rml-attr-rml-wire-dash-on, 10)
+    var(--rml-attr-rml-wire-dash-off, 7);
 }
 
 .rml-graph-wire-point {
@@ -3574,4 +3600,18 @@ html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rm
   color: inherit;
   overflow: visible;
   pointer-events: none;
+}
+
+.rml-node-symbol-text {
+  display: inline-block;
+  max-width: 28px;
+  color: inherit;
+  font-family: Consolas, monospace;
+  font-size: var(--rml-node-symbol-text-font-size, 10px);
+  font-variant-ligatures: none;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: center;
+  white-space: pre;
 }

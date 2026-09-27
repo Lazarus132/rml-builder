@@ -1,10 +1,8 @@
 (() => {
   "use strict";
-  // RML Builder templates: setup_template.
 
   Object.defineProperty(window, "RMLSetupTemplateMarkup", {
-    value: `<!-- Lazy-loaded by setup_assistant.js. -->
-<div id="rml-setup-assistant" hidden aria-live="polite">
+    value: `<div id="rml-setup-assistant" hidden aria-live="polite">
   <div class="rml-setup-interaction-shield" data-setup-interaction-shield aria-hidden="true"></div>
   <div class="rml-setup-shade" data-setup-shade="top"></div>
   <div class="rml-setup-shade" data-setup-shade="left"></div>

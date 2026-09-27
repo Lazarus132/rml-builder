@@ -190,18 +190,15 @@
                 </p>
                 <p>
                   WebGPU/WGSL is the preferred graph renderer, followed by WebGL2/GLSL.
-                  If neither GPU renderer is available, the compact SVG/DOM compatibility
-                  path remains available for small graphs. After opening Runtime Graph once, use
+                  If neither GPU renderer is available, one Canvas2D surface keeps the complete
+                  graph visible without creating one DOM element per node. After opening Runtime Graph once, use
                   <code>RMLGraphHybridRenderer.setBackend("glsl")</code> in the browser
                   console to force the GLSL path. Use <code>"wgsl"</code>,
-                  <code>"svg"</code> or <code>"auto"</code> to select the other modes, and
+                  <code>"canvas2d"</code>, <code>"svg"</code> or <code>"auto"</code> to select the other modes, and
                   <code>RMLGraphHybridRenderer.getBackend()</code> to inspect the stored and
                   active backend. Changing the backend reloads the page automatically.
-                  If the Builder confirms a pure SVG-only renderer for an extreme graph, it
-                  pauses that graph's visual surface before the browser reaches an unsafe SVG/DOM
-                  workload. This safety pause never deletes or changes graph data. Breadcrumbs,
-                  graph navigation, project saving and export remain available, and the pause is
-                  never applied while a GPU renderer is active.
+                  The pure SVG/DOM path remains a manual compatibility/debug mode; normal automatic
+                  fallback uses Canvas2D so large graphs do not need a visual safety pause.
                 </p>
               </section>
 

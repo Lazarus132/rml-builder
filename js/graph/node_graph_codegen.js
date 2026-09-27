@@ -214,6 +214,8 @@ const graphAnalysisIdentityTokens = new WeakMap();
 
 const trustedGraphAnalysisCertificates = new WeakSet();
 
+const transferredGraphAnalysisCertificates = new WeakSet();
+
 let lastGraphAnalysisRecord = null;
 
 let pendingGraphAnalysisCertificate = null;
@@ -2404,6 +2406,8 @@ function apiCompositeBoundaryRecords(
         constraint: String(
           raw?.constraint || "value"
         ).trim().slice(0, 120),
+        optional:
+          raw?.optional === true,
         autoExposed:
           raw?.autoExposed === true,
         internalNodeId,
@@ -2648,6 +2652,8 @@ function forwardedApiCompositeBoundary(
       constraint: String(
         boundary.constraint || "value"
       ).slice(0, 120),
+      optional:
+        boundary.optional === true,
       autoExposed: true,
       internalNodeId: String(
         owner?.id || ""
@@ -2691,7 +2697,11 @@ function apiCompositeBoundaryPortSpecification(
             typeVar:
               nestedBoundary.typeVar,
             constraint:
-              nestedBoundary.constraint
+              nestedBoundary.constraint,
+            optional:
+              nestedBoundary.optional === true,
+            apiCompositeBoundaryContract:
+              true
           }
         : null;
     }
@@ -2955,6 +2965,39 @@ function apiCompositeBoundaryListsEqual(
     ) === JSON.stringify(
       apiCompositeBoundaryRecords(second)
     );
+  }
+
+function apiCompositeSynchronizedBoundaryLabel(
+    documentValue,
+    boundary,
+    specification
+  ) {
+    const node = (
+      Array.isArray(documentValue?.nodes)
+        ? documentValue.nodes
+        : []
+    ).find(candidate =>
+      String(candidate?.id || "") ===
+        String(boundary?.internalNodeId || "")
+    );
+    const definition = node
+      ? nodeDefinition(node)
+      : null;
+    const nodeTitle = String(
+      node?.label ||
+      node?.parameters?.title ||
+      definition?.title ||
+      node?.operatorId ||
+      "Node"
+    );
+    const portTitle = String(
+      specification?.label ||
+      specification?.id ||
+      boundary?.internalPortId ||
+      "Port"
+    );
+    return `${nodeTitle} · ${portTitle}`
+      .slice(0, 160);
   }
 
 function reconcileApiCompositeBoundaryTree(
@@ -3236,29 +3279,54 @@ function reconcileApiCompositeBoundaryTree(
             }
             boundaries.push({
               ...boundary,
-              label: String(
-                boundary.label ||
-                specification.label ||
-                boundary.internalPortId
-              ).slice(0, 160),
+              label:
+                apiCompositeSynchronizedBoundaryLabel(
+                  documentValue,
+                  boundary,
+                  specification
+                ),
               type: String(
-                specification.type ||
-                boundary.type ||
-                ""
+                specification
+                  .apiCompositeBoundaryContract ===
+                  true
+                  ? specification.type || ""
+                  : specification.type ||
+                    boundary.type ||
+                    ""
               ).slice(0, 320),
               typeVar:
-                specification.type
+                (
+                  specification
+                    .apiCompositeBoundaryContract ===
+                    true
+                    ? specification.type
+                    : specification.type ||
+                      boundary.type
+                )
                   ? ""
                   : String(
                       specification.typeVar ||
-                      boundary.typeVar ||
+                      (
+                        specification
+                          .apiCompositeBoundaryContract ===
+                          true
+                          ? ""
+                          : boundary.typeVar
+                      ) ||
                       ""
                     ).slice(0, 120),
               constraint: String(
-                specification.constraint ||
-                boundary.constraint ||
-                "value"
-              ).slice(0, 120)
+                specification
+                  .apiCompositeBoundaryContract ===
+                  true
+                  ? specification.constraint ||
+                    "value"
+                  : specification.constraint ||
+                    boundary.constraint ||
+                    "value"
+              ).slice(0, 120),
+              optional:
+                specification.optional === true
             });
           }
           documentValue.boundaryPorts =
@@ -4572,6 +4640,8 @@ function apiCompositePortDescriptor(
         reference.spec.constraint ||
         "value"
       ),
+      optional:
+        reference.spec.optional === true,
       internalNodeId: nodeId,
       internalPortId: portId
     };
@@ -7387,6 +7457,34 @@ function resolveNodeDefinition(node) {
       OPERATOR_DEFINITIONS[
         node.operatorId
       ];
+    const preservedRecoveryContract =
+      node?.importRecovery?.unresolved === true &&
+      node?.apiContract &&
+      typeof node.apiContract === "object" &&
+      !Array.isArray(node.apiContract)
+        ? node.apiContract
+        : null;
+    if (
+      preservedRecoveryContract &&
+      definition?.catalogGenerated === true &&
+      definition?.unavailableApiContract !== true
+    ) {
+      const currentContract =
+        typeof portableApiContract === "function"
+          ? portableApiContract(definition)
+          : null;
+      const contractKey = value =>
+        typeof savedApiContractSemanticKey === "function"
+          ? savedApiContractSemanticKey(value)
+          : JSON.stringify(value || null);
+      if (
+        !currentContract ||
+        contractKey(preservedRecoveryContract) !==
+          contractKey(currentContract)
+      ) {
+        definition = null;
+      }
+    }
     let definitionNode = node;
     if (
       isVisualFunctionReferenceNode(node) &&
@@ -8533,7 +8631,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+        "1.21.76-custom-csharp-catalog-provenance",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8566,7 +8664,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle" &&
+        "1.21.76-custom-csharp-catalog-provenance" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -8597,6 +8695,11 @@ function acceptGraphAnalysisCertificate(
     ) {
       return false;
     }
+    if (transferred) {
+      transferredGraphAnalysisCertificates.add(
+        certificate
+      );
+    }
     pendingGraphAnalysisCertificate =
       certificate;
     return true;
@@ -8607,6 +8710,13 @@ function graphAnalysisFromCertificate(
     connections,
     semanticToken
   ) {
+    const transferred = Boolean(
+      certificate &&
+      typeof certificate === "object" &&
+      transferredGraphAnalysisCertificates.has(
+        certificate
+      )
+    );
     if (
       !graphAnalysisCertificateEnvelopeValid(
         certificate
@@ -8619,18 +8729,23 @@ function graphAnalysisFromCertificate(
         graph.nodes.length ||
       Number(certificate.connectionCount) !==
         connections.length ||
-      Number(certificate.definitionEpoch) !==
+      (
+        !transferred &&
         (
-          Number(
-            window.__RMLNodeDefinitionRevision
-          ) || 0
-        ) ||
-      Number(certificate.factoryEpoch) !==
-        (
-          Number(
-            window.__RMLApiNodeFactoryVersion
-          ) || 0
-        ) ||
+          Number(certificate.definitionEpoch) !==
+            (
+              Number(
+                window.__RMLNodeDefinitionRevision
+              ) || 0
+            ) ||
+          Number(certificate.factoryEpoch) !==
+            (
+              Number(
+                window.__RMLApiNodeFactoryVersion
+              ) || 0
+            )
+        )
+      ) ||
       certificate.catalogId !==
         graphAnalysisCatalogId()
     ) {
@@ -18298,7 +18413,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+          "1.21.76-custom-csharp-catalog-provenance",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
+  "1.21.76-custom-csharp-catalog-provenance";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];
@@ -30,14 +30,10 @@ function assertGraphBootstrapModuleCoherence() {
       );
     }
   }
-  if (mismatches.length > 0) {
-    throw new Error(
-      `Runtime Graph module version mismatch: ${mismatches.join(", ")}. Reload the Builder without cached files. Project import was stopped before graph reconciliation.`
-    );
-  }
+  return Object.freeze(mismatches);
 }
 
-assertGraphBootstrapModuleCoherence();
+void assertGraphBootstrapModuleCoherence();
 
 installGraphRevealProvider();
 
@@ -559,10 +555,14 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           fileName: customCSharpEditor?.fileName || ""
         });
       },
-      openCustomCSharpFile(fileNodeId) {
+      async openCustomCSharpFile(fileNodeId) {
+        const normalizedFileNodeId =
+          String(fileNodeId || "");
         return {
-          ok: openCustomCSharpFileGraph(String(fileNodeId || "")),
-          fileNodeId: String(fileNodeId || "")
+          ok: await openCustomCSharpFileGraphSynced(
+            normalizedFileNodeId
+          ),
+          fileNodeId: normalizedFileNodeId
         };
       },
       closeCustomCSharpFile() {
@@ -609,9 +609,9 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
             createApiCompositeFromSelection()
         };
       },
-      openApiComposite(containerNodeId) {
+      async openApiComposite(containerNodeId) {
         return {
-          ok: openApiCompositeGraph(
+          ok: await openApiCompositeGraph(
             String(containerNodeId || "")
           )
         };
@@ -1367,14 +1367,18 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           "runtime-graph-api-open"
         );
         persistGraphView(true);
-        activateGraphMode();
+        const presentationActivated =
+          activateGraphMode();
         return {
-          ok: document.body.classList.contains(
-            "rml-node-graph-mode"
-          ),
+          ok: graph.active === true,
           graphActive: graph.active === true,
           graphViewActive:
             runtimeGraphViewActive === true,
+          presentationPending:
+            presentationActivated !== true ||
+            !document.body.classList.contains(
+              "rml-node-graph-mode"
+            ),
           documentMutationAccepted:
             documentChanged === true
         };

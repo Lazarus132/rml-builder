@@ -139,6 +139,87 @@ function customCSharpCatalogStampMatches(
     );
   }
 
+function customCSharpCatalogContentStampMatches(
+    first,
+    second
+  ) {
+    return Boolean(
+      first &&
+      second &&
+      String(first.fingerprint || "") ===
+        String(second.fingerprint || "") &&
+      String(first.engineVersion || "") ===
+        String(second.engineVersion || "")
+    );
+  }
+
+function customCSharpEmptyCatalogStamp() {
+    return {
+      fingerprint: "",
+      engineVersion: "",
+      source: "",
+      definitionRevision: 0
+    };
+  }
+
+function customCSharpStoredGraphCatalogStamp(
+    stored
+  ) {
+    return {
+      fingerprint: String(
+        stored?.catalogFingerprint || ""
+      ),
+      engineVersion: String(
+        stored?.catalogEngineVersion || ""
+      ),
+      source: String(
+        stored?.catalogSource || ""
+      ),
+      definitionRevision: Number(
+        stored?.catalogDefinitionRevision || 0
+      )
+    };
+  }
+
+function customCSharpCatalogRetryError() {
+    const error = new Error(
+      window.RMLI18n.t(
+        "ui.literal.173710401c7b"
+      )
+    );
+    error.name = "RMLCustomCSharpCatalogRetry";
+    error.code =
+      "RML_CUSTOM_CSHARP_CATALOG_RETRY";
+    return error;
+  }
+
+function customCSharpIsCatalogRetryError(
+    error
+  ) {
+    return Boolean(
+      error?.code ===
+        "RML_CUSTOM_CSHARP_CATALOG_RETRY"
+    );
+  }
+
+function customCSharpCatalogCommitStamp(
+    buildStamp,
+    catalogBypass = false,
+    currentStamp =
+      currentCustomCSharpCatalogStamp()
+  ) {
+    if (catalogBypass) return currentStamp;
+    if (
+      !customCSharpCatalogContentStampMatches(
+        buildStamp,
+        currentStamp
+      )
+    ) {
+      throw customCSharpCatalogRetryError();
+    }
+    return buildStamp;
+  }
+
 function createCustomCSharpReopenIdentity(
     owner,
     stored,
@@ -188,7 +269,10 @@ function createCustomCSharpReopenIdentity(
         customCSharpValidatedSourceNodeSets.has(
           nodes
         ),
-      catalog: currentCustomCSharpCatalogStamp()
+      catalog:
+        customCSharpStoredGraphCatalogStamp(
+          stored
+        )
     };
   }
 
@@ -204,6 +288,12 @@ function customCSharpReopenIdentityMatchesStoredGraph(
   ) {
     const contentMutationIdentity =
       customCSharpContentMutationIdentity();
+    const storedCatalogStamp =
+      customCSharpStoredGraphCatalogStamp(
+        stored
+      );
+    const currentCatalogStamp =
+      currentCustomCSharpCatalogStamp();
     return Boolean(
       identity &&
       stored &&
@@ -236,13 +326,22 @@ function customCSharpReopenIdentityMatchesStoredGraph(
         String(stored.rootSyntaxNodeId || "") &&
       identity.directSourceNodeId ===
         String(stored.directSourceNodeId || "") &&
+      customCSharpCatalogStampMatches(
+        identity.catalog,
+        storedCatalogStamp
+      ) &&
+      (
+        !String(
+          currentCatalogStamp.fingerprint || ""
+        ) ||
+        customCSharpCatalogStampMatches(
+          identity.catalog,
+          currentCatalogStamp
+        )
+      ) &&
       (
         !requireSourceValidation ||
         identity.sourceValidated === true
-      ) &&
-      customCSharpCatalogStampMatches(
-        identity.catalog,
-        currentCustomCSharpCatalogStamp()
       )
     );
   }
@@ -679,6 +778,21 @@ function acknowledgeCustomCSharpGraphDocumentCommit({
     return true;
   }
 
+function customCSharpOpenPreparationCatalogCurrent(
+    preparation
+  ) {
+    return Boolean(
+      preparation &&
+      (
+        preparation.catalogBypass === true ||
+        customCSharpCatalogContentStampMatches(
+          preparation.catalogStamp,
+          currentCustomCSharpCatalogStamp()
+        )
+      )
+    );
+  }
+
 function restoreCustomCSharpOpenPreparation(
     preparation
   ) {
@@ -853,6 +967,51 @@ function commitApiCompositeEditorBeforeCustomOpen() {
     return true;
   }
 
+function requestCustomCSharpInitialViewport(
+    customGraph,
+    fileNodeId
+  ) {
+    const projectEpoch = builderProjectEpoch;
+    requestInitialGraphViewport(() => {
+      if (
+        projectEpoch !== builderProjectEpoch ||
+        customCSharpEditor?.fileNodeId !== fileNodeId ||
+        graph.nodes !== customGraph?.nodes
+      ) {
+        return;
+      }
+      if (graph.nodes.length <= 40) {
+        centerGraph();
+        renderGraphWires();
+        return;
+      }
+      const output = graph.nodes.find(
+        node => node.id === customGraph.outputNodeId
+      );
+      const rectangle =
+        dom.viewport?.getBoundingClientRect();
+      if (!output || !rectangle) return;
+      const geometry =
+        estimatedGraphNodeGeometry(output);
+      graph.viewport.scale = nodeGraphClamp(
+        0.62,
+        GRAPH_MIN_ZOOM,
+        GRAPH_MAX_ZOOM
+      );
+      graph.viewport.x =
+        rectangle.width * 0.72 -
+        (output.x + geometry.width / 2) *
+          graph.viewport.scale;
+      graph.viewport.y =
+        rectangle.height / 2 -
+        (output.y + geometry.height / 2) *
+          graph.viewport.scale;
+      applyViewportTransform();
+      persistGraphView();
+      renderGraphWires();
+    });
+  }
+
 function openCustomCSharpFileGraph(fileNodeId) {
     if (!graph || customCSharpEditor) {
       return false;
@@ -901,6 +1060,9 @@ function openCustomCSharpFileGraph(fileNodeId) {
       pendingPreparation.owner === fileNode &&
       pendingPreparation.ownerDocument ===
         openOwnerDocument &&
+      customCSharpOpenPreparationCatalogCurrent(
+        pendingPreparation
+      ) &&
       restoreCustomCSharpOpenPreparation(
         pendingPreparation
       )
@@ -965,20 +1127,9 @@ function openCustomCSharpFileGraph(fileNodeId) {
           ? pendingPreparation
           : null
     };
-    const workSession =
-      beginGraphTransitionWork({
-        kicker: window.RMLI18n.t("ui.text.ba090b5e07cf"),
-        title: `Opening ${customCSharpEditor.fileName}…`,
-        message:
-          window.RMLI18n.t("ui.auto.478b43e28a3b"),
-        detail:
-          window.RMLI18n.t("ui.literal.742b21124ebe"),
-        progress: 42
-      });
     try {
       applyGraphView(graphViewFrom(customGraph));
     } catch (error) {
-      finishGraphTransitionWork(workSession);
       throw error;
     }
     resetGraphRenderCaches();
@@ -992,7 +1143,6 @@ function openCustomCSharpFileGraph(fileNodeId) {
     try {
       activateGraphMode();
     } catch (error) {
-      finishGraphTransitionWork(workSession);
       throw error;
     }
     const provisionalOpen = Boolean(
@@ -1016,8 +1166,6 @@ function openCustomCSharpFileGraph(fileNodeId) {
         graph.nodes
       );
     }
-    const projectEpoch =
-      builderProjectEpoch;
     if (
       initialViewportPending &&
       !previouslyPresented
@@ -1026,31 +1174,10 @@ function openCustomCSharpFileGraph(fileNodeId) {
         customCSharpInitialViewportPendingNodeSets
           .delete(customGraph.nodes);
       }
-      requestInitialGraphViewport(() => {
-      if (
-        projectEpoch !==
-          builderProjectEpoch ||
-        customCSharpEditor?.fileNodeId !==
-          fileNodeId
-      ) {
-        return;
-      }
-      if (graph.nodes.length <= 40) {
-        centerGraph();
-        renderGraphWires();
-        return;
-      }
-      const output = graph.nodes.find(node => node.id === customGraph.outputNodeId);
-      const rectangle = dom.viewport?.getBoundingClientRect();
-      if (!output || !rectangle) return;
-      const geometry = estimatedGraphNodeGeometry(output);
-      graph.viewport.scale = nodeGraphClamp(0.62, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM);
-      graph.viewport.x = rectangle.width * 0.72 - (output.x + geometry.width / 2) * graph.viewport.scale;
-      graph.viewport.y = rectangle.height / 2 - (output.y + geometry.height / 2) * graph.viewport.scale;
-      applyViewportTransform();
-      persistGraphView();
-      renderGraphWires();
-      });
+      requestCustomCSharpInitialViewport(
+        customGraph,
+        fileNodeId
+      );
     }
     if (customCSharpEditor?.openPreparation) {
       customCSharpEditor
@@ -1080,7 +1207,6 @@ function openCustomCSharpFileGraph(fileNodeId) {
         : null;
     customCSharpEditor.openViewState =
       customCSharpOpenPreparationViewState();
-    showGraphMessage(`Opened ${customCSharpEditor.fileName} in its separate C# graph.`, "success");
     return true;
   }
 
@@ -1196,8 +1322,7 @@ async function openCustomCSharpFileGraphReady(
 
 function closeCustomCSharpFileGraph({
     restorePreviousPresentation = true,
-    commit = true,
-    announce = true
+    commit = true
   } = {}) {
     if (!customCSharpEditor || !graph) return false;
     const closingEditor =
@@ -1209,7 +1334,6 @@ function closeCustomCSharpFileGraph({
     ) {
       flushActiveGraphDocumentPersistenceBeforeTransition();
     }
-    const fileName = closingEditor.fileName;
     const contentUnchanged =
       customCSharpEditorContentUnchangedSinceOpen(
         closingEditor
@@ -1329,12 +1453,6 @@ function closeCustomCSharpFileGraph({
             )
         });
       }
-    }
-    if (announce) {
-      showGraphMessage(
-        `Returned from ${fileName} to its owning graph.`,
-        "success"
-      );
     }
     if (restorePreviousPresentation) {
       restorePreviousEmbeddedEditor(
@@ -1730,10 +1848,26 @@ function setCustomCSharpSynchronizationStatus(
     } else {
       customCSharpSynchronizationStatus.delete(id);
     }
-    updateCustomCSharpSynchronizationToast(
-      id,
-      status
-    );
+    if (graphTransitionWorkSession) {
+      window.RMLBuilderWork?.update?.(
+        graphTransitionWorkSession,
+        {
+          detail: status
+            ? String(status)
+            : window.RMLI18n.t("ui.literal.356c9e23044a"),
+          progress: Boolean(status)
+        }
+      );
+      updateCustomCSharpSynchronizationToast(
+        id,
+        ""
+      );
+    } else {
+      updateCustomCSharpSynchronizationToast(
+        id,
+        status
+      );
+    }
     for (const editor of
       customCSharpDetachedEditors.values()) {
       if (
@@ -2056,9 +2190,6 @@ function customCSharpCatalogProjectionSnapshot() {
     const indexRevision = Number(
       report?.catalogProjectionRevision
     ) || 0;
-    const definitionRevision = Number(
-      window.__RMLNodeDefinitionRevision
-    ) || 0;
     if (
       report?.verificationPassed !== true ||
       index?.version !== 1 ||
@@ -2074,9 +2205,6 @@ function customCSharpCatalogProjectionSnapshot() {
       indexRevision <= 0 ||
       Number(index.revision) !==
         indexRevision ||
-      definitionRevision <= 0 ||
-      Number(index.definitionRevision) !==
-        definitionRevision ||
       typeof index.customCSharpByIdentifier
         ?.select !== "function" ||
       !Object.isFrozen(
@@ -2094,37 +2222,30 @@ function customCSharpCatalogProjectionSnapshot() {
       report,
       index,
       catalogFingerprint,
-      indexRevision,
-      definitionRevision
+      indexRevision
     };
   }
 
-function customCSharpCatalogProjectionSnapshotCurrent(
-    snapshot,
-    isCurrent
+function customCSharpCatalogStampFromProjectionSnapshot(
+    snapshot
   ) {
-    if (!isCurrent()) return false;
-    const current =
-      customCSharpCatalogProjectionSnapshot();
-    return Boolean(
-      current &&
-      current.catalog === snapshot.catalog &&
-      current.report === snapshot.report &&
-      current.index === snapshot.index &&
-      current.catalogFingerprint ===
-        snapshot.catalogFingerprint &&
-      current.indexRevision ===
-        snapshot.indexRevision &&
-      current.definitionRevision ===
-        snapshot.definitionRevision
-    );
-  }
-
-function customCSharpCatalogChangedError() {
-    return new DOMException(
-      window.RMLI18n.t("ui.literal.173710401c7b"),
-      "AbortError"
-    );
+    if (!snapshot) {
+      return customCSharpEmptyCatalogStamp();
+    }
+    return {
+      fingerprint: String(
+        snapshot.catalogFingerprint || ""
+      ),
+      engineVersion: String(
+        snapshot.report?.engineVersion || ""
+      ),
+      source: String(
+        snapshot.report?.catalogSource || ""
+      ),
+      definitionRevision: Number(
+        snapshot.index?.definitionRevision || 0
+      )
+    };
   }
 
 async function customCSharpWorkerSupport(
@@ -2135,7 +2256,10 @@ async function customCSharpWorkerSupport(
     if (options?.disableCatalogNodes === true) {
       return {
         catalog: null,
-        requirements: []
+        requirements: [],
+        catalogStamp:
+          currentCustomCSharpCatalogStamp(),
+        catalogBypass: true
       };
     }
     const transport =
@@ -2147,7 +2271,10 @@ async function customCSharpWorkerSupport(
     if (!activeCatalog) {
       return {
         catalog: null,
-        requirements: []
+        requirements: [],
+        catalogStamp:
+          customCSharpEmptyCatalogStamp(),
+        catalogBypass: false
       };
     }
 
@@ -2156,123 +2283,111 @@ async function customCSharpWorkerSupport(
         source,
         isCurrent
       );
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (!isCurrent()) {
-        throw customCSharpCatalogChangedError();
-      }
-      const snapshot =
-        customCSharpCatalogProjectionSnapshot();
-      if (!snapshot) {
-        if (
-          window.RMLApiNodeFactoryReport
-            ?.verificationPassed === false
-        ) {
-          return {
-            catalog: null,
-            requirements: []
-          };
-        }
-        if (attempt === 0) {
-          await yieldBuilderTask();
-          continue;
-        }
-        if (!window.RMLApiNodeFactoryReport) {
-          return {
-            catalog: null,
-            requirements: []
-          };
-        }
-        throw customCSharpCatalogChangedError();
-      }
-
-      let requirementList;
-      try {
-        requirementList =
-          snapshot.index
-            .customCSharpByIdentifier
-            .select(
-              sourceTokens.identifiers,
-              sourceTokens.hasIndexer
-            );
-        if (
-          !Array.isArray(requirementList) ||
-          !Object.isFrozen(requirementList)
-        ) {
-          throw new Error(
-            window.RMLI18n.t("ui.literal.3a7d98ffd045")
-          );
-        }
-      } catch (error) {
-        if (
-          attempt === 0 &&
-          !customCSharpCatalogProjectionSnapshotCurrent(
-            snapshot,
-            isCurrent
-          )
-        ) {
-          await yieldBuilderTask();
-          continue;
-        }
-        throw error;
-      }
-      if (
-        !customCSharpCatalogProjectionSnapshotCurrent(
-          snapshot,
-          isCurrent
-        )
-      ) {
-        if (attempt === 0 && isCurrent()) {
-          await yieldBuilderTask();
-          continue;
-        }
-        throw customCSharpCatalogChangedError();
-      }
-      if (requirementList.length === 0) {
-        return {
-          catalog: null,
-          requirements: []
-        };
-      }
-
-      let projection;
-      try {
-        projection =
-          await transport.projectCatalog(
-            snapshot.catalog,
-            requirementList
-          );
-      } catch (error) {
-        if (
-          attempt === 0 &&
-          isCurrent() &&
-          !customCSharpCatalogProjectionSnapshotCurrent(
-            snapshot,
-            isCurrent
-          )
-        ) {
-          await yieldBuilderTask();
-          continue;
-        }
-        throw error;
-      }
-      if (
-        customCSharpCatalogProjectionSnapshotCurrent(
-          snapshot,
-          isCurrent
-        )
-      ) {
-        return {
-          catalog: projection,
-          requirements: requirementList
-        };
-      }
-      if (attempt === 0 && isCurrent()) {
-        await yieldBuilderTask();
-        continue;
-      }
-      throw customCSharpCatalogChangedError();
+    if (!isCurrent()) {
+      throw new DOMException(
+        window.RMLI18n.t("ui.literal.4f23eb11b20d"),
+        "AbortError"
+      );
     }
-    throw customCSharpCatalogChangedError();
+
+    let snapshot =
+      customCSharpCatalogProjectionSnapshot();
+    if (!snapshot) {
+      await yieldBuilderTask();
+      if (!isCurrent()) {
+        throw new DOMException(
+          window.RMLI18n.t("ui.literal.4f23eb11b20d"),
+          "AbortError"
+        );
+      }
+      snapshot =
+        customCSharpCatalogProjectionSnapshot();
+    }
+    if (!snapshot) {
+      return {
+        catalog: null,
+        requirements: [],
+        catalogStamp:
+          customCSharpEmptyCatalogStamp(),
+        catalogBypass: false
+      };
+    }
+
+    const catalogStamp =
+      customCSharpCatalogStampFromProjectionSnapshot(
+        snapshot
+      );
+
+    let requirementList;
+    try {
+      requirementList =
+        snapshot.index
+          .customCSharpByIdentifier
+          .select(
+            sourceTokens.identifiers,
+            sourceTokens.hasIndexer
+          );
+      if (
+        !Array.isArray(requirementList) ||
+        !Object.isFrozen(requirementList)
+      ) {
+        throw new Error(
+          window.RMLI18n.t("ui.literal.3a7d98ffd045")
+        );
+      }
+    } catch (error) {
+      if (!isCurrent()) throw error;
+      return {
+        catalog: null,
+        requirements: [],
+        catalogStamp,
+        catalogBypass: false
+      };
+    }
+    if (!isCurrent()) {
+      throw new DOMException(
+        window.RMLI18n.t("ui.literal.4f23eb11b20d"),
+        "AbortError"
+      );
+    }
+    if (requirementList.length === 0) {
+      return {
+        catalog: null,
+        requirements: [],
+        catalogStamp,
+        catalogBypass: false
+      };
+    }
+
+    let projection;
+    try {
+      projection =
+        await transport.projectCatalog(
+          snapshot.catalog,
+          requirementList,
+          snapshot.index
+        );
+    } catch (error) {
+      if (!isCurrent()) throw error;
+      return {
+        catalog: null,
+        requirements: [],
+        catalogStamp,
+        catalogBypass: false
+      };
+    }
+    if (!isCurrent()) {
+      throw new DOMException(
+        window.RMLI18n.t("ui.literal.4f23eb11b20d"),
+        "AbortError"
+      );
+    }
+    return {
+      catalog: projection,
+      requirements: requirementList,
+      catalogStamp,
+      catalogBypass: false
+    };
   }
 
 function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options) {
@@ -2300,7 +2415,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.21.24-contextual-csharp-api",
+        "js/workers/graph_codegen_worker.js?v=1.21.76-custom-csharp-catalog-provenance",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -2309,6 +2424,9 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     return new Promise((resolve, reject) => {
       let settled = false;
       let resultDecoder = null;
+      let catalogStamp =
+        customCSharpEmptyCatalogStamp();
+      let catalogBypass = false;
       const settle = (callback, value) => {
         if (settled) return;
         settled = true;
@@ -2330,7 +2448,14 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
         customCSharpBuildWorkers.get(nodeId) ===
           record
       );
-      const succeed = value => settle(resolve, value);
+      const succeed = fragment => settle(
+        resolve,
+        {
+          fragment,
+          catalogStamp,
+          catalogBypass
+        }
+      );
       const fail = (
         error,
         sourceLabel = "Worker"
@@ -2505,12 +2630,20 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
             "AbortError"
           );
         }
+        catalogStamp = support.catalogStamp ||
+          customCSharpEmptyCatalogStamp();
+        catalogBypass =
+          support.catalogBypass === true;
         const supportTransport =
           await transport.stream(
             worker,
             requestId,
             "support",
-            support,
+            {
+              catalog: support.catalog,
+              requirements:
+                support.requirements
+            },
             { isCurrent }
           );
         if (!isCurrent()) {
@@ -2534,54 +2667,68 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
   }
 
 function currentCustomCSharpCatalogStamp() {
-    const report = window.RMLApiNodeFactoryReport;
-    const verified =
-      report?.verificationPassed === true &&
-      ["scanner", "scanner-cache"].includes(
-        String(report?.catalogSource || "")
-      );
-    return {
-      fingerprint: verified
-        ? String(report.catalogFingerprint || "")
-        : "",
-      engineVersion: verified
-        ? String(report.engineVersion || "")
-        : "",
-      source: verified
-        ? String(report.catalogSource || "")
-        : "",
-      definitionRevision: Number(
-        window.__RMLNodeDefinitionRevision || 0
-      )
-    };
+    return customCSharpCatalogStampFromProjectionSnapshot(
+      customCSharpCatalogProjectionSnapshot()
+    );
   }
 
-function customCSharpStoredGraphMetadataMatches(
+  function customCSharpStoredGraphMetadataMatches(
     stored,
     sourceHash,
     optimizerVersion,
-    catalogStamp
+    catalogStamp = null
   ) {
+    const hasImportedSyntax =
+      Array.isArray(stored?.nodes) &&
+      stored.nodes.some(
+        node =>
+          String(node?.operatorId || "") !==
+          "csharp.customFileOutput"
+      );
     return Boolean(
       stored &&
+      hasImportedSyntax &&
       stored.importedSource === true &&
       stored.sourceEditedInInspector !== true &&
       String(stored.sourceHash || "") ===
         String(sourceHash || "") &&
       Number(stored.optimizerVersion || 0) ===
         Number(optimizerVersion || 0) &&
-      String(stored.catalogFingerprint || "") ===
-        String(catalogStamp?.fingerprint || "") &&
-      String(stored.catalogEngineVersion || "") ===
-        String(catalogStamp?.engineVersion || "") &&
-      String(stored.catalogSource || "") ===
-        String(catalogStamp?.source || "") &&
-      Number(
-        stored.catalogDefinitionRevision || 0
-      ) === Number(
-        catalogStamp?.definitionRevision || 0
+      (
+        !String(catalogStamp?.fingerprint || "") ||
+        customCSharpCatalogStampMatches(
+          customCSharpStoredGraphCatalogStamp(
+            stored
+          ),
+          catalogStamp
+        )
       )
     );
+  }
+
+async function customCSharpRetryCatalogChanges(
+    operation,
+    signal = null
+  ) {
+    for (;;) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (!customCSharpIsCatalogRetryError(error)) {
+          throw error;
+        }
+        if (signal?.aborted) {
+          throw signal.reason ||
+            new DOMException(
+              window.RMLI18n.t(
+                "ui.literal.90e2466e1463"
+              ),
+              "AbortError"
+            );
+        }
+        await yieldBuilderTask();
+      }
+    }
   }
 
 function customCSharpFileNeedsOptimization(node) {
@@ -2610,8 +2757,14 @@ function customCSharpFileNeedsOptimization(node) {
     if (existing?.sourceEditedInInspector === true) return true;
     const visualCSharp = window.RMLVisualCSharp;
     if (!existing || !visualCSharp) return true;
-    return !customCSharpStoredGraphReopenIdentityMatches(
-      node
+    const sourceHash =
+      visualCSharp.sourceHash?.(source) ||
+      hashText(source);
+    return !customCSharpStoredGraphMetadataMatches(
+      existing,
+      sourceHash,
+      visualCSharp.version,
+      currentCustomCSharpCatalogStamp()
     );
   }
 
@@ -2631,10 +2784,59 @@ async function openCustomCSharpFileGraphSynced(nodeId, options = {}) {
         })
       : 0;
     try {
+    if (workSession) {
+      await window.RMLBuilderWork?.paint?.();
+    }
     const previousTask =
       customCSharpSynchronizationTasks.get(
         normalizedNodeId
       );
+    if (
+      openAfterSync &&
+      graph &&
+      !customCSharpEditor
+    ) {
+      const owner = findGraphNode(
+        normalizedNodeId
+      );
+      const definition = owner
+        ? nodeDefinition(owner)
+        : null;
+      if (
+        owner &&
+        definition?.customCSharpFile === true
+      ) {
+        const source = String(
+          owner.parameters?.source || ""
+        );
+        const synchronizeAfterOpening =
+          customCSharpFileNeedsOptimization(
+            owner
+          );
+        if (
+          !synchronizeAfterOpening ||
+          !source.trim()
+        ) {
+          const opened =
+            await openCustomCSharpFileGraphReady(
+              normalizedNodeId
+            );
+          if (opened) {
+            rememberStoredCustomCSharpReopenIdentity(
+              normalizedNodeId,
+              owner,
+              {
+                sourceValidated:
+                  owner.parameters?.source
+                    ? true
+                    : false
+              }
+            );
+          }
+          return opened;
+        }
+      }
+    }
     if (previousTask) {
       if (openAfterSync) {
         const promotionToken = Symbol(
@@ -2738,10 +2940,14 @@ async function openCustomCSharpFileGraphSynced(nodeId, options = {}) {
       { source: "Builder" }
     );
     const task =
-      synchronizeCustomCSharpFileGraph(
-        normalizedNodeId,
-        options,
-        synchronizationEpoch,
+      customCSharpRetryCatalogChanges(
+        () =>
+          synchronizeCustomCSharpFileGraph(
+            normalizedNodeId,
+            options,
+            synchronizationEpoch,
+            controller.signal
+          ),
         controller.signal
       );
     customCSharpSynchronizationTasks.set(
@@ -2824,7 +3030,7 @@ async function synchronizeCustomCSharpFileGraph(
       options.ownerBinding || null;
     const ownerLocation =
       requestedOwnerBinding &&
-      customCSharpOwnerBindingCurrent(
+      customCSharpOwnerBindingAttached(
         requestedOwnerBinding
       )
         ? {
@@ -2889,8 +3095,11 @@ async function synchronizeCustomCSharpFileGraph(
     if (!owner || definition?.customCSharpFile !== true) return false;
     const ownerId = owner.id;
     const currentBoundOwner = () =>
-      synchronizationOwnerDocument
-        ?.nodes?.find(candidate =>
+      (
+        activeOwnerCustomEditor
+          ? customCSharpEditor?.mainView?.nodes
+          : synchronizationOwnerDocument?.nodes
+      )?.find(candidate =>
           candidate === owner
         ) || null;
     const synchronizationOwnerPath =
@@ -2927,7 +3136,9 @@ async function synchronizeCustomCSharpFileGraph(
         : null;
     let ownerRegistryCreated = false;
     const synchronizationOwnerNodes =
-      synchronizationOwnerDocument.nodes;
+      activeOwnerCustomEditor
+        ? customCSharpEditor.mainView.nodes
+        : synchronizationOwnerDocument.nodes;
     const synchronizationPreparationKey =
       customCSharpOpenPreparationKey(
         ownerId,
@@ -2952,10 +3163,17 @@ async function synchronizeCustomCSharpFileGraph(
                 apiCompositeEditor
               )
             : graph;
+      const currentOwnerNodes =
+        activeOwnerCustomEditor &&
+        customCSharpEditor?.openOwner === owner &&
+        customCSharpEditor?.openOwnerDocument ===
+          currentOwnerDocument
+          ? customCSharpEditor.mainView.nodes
+          : currentOwnerDocument?.nodes;
       if (
-        currentOwnerDocument?.nodes !==
+        currentOwnerNodes !==
           synchronizationOwnerNodes ||
-        currentOwnerDocument.nodes.find(
+        currentOwnerNodes.find(
           candidate => candidate === owner
         ) !== owner ||
         currentOwnerDocument !==
@@ -3021,6 +3239,12 @@ async function synchronizeCustomCSharpFileGraph(
     const commitSynchronizedGraph =
       customGraph => {
         const registry = createOwnerRegistry();
+        const initializeViewport = Boolean(
+          Array.isArray(customGraph.nodes) &&
+          !customCSharpPresentedNodeSets.has(
+            customGraph.nodes
+          )
+        );
         if (Array.isArray(customGraph.nodes)) {
           customCSharpInitialViewportPendingNodeSets
             .add(customGraph.nodes);
@@ -3062,6 +3286,14 @@ async function synchronizeCustomCSharpFileGraph(
           currentAnalysis = null;
           if (!customCSharpInlineEditorKey) {
             activateGraphMode();
+          }
+          if (initializeViewport) {
+            customCSharpInitialViewportPendingNodeSets
+              .delete(customGraph.nodes);
+            requestCustomCSharpInitialViewport(
+              customGraph,
+              ownerId
+            );
           }
         }
         return customGraph;
@@ -3115,9 +3347,6 @@ async function synchronizeCustomCSharpFileGraph(
         ownerId,
         signal
       );
-      if (opened) {
-        showGraphMessage(window.RMLI18n.t("ui.literal.892ba4c75c2e"), "success");
-      }
       return opened;
     }
 
@@ -3136,6 +3365,16 @@ async function synchronizeCustomCSharpFileGraph(
       return opened;
     }
 
+    try {
+      await window.RMLModNodesReady;
+    } catch (error) {
+      console.error(
+        "Custom C# graph prerequisites failed to load.",
+        error
+      );
+    }
+    assertCurrentOwnerContext();
+
     const roslyn = window.RMLCSharp14Roslyn;
     const visualCSharp = window.RMLVisualCSharp;
     if (
@@ -3143,16 +3382,13 @@ async function synchronizeCustomCSharpFileGraph(
       typeof visualCSharp?.createRoslynImportFragment !== "function" ||
       typeof visualCSharp?.createCustomCSharpFileGraphFromFragment !== "function"
     ) {
-      if (!quiet) showGraphMessage(window.RMLI18n.t("ui.literal.a25551b1d73f"), "error");
+      console.error(
+        "Custom C# graph prerequisites are unavailable after module readiness."
+      );
       return false;
     }
 
-    try {
-      await window.RMLModNodesReady;
-    } catch {}
-    assertCurrentOwnerContext();
-
-    const initialCatalogStamp = currentCustomCSharpCatalogStamp();
+      const initialCatalogStamp = currentCustomCSharpCatalogStamp();
 
     const sourceHash =
       visualCSharp.sourceHash?.(source) ||
@@ -3213,7 +3449,13 @@ async function synchronizeCustomCSharpFileGraph(
             }
           );
         }
-        throw new Error(messages[0] || "Roslyn rejected the direct source as invalid C# 14 syntax.");
+        const syntaxError = new SyntaxError(
+          messages[0] ||
+          "Roslyn rejected the direct source as invalid C# 14 syntax."
+        );
+        syntaxError.code =
+          "RML_CUSTOM_CSHARP_SYNTAX_INVALID";
+        throw syntaxError;
       }
       if (
         existingGraph &&
@@ -3283,11 +3525,6 @@ async function synchronizeCustomCSharpFileGraph(
           const storedStillCurrent =
             ownerRegistry?.[ownerId] ===
               existingGraph;
-          const catalogStillCurrent =
-            customCSharpCatalogStampMatches(
-              initialCatalogStamp,
-              currentCustomCSharpCatalogStamp()
-            );
           const roundtripMatches =
             renderedValidation?.ok === true &&
             (
@@ -3297,21 +3534,49 @@ async function synchronizeCustomCSharpFileGraph(
                 signature(parseResult.root) ===
                   signature(
                     renderedValidation.root
-                  )
+                )
               )
+            );
+          const roundtripCatalogReusable =
+            !String(
+              initialCatalogStamp.fingerprint || ""
+            ) ||
+            customCSharpCatalogContentStampMatches(
+              customCSharpStoredGraphCatalogStamp(
+                existingGraph
+              ),
+              initialCatalogStamp
             );
           if (
             sourceStillCurrent &&
             storedStillCurrent &&
-            catalogStillCurrent &&
-            roundtripMatches
+            roundtripMatches &&
+            roundtripCatalogReusable
           ) {
+            const validatedCatalogStamp =
+              customCSharpCatalogCommitStamp(
+                initialCatalogStamp
+              );
             const previousSourceHash =
               existingGraph.sourceHash;
             const previousSourceEdited =
               existingGraph.sourceEditedInInspector;
+            const previousCatalogStamp =
+              customCSharpStoredGraphCatalogStamp(
+                existingGraph
+              );
             existingGraph.sourceHash = sourceHash;
             existingGraph.sourceEditedInInspector = false;
+            if (validatedCatalogStamp.fingerprint) {
+              existingGraph.catalogFingerprint =
+                validatedCatalogStamp.fingerprint;
+              existingGraph.catalogEngineVersion =
+                validatedCatalogStamp.engineVersion;
+              existingGraph.catalogSource =
+                validatedCatalogStamp.source;
+              existingGraph.catalogDefinitionRevision =
+                validatedCatalogStamp.definitionRevision;
+            }
             const remembered =
               rememberStoredCustomCSharpReopenIdentity(
                 ownerId,
@@ -3323,6 +3588,14 @@ async function synchronizeCustomCSharpFileGraph(
                 previousSourceHash;
               existingGraph.sourceEditedInInspector =
                 previousSourceEdited;
+              existingGraph.catalogFingerprint =
+                previousCatalogStamp.fingerprint;
+              existingGraph.catalogEngineVersion =
+                previousCatalogStamp.engineVersion;
+              existingGraph.catalogSource =
+                previousCatalogStamp.source;
+              existingGraph.catalogDefinitionRevision =
+                previousCatalogStamp.definitionRevision;
             }
             if (remembered) {
             updateCustomCSharpSynchronizationControl(
@@ -3352,7 +3625,15 @@ async function synchronizeCustomCSharpFileGraph(
         ownerId,
         window.RMLI18n.t("ui.literal.1e39ffde6495")
       );
-      let fragment = await buildCustomCSharpFragmentInWorker(ownerId, source, parseResult, fragmentOptions);
+      const initialBuild =
+        await buildCustomCSharpFragmentInWorker(
+          ownerId,
+          source,
+          parseResult,
+          fragmentOptions
+        );
+      let activeBuild = initialBuild;
+      let fragment = activeBuild.fragment;
       assertCurrentOwnerContext();
       if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The Roslyn Node Graph synchronization failed.");
       const selectedCatalogNodeIds = [...new Set(
@@ -3363,46 +3644,8 @@ async function synchronizeCustomCSharpFileGraph(
       if (selectedCatalogNodeIds.length > 0) {
         setCustomCSharpSynchronizationStatus(
           ownerId,
-          `Checking ${selectedCatalogNodeIds.length.toLocaleString()} optimized scanner API node${selectedCatalogNodeIds.length === 1 ? "" : "s"}…`
+          `Using ${selectedCatalogNodeIds.length.toLocaleString()} API node${selectedCatalogNodeIds.length === 1 ? "" : "s"} from the currently loaded catalog…`
         );
-        const gate = window.RMLCatalogImportGate?.ensureForImport;
-        if (typeof gate !== "function") {
-          fragment = await buildCustomCSharpFragmentInWorker(ownerId, source, parseResult, {
-            ...fragmentOptions,
-            prefix: `${fragmentOptions.prefix}-no-unverified-catalog`,
-            disableCatalogNodes: true
-          });
-          assertCurrentOwnerContext();
-        } else {
-          try {
-            await customCSharpCancellable(
-              gate({ requiredNodeIds: selectedCatalogNodeIds }),
-              signal
-            );
-            assertCurrentOwnerContext();
-            setCustomCSharpSynchronizationStatus(
-              ownerId,
-              window.RMLI18n.t("ui.literal.b99fbdd6095c")
-            );
-            fragment = await buildCustomCSharpFragmentInWorker(ownerId, source, parseResult, fragmentOptions);
-            assertCurrentOwnerContext();
-          } catch (error) {
-            if (error?.name === "AbortError") {
-              throw error;
-            }
-            setCustomCSharpSynchronizationStatus(
-              ownerId,
-              window.RMLI18n.t("ui.literal.10aa5ed3c448")
-            );
-            fragment = await buildCustomCSharpFragmentInWorker(ownerId, source, parseResult, {
-              ...fragmentOptions,
-              prefix: `${fragmentOptions.prefix}-catalog-unavailable`,
-              disableCatalogNodes: true
-            });
-            assertCurrentOwnerContext();
-          }
-        }
-        if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The verified catalog fallback graph could not be created.");
       }
       let prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
       if (!prepared?.ok) throw new Error(prepared?.diagnostics?.[0] || "The Custom C# File graph could not be created.");
@@ -3500,11 +3743,19 @@ async function synchronizeCustomCSharpFileGraph(
         return matches;
       };
       if (!await validatePreparedGraph(prepared)) {
-        fragment = await buildCustomCSharpFragmentInWorker(ownerId, source, parseResult, {
-          ...fragmentOptions,
-          prefix: `${fragmentOptions.prefix}-semantic`,
-          disableCatalogNodes: true
-        });
+        const semanticBuild =
+          await buildCustomCSharpFragmentInWorker(
+            ownerId,
+            source,
+            parseResult,
+            {
+              ...fragmentOptions,
+              prefix: `${fragmentOptions.prefix}-semantic`,
+              disableCatalogNodes: true
+            }
+          );
+        activeBuild = semanticBuild;
+        fragment = activeBuild.fragment;
         assertCurrentOwnerContext();
         if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The catalog-independent semantic graph could not be created.");
         prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
@@ -3514,7 +3765,8 @@ async function synchronizeCustomCSharpFileGraph(
           ownerId,
           window.RMLI18n.t("ui.literal.4e53eaee4568")
         );
-        fragment = await buildCustomCSharpFragmentInWorker(
+        const exactBuild =
+          await buildCustomCSharpFragmentInWorker(
           ownerId,
           source,
           parseResult,
@@ -3525,6 +3777,8 @@ async function synchronizeCustomCSharpFileGraph(
             semanticOptimization: false
           }
         );
+        activeBuild = exactBuild;
+        fragment = activeBuild.fragment;
         assertCurrentOwnerContext();
         if (!fragment?.ok) {
           throw new Error(
@@ -3548,7 +3802,11 @@ async function synchronizeCustomCSharpFileGraph(
 
       prepared.customGraph.sourceHash = sourceHash;
       prepared.customGraph.optimizerVersion = Number(visualCSharp.version || 0);
-      const finalCatalogStamp = currentCustomCSharpCatalogStamp();
+      const finalCatalogStamp =
+        customCSharpCatalogCommitStamp(
+          activeBuild.catalogStamp,
+          activeBuild.catalogBypass === true
+        );
       prepared.customGraph.catalogFingerprint = finalCatalogStamp.fingerprint;
       prepared.customGraph.catalogEngineVersion = finalCatalogStamp.engineVersion;
       prepared.customGraph.catalogSource = finalCatalogStamp.source;
@@ -3608,6 +3866,10 @@ async function synchronizeCustomCSharpFileGraph(
               preparedRegistry[ownerId],
             preparedGraph:
               prepared.customGraph,
+            catalogStamp:
+              finalCatalogStamp,
+            catalogBypass:
+              activeBuild.catalogBypass === true,
             customProjectEpoch:
               customCSharpProjectEpoch,
             builderProjectEpoch
@@ -3668,12 +3930,14 @@ async function synchronizeCustomCSharpFileGraph(
           pending
         );
         rollbackCreatedOwnerRegistry();
+        customCSharpCatalogCommitStamp(
+          finalCatalogStamp,
+          activeBuild.catalogBypass === true
+        );
       }
       if (opened) {
         const synchronizedNodes = prepared.customGraph.nodes || [];
-        const usingCount = synchronizedNodes.filter(node => node.operatorId === "csharp.usingDirective").length;
         const catalogCount = synchronizedNodes.filter(node => String(node.operatorId || "").startsWith("api.")).length;
-        showGraphMessage(`Opened ${prepared.importedSyntaxNodeCount.toLocaleString()} editable C# nodes: ${usingCount.toLocaleString()} Using Directive and ${catalogCount.toLocaleString()} verified scanner API nodes.`, "success");
         appendCustomCSharpDebugOutput(
           ownerId,
           `Validation completed with ${prepared.importedSyntaxNodeCount.toLocaleString()} editable C# nodes and ${catalogCount.toLocaleString()} verified scanner API nodes.`,
@@ -3700,33 +3964,75 @@ async function synchronizeCustomCSharpFileGraph(
         );
       }
       rollbackCreatedOwnerRegistry();
+      if (customCSharpIsCatalogRetryError(error)) {
+        throw error;
+      }
       if (error?.name === "AbortError") return false;
       const message =
         error instanceof Error
           ? error.message
           : String(error);
-      setCustomCSharpDiagnostics(
-        ownerId,
-        [message],
-        { source: "Builder" }
-      );
-      appendCustomCSharpDebugOutput(
-        ownerId,
-        message,
-        {
-          tone: "error",
-          source: "Builder"
+      const syntaxInvalid =
+        error instanceof SyntaxError ||
+        error?.code ===
+          "RML_CUSTOM_CSHARP_SYNTAX_INVALID";
+      if (syntaxInvalid) {
+        setCustomCSharpDiagnostics(
+          ownerId,
+          [message],
+          { source: "Roslyn" }
+        );
+        appendCustomCSharpDebugOutput(
+          ownerId,
+          message,
+          {
+            tone: "error",
+            source: "Roslyn"
+          }
+        );
+        setCustomCSharpSynchronizationStatus(
+          ownerId,
+          message,
+          {
+            tone: "error",
+            source: "Roslyn"
+          }
+        );
+        if (!quiet) {
+          showGraphMessage(message, "error");
         }
+        return false;
+      }
+
+      console.error(
+        "Custom C# graph synchronization failed; the source and previous graph were preserved.",
+        error
       );
+      setCustomCSharpDiagnostics(ownerId, []);
       setCustomCSharpSynchronizationStatus(
         ownerId,
-        message,
-        {
-          tone: "error",
-          source: "Builder"
-        }
+        ""
       );
-      if (!quiet) showGraphMessage(message, "error");
+      if (
+        openAfterSync &&
+        existingGraph &&
+        Array.isArray(existingGraph.nodes) &&
+        Array.isArray(existingGraph.connections)
+      ) {
+        try {
+          return await openCustomCSharpFileGraphReady(
+            ownerId,
+            signal
+          );
+        } catch (presentationError) {
+          if (presentationError?.name !== "AbortError") {
+            console.error(
+              "The preserved Custom C# graph could not be presented.",
+              presentationError
+            );
+          }
+        }
+      }
       return false;
     }
   }
@@ -4475,6 +4781,30 @@ function customCSharpOwnerBindingCurrent(
     );
   }
 
+function customCSharpOwnerBindingAttached(
+    binding
+  ) {
+    const ownerStillAttached =
+      Array.isArray(binding?.document?.nodes) &&
+      binding.document.nodes.includes(binding.owner) ||
+      Boolean(
+        customCSharpEditor?.openOwner === binding?.owner &&
+        customCSharpEditor?.openOwnerDocument ===
+          binding?.document &&
+        customCSharpEditor?.mainView?.nodes?.includes(
+          binding?.owner
+        )
+      );
+    return Boolean(
+      binding &&
+      binding.projectEpoch === customCSharpProjectEpoch &&
+      binding.builderProjectEpoch === builderProjectEpoch &&
+      String(binding.owner?.parameters?.source ?? "") ===
+        binding.source &&
+      ownerStillAttached
+    );
+  }
+
 function cancelCustomCSharpSourceGraphSynchronization(
     ownerOrId = null
   ) {
@@ -4499,7 +4829,7 @@ function cancelCustomCSharpSourceGraphSynchronization(
 function startCustomCSharpSourceGraphSynchronization(
     binding
   ) {
-    if (!customCSharpOwnerBindingCurrent(binding)) {
+    if (!customCSharpOwnerBindingAttached(binding)) {
       return Promise.resolve(false);
     }
 
@@ -4810,20 +5140,12 @@ function customCSharpDeclaredSystemTypesFromSource(source) {
     return result;
   }
 
-  function customCSharpConnectedInputIds(nodeId) {
-    const result = [];
-    const seen = new Set();
-    for (const connection of graph?.connections || []) {
-      if (String(connection?.toNode || "") !== String(nodeId)) continue;
-      const id = String(connection?.toPort || "").trim();
-      if (!id || id === "call" || seen.has(id)) continue;
-      seen.add(id);
-      result.push(id);
-    }
-    return result;
-  }
-
-function reconcileCustomCSharpRuntimeValuePorts(nodeId, parameterKey, source) {
+function reconcileCustomCSharpRuntimeValuePorts(
+    nodeId,
+    parameterKey,
+    source,
+    previousDefinition = null
+  ) {
     if (parameterKey !== "actionCode" && parameterKey !== "expressionCode") return false;
     const locations = customCSharpEditorNodeLocations(nodeId);
     if (locations.length === 0) return false;
@@ -4835,10 +5157,7 @@ function reconcileCustomCSharpRuntimeValuePorts(nodeId, parameterKey, source) {
     refreshCustomCSharpSystemTypeRegistry();
     const referencedIds = customCSharpPlaceholderInputIds(source);
     const typeHints = customCSharpPlaceholderTypeHints(source);
-    const connectedIds = customCSharpConnectedInputIds(nodeId);
-
     const nextIds = [...referencedIds];
-    for (const id of connectedIds) if (!nextIds.includes(id)) nextIds.push(id);
     const previousIds = Array.isArray(primary?.parameters?.customCSharpValueInputIds)
       ? primary.parameters.customCSharpValueInputIds.map(value => String(value || "").trim()).filter(Boolean)
       : [];
@@ -4869,11 +5188,52 @@ function reconcileCustomCSharpRuntimeValuePorts(nodeId, parameterKey, source) {
     }
     graphNodeDefinitionCache = new WeakMap();
     currentAnalysis = null;
+    const removedInputIds = new Set(
+      previousIds.filter(id =>
+        !nextIds.includes(id)
+      )
+    );
+    if (
+      removedInputIds.size > 0 &&
+      typeof removeGraphConnectionsFromState ===
+        "function"
+    ) {
+      removeGraphConnectionsFromState(
+        (graph?.connections || [])
+          .filter(connection =>
+            String(connection?.toNode || "") ===
+              String(nodeId) &&
+            removedInputIds.has(
+              String(connection?.toPort || "")
+            )
+          )
+          .map(connection => connection.id)
+      );
+    }
+    if (
+      typeof synchronizeChangedApiCompositeNodePortContract ===
+        "function"
+    ) {
+      synchronizeChangedApiCompositeNodePortContract(
+        nodeId,
+        previousDefinition,
+        nodeDefinition(primary),
+        { exposeCurrent: true }
+      );
+    }
     renderGraphMutationDelta({
       nodeIds: [...new Set([...(previousSelection?.nodeIds || []), String(nodeId)])],
       connectionIds: affectedConnectionIds,
       nodeContentIds: [String(nodeId)]
     });
+    if (
+      typeof synchronizeGraphInspectorTypeList ===
+        "function"
+    ) {
+      synchronizeGraphInspectorTypeList(
+        nodeId
+      );
+    }
     refreshDisplayValueNodes();
     scheduleAcceptedGraphPersistenceAfterPaint({
       refreshGeneratedOutput: true,
@@ -4902,6 +5262,8 @@ function commitCustomCSharpEditorValue(
       location => location.node
     );
     if (nodes.length === 0) return false;
+    const previousDefinition =
+      nodeDefinition(nodes[0]);
     if (!validateUnchanged && nodes.every(candidate =>
       String(candidate.parameters?.[parameterKey] ?? "") === next)) {
       synchronizeCustomCSharpInspectorValue(nodeId, parameterKey, next);
@@ -4916,7 +5278,12 @@ function commitCustomCSharpEditorValue(
       candidate.parameters[parameterKey] = next;
     }
     const node = nodes[0];
-    reconcileCustomCSharpRuntimeValuePorts(nodeId, parameterKey, next);
+    reconcileCustomCSharpRuntimeValuePorts(
+      nodeId,
+      parameterKey,
+      next,
+      previousDefinition
+    );
     const synchronization = customCSharpSynchronizationControllers.get(String(nodeId));
     if (synchronization && !synchronization.signal.aborted) {
       synchronization.abort(new DOMException(window.RMLI18n.t("ui.literal.de598a3d6a15"), "AbortError"));
@@ -5109,7 +5476,7 @@ function createCustomCSharpOverlayFrame(
     actions.className =
       "rml-custom-csharp-overlay-window-actions";
     const windowIcon = name =>
-      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-${name}"></use></svg>`;
+      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-${name}"></use></svg>`;
     const returnIcon = windowIcon("back");
     const minimizeIcon = windowIcon("minimize");
     const maximizeIcon = windowIcon("maximize");
@@ -5420,7 +5787,7 @@ function restoreGraphAfterCustomCSharpInlineEditor(
         throw error;
       }
     } else {
-      finishGraphTransitionWork(
+      window.RMLBuilderWork?.finish?.(
         workSession
       );
     }
@@ -5658,7 +6025,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+      "styles/features/styles.runtime-graph.css?v=1.21.76-custom-csharp-catalog-provenance",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6458,7 +6825,8 @@ function mountCustomCSharpEditorPresentation({
       pendingRecord
     );
 
-    void loadCustomCSharpDetachedEditorModule()
+    const mountTask =
+      loadCustomCSharpDetachedEditorModule()
       .then(async editorModule => {
         if (
           hostWindow.closed ||
@@ -6778,6 +7146,7 @@ function mountCustomCSharpEditorPresentation({
             customCSharpEditorNode(nodeId), specification, record.getValue()
           );
         }
+        return record;
       })
       .catch(error => {
         shortcutBootstrap?.dispose?.();
@@ -6809,7 +7178,9 @@ function mountCustomCSharpEditorPresentation({
             : String(error),
           "error"
         );
+        return null;
       });
+    return mountTask;
   }
 
 function disposeCustomCSharpPresentation(
@@ -6884,8 +7255,17 @@ async function moveCustomCSharpEditorToMode(
       return false;
     }
 
+    const workSession =
+      window.RMLBuilderWork?.begin?.({
+        kicker: window.RMLI18n.t("ui.text.ba090b5e07cf"),
+        title: "Switching Custom C# editor view…",
+        message: "The selected editor presentation is being prepared.",
+        detail: `Mounting the ${targetMode} editor with the current document state.`,
+        progress: 44
+      });
     existing.presentationTransition = true;
     try {
+      await window.RMLBuilderWork?.paint?.();
       const title =
         `${String(existing.specification?.label || "Custom C#")} · Code editor`;
       let externalHost = null;
@@ -6963,7 +7343,8 @@ async function moveCustomCSharpEditorToMode(
         hostWindow = externalHost.hostWindow;
       }
 
-      mountCustomCSharpEditorPresentation({
+      const mounted =
+        await mountCustomCSharpEditorPresentation({
         nodeId: existing.nodeId,
         specification: existing.specification,
         mode: targetMode,
@@ -6973,20 +7354,33 @@ async function moveCustomCSharpEditorToMode(
         editorState,
         initialValue: value
       });
+      if (!mounted) {
+        customCSharpDetachedEditors.set(
+          editorKey,
+          existing
+        );
+        existing.focus?.();
+        return false;
+      }
       disposeCustomCSharpPresentation(
         existing,
         editorKey
       );
 
-      if (targetMode === "external") {
-        showGraphMessage(
-          window.RMLI18n.t("ui.literal.7a2370832e68"),
-          "success"
-        );
-      }
       return true;
+    } catch (error) {
+      showGraphMessage(
+        error instanceof Error
+          ? error.message
+          : String(error),
+        "error"
+      );
+      return false;
     } finally {
       existing.presentationTransition = false;
+      window.RMLBuilderWork?.finish?.(
+        workSession
+      );
     }
   }
 
@@ -6999,7 +7393,7 @@ function moveCustomCSharpEditorToInline(
     );
   }
 
-function openCustomCSharpDetachedEditor(
+async function openCustomCSharpDetachedEditor(
     node,
     specification,
     codeControl
@@ -7026,8 +7420,18 @@ function openCustomCSharpDetachedEditor(
         customCSharpEditorAppearance(node)
       );
       existing.focus?.();
-      return;
+      return true;
     }
+    const workSession =
+      beginGraphTransitionWork({
+        kicker: window.RMLI18n.t("ui.text.ba090b5e07cf"),
+        title: `Opening ${String(specification?.label || "Custom C#")} editor…`,
+        message: "The Custom C# editor is being prepared.",
+        detail: "Loading the editor and restoring its current document state.",
+        progress: 36
+      });
+    try {
+      await window.RMLBuilderWork?.paint?.();
     if (existing) {
       customCSharpDetachedEditors.delete(
         editorKey
@@ -7046,7 +7450,8 @@ function openCustomCSharpDetachedEditor(
       editorKey,
       `${String(specification?.label || "Custom C#")} · Code editor`
     );
-    mountCustomCSharpEditorPresentation({
+    return Boolean(
+      await mountCustomCSharpEditorPresentation({
       nodeId: node.id,
       specification,
       mode: "inline",
@@ -7058,7 +7463,21 @@ function openCustomCSharpDetachedEditor(
           parameterKey,
           codeControl?.value
         )
-    });
+      })
+    );
+    } catch (error) {
+      showGraphMessage(
+        error instanceof Error
+          ? error.message
+          : String(error),
+        "error"
+      );
+      return false;
+    } finally {
+      finishGraphTransitionWork(
+        workSession
+      );
+    }
   }
 
 function customCSharpEditorDropTargetAt(
@@ -7148,7 +7567,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+      "1.21.76-custom-csharp-catalog-provenance",
     writable: false,
     enumerable: true,
     configurable: true

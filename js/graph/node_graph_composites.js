@@ -676,7 +676,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
+    "1.21.76-custom-csharp-catalog-provenance";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -934,7 +934,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.21.76-custom-csharp-catalog-provenance&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -6434,7 +6434,8 @@ async function resolveSavedApiCompositeForCurrentCatalog(
       allowFingerprintShortcut = true,
       includeResolutionDetails = false,
       sourceRecordIsSanitized = false,
-      expectedCatalogBatchEpoch = ""
+      expectedCatalogBatchEpoch = "",
+      resolverContext = "saved-composite"
     } = {}
   ) {
     const preSanitizeOmissions =
@@ -6514,18 +6515,20 @@ async function resolveSavedApiCompositeForCurrentCatalog(
         typeof detailedResolver ===
           "function"
           ? await detailedResolver(
-              validation.graph,
-              {
-                name: record.name
-              }
+               validation.graph,
+               {
+                 name: record.name,
+                 context: resolverContext
+               }
             )
           : {
               graph:
                 await resolver(
-                  validation.graph,
-                  {
-                    name: record.name
-                  }
+                   validation.graph,
+                   {
+                     name: record.name,
+                     context: resolverContext
+                   }
                 ),
               resolution: null
             };
@@ -6938,8 +6941,261 @@ function commitApiCompositeRootDocumentMutation(
       rootView.branchRouting;
   }
 
+function apiCompositeDefinitionPortContract(
+    definition
+  ) {
+    const contract = [];
+    for (const [direction, ports] of [
+      ["input", definition?.inputs],
+      ["output", definition?.outputs]
+    ]) {
+      for (const specification of
+        Array.isArray(ports) ? ports : []) {
+        const portId = String(
+          specification?.id || ""
+        );
+        if (portId) {
+          contract.push({
+            direction,
+            id: portId,
+            label: String(
+              specification?.label || ""
+            ),
+            type: String(
+              specification?.type || ""
+            ),
+            typeVar: String(
+              specification?.typeVar || ""
+            ),
+            constraint: String(
+              specification?.constraint ||
+                "value"
+            ),
+            optional:
+              specification?.optional === true
+          });
+        }
+      }
+    }
+    return contract;
+  }
+
+function apiCompositeDefinitionPortContractSignature(
+    definition
+  ) {
+    return JSON.stringify(
+      apiCompositeDefinitionPortContract(
+        definition
+      )
+    );
+  }
+
+function synchronizeChangedApiCompositeNodePortContract(
+    nodeId,
+    previousDefinition,
+    nextDefinition,
+    {
+      exposeNew = true,
+      exposeCurrent = false
+    } = {}
+  ) {
+    if (
+      !apiCompositeEditor ||
+      customCSharpEditor ||
+      !nodeId
+    ) {
+      return false;
+    }
+    const previousContract =
+      apiCompositeDefinitionPortContract(
+        previousDefinition
+      );
+    const nextContract =
+      apiCompositeDefinitionPortContract(
+        nextDefinition
+      );
+    const contractChanged =
+      JSON.stringify(previousContract) !==
+      JSON.stringify(nextContract);
+    if (!contractChanged && !exposeCurrent) {
+      return false;
+    }
+
+    const composite =
+      apiCompositeEditorDocument(
+        apiCompositeEditor
+      );
+    if (!composite) return false;
+
+    const contractKey = specification =>
+      `${specification.direction}\u0000${specification.id}`;
+    const previousByKey = new Map(
+      previousContract.map(specification => [
+        contractKey(specification),
+        specification
+      ])
+    );
+    const nextByKey = new Map(
+      nextContract.map(specification => [
+        contractKey(specification),
+        specification
+      ])
+    );
+    const nodeKey = String(nodeId);
+    const sourceBoundaries =
+      apiCompositeBoundaryRecords(
+        composite.boundaryPorts
+      );
+    const boundaries = [];
+    const endpointKeys = new Set();
+    let removed = 0;
+    let synchronized = 0;
+
+    for (const boundary of sourceBoundaries) {
+      if (
+        String(boundary.internalNodeId) !==
+          nodeKey
+      ) {
+        boundaries.push(boundary);
+        endpointKeys.add(
+          apiCompositeBoundaryEndpointKey(
+            boundary
+          )
+        );
+        continue;
+      }
+      const key =
+        `${boundary.direction}\u0000${boundary.internalPortId}`;
+      if (!nextByKey.has(key)) {
+        removed += 1;
+        continue;
+      }
+      const descriptor =
+        apiCompositePortDescriptor(
+          nodeId,
+          boundary.internalPortId,
+          boundary.direction,
+          boundary.id
+        );
+      if (!descriptor) {
+        removed += 1;
+        continue;
+      }
+      const updated = {
+        ...boundary,
+        ...descriptor,
+        autoExposed:
+          boundary.autoExposed === true
+      };
+      if (
+        JSON.stringify(boundary) !==
+        JSON.stringify(updated)
+      ) {
+        synchronized += 1;
+      }
+      boundaries.push(updated);
+      endpointKeys.add(
+        apiCompositeBoundaryEndpointKey(
+          updated
+        )
+      );
+    }
+
+    const candidates = exposeCurrent
+      ? nextContract
+      : exposeNew
+        ? nextContract.filter(specification =>
+            !previousByKey.has(
+              contractKey(specification)
+            )
+          )
+        : [];
+    const addedBoundaries = [];
+    for (const specification of candidates) {
+      const endpoint = {
+        direction: specification.direction,
+        internalNodeId: nodeId,
+        internalPortId: specification.id
+      };
+      const endpointKey =
+        apiCompositeBoundaryEndpointKey(
+          endpoint
+        );
+      if (
+        endpointKeys.has(endpointKey) ||
+        apiCompositePortHasInternalWire(
+          endpoint
+        )
+      ) {
+        continue;
+      }
+      const descriptor =
+        apiCompositePortDescriptor(
+          nodeId,
+          specification.id,
+          specification.direction,
+          nextApiCompositeBoundaryId(
+            specification.direction,
+            boundaries
+          )
+        );
+      if (!descriptor) continue;
+      descriptor.autoExposed = true;
+      boundaries.push(descriptor);
+      addedBoundaries.push(descriptor);
+      endpointKeys.add(endpointKey);
+    }
+
+    applyApiCompositeBoundaries(boundaries);
+    const rootDocument =
+      apiCompositeRootDocumentForMutation();
+    const propagation =
+      propagateApiCompositeBoundariesOutward(
+        rootDocument,
+        composite,
+        addedBoundaries
+      );
+    const reconciliation =
+      reconcileApiCompositeBoundaryTree(
+        rootDocument,
+        {
+          changedOwnerPath:
+            apiCompositeEditorOwnerPath(
+              apiCompositeEditor
+            )
+        }
+      );
+    commitApiCompositeRootDocumentMutation(
+      rootDocument
+    );
+    apiCompositeEditor.boundaryUpdate = {
+      added:
+        (Number(
+          apiCompositeEditor.boundaryUpdate
+            ?.added
+        ) || 0) + addedBoundaries.length,
+      removed:
+        (Number(
+          apiCompositeEditor.boundaryUpdate
+            ?.removed
+        ) || 0) + removed
+    };
+
+    return (
+      addedBoundaries.length > 0 ||
+      removed > 0 ||
+      synchronized > 0 ||
+      propagation.addedBoundaries > 0 ||
+      reconciliation.addedBoundaries > 0 ||
+      reconciliation.removedBoundaries > 0 ||
+      reconciliation.disconnectedWires > 0 ||
+      reconciliation.synchronizedOwners > 0
+    );
+  }
+
 function exposeApiCompositeNodePorts(
-    nodeId
+    nodeId,
+    { quiet = false } = {}
   ) {
     if (!apiCompositeEditor) {
       return false;
@@ -7005,14 +7261,16 @@ function exposeApiCompositeNodePorts(
         mutationClass: "boundary"
       });
     }
-    showGraphMessage(
-      changed
-        ? `${result.added.toLocaleString(window.RMLI18n?.language || undefined)} open port${result.added === 1 ? " was" : "s were"} exposed and forwarded through every open Composite level.${propagation.stoppedAtInternalWire > 0 ? ` Forwarding stopped at ${propagation.stoppedAtInternalWire.toLocaleString(window.RMLI18n?.language || undefined)} internally connected level${propagation.stoppedAtInternalWire === 1 ? "" : "s"}.` : ""}`
-        : window.RMLI18n.t("ui.literal.e87751cd22ae"),
-      changed
-        ? "success"
-        : ""
-    );
+    if (!quiet) {
+      showGraphMessage(
+        changed
+          ? `${result.added.toLocaleString(window.RMLI18n?.language || undefined)} open port${result.added === 1 ? " was" : "s were"} exposed and forwarded through every open Composite level.${propagation.stoppedAtInternalWire > 0 ? ` Forwarding stopped at ${propagation.stoppedAtInternalWire.toLocaleString(window.RMLI18n?.language || undefined)} internally connected level${propagation.stoppedAtInternalWire === 1 ? "" : "s"}.` : ""}`
+          : window.RMLI18n.t("ui.literal.e87751cd22ae"),
+        changed
+          ? "success"
+          : ""
+      );
+    }
     return changed;
   }
 
@@ -7221,7 +7479,7 @@ function apiCompositeNodeHasExposablePorts(
     return false;
   }
 
-function openApiCompositeGraph(
+async function openApiCompositeGraph(
     containerNodeId
   ) {
     if (
@@ -7386,6 +7644,7 @@ function openApiCompositeGraph(
         progress: 28
       });
     try {
+      await window.RMLBuilderWork?.paint?.();
       window.__RML_API_COMPOSITE_NAVIGATION_DEPTH__ =
         (Number(window.__RML_API_COMPOSITE_NAVIGATION_DEPTH__) || 0) + 1;
       try {
@@ -7408,14 +7667,11 @@ function openApiCompositeGraph(
         restoreCurrentGraphAnalysis();
       }
       activateGraphMode();
+      await whenGraphViewReady();
     } catch (error) {
       finishGraphTransitionWork(workSession);
       throw error;
     }
-    showGraphMessage(
-      window.RMLI18n.format("composite.transition.opened", { title: apiCompositeEditor.title }),
-      "success"
-    );
     return true;
   }
 
@@ -7591,18 +7847,13 @@ function closeApiCompositeGraph({
         });
       }
     }
-    if (announce) {
-      const message =
-        missingVerifiedCatalogNode
-          ? emptyComposite
-            ? `Returned from ${title} to its parent graph level. The empty Composite remains editable, but it cannot be saved or exported until it contains a verified catalog API node again.`
-            : `Returned from ${title} to its parent graph level. The Composite draft and its owned graphs were preserved, but it cannot be saved or exported until it contains a verified catalog API node.`
-          : `Returned from ${title} to its parent graph level.${boundaryUpdate.added > 0 ? ` ${boundaryUpdate.added.toLocaleString(window.RMLI18n?.language || undefined)} new outer port${boundaryUpdate.added === 1 ? " was" : "s were"} exposed.` : ""}${boundaryUpdate.removed > 0 ? ` ${boundaryUpdate.removed.toLocaleString(window.RMLI18n?.language || undefined)} outward contract port${boundaryUpdate.removed === 1 ? " was" : "s were"} removed by the current internal connection topology.` : ""}`;
+    if (announce && missingVerifiedCatalogNode) {
+      const message = emptyComposite
+        ? `Returned from ${title} to its parent graph level. The empty Composite remains editable, but it cannot be saved or exported until it contains a verified catalog API node again.`
+        : `Returned from ${title} to its parent graph level. The Composite draft and its owned graphs were preserved, but it cannot be saved or exported until it contains a verified catalog API node.`;
       showGraphMessage(
         message,
-        missingVerifiedCatalogNode
-          ? "warning"
-          : "success"
+        "warning"
       );
     }
     if (
@@ -10653,11 +10904,13 @@ async function importSavedApiCompositePayload(
             {
               allowFingerprintShortcut:
                 false,
-              includeResolutionDetails:
-                true,
-              sourceRecordIsSanitized:
-                true
-            }
+               includeResolutionDetails:
+                 true,
+               sourceRecordIsSanitized:
+                 true,
+               resolverContext:
+                 "saved-composite-import"
+             }
           );
         const resolvedRecord =
           outcome.record;
@@ -16409,6 +16662,71 @@ function synchronizeApiCompositeInspectorLibraryActions(
     );
   }
 
+function setSavedApiCompositeIcon(
+    element,
+    iconName,
+    className = ""
+  ) {
+    if (!element) return false;
+    const normalizedIconName =
+      String(iconName || "").trim();
+    if (!normalizedIconName) return false;
+    const normalizedClassName =
+      String(className || "").trim();
+    const namespace =
+      "http://www.w3.org/2000/svg";
+    const href =
+      `assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-${normalizedIconName}`;
+    const existingSvg =
+      element.firstElementChild;
+    const existingUse =
+      existingSvg?.firstElementChild;
+    if (
+      element.childElementCount === 1 &&
+      existingSvg?.namespaceURI === namespace &&
+      existingSvg.localName === "svg" &&
+      existingSvg.childElementCount === 1 &&
+      existingSvg.getAttribute("viewBox") ===
+        "0 0 24 24" &&
+      existingSvg.getAttribute("aria-hidden") ===
+        "true" &&
+      String(
+        existingSvg.getAttribute("class") || ""
+      ) === normalizedClassName &&
+      existingUse?.namespaceURI === namespace &&
+      existingUse.localName === "use" &&
+      existingUse.getAttribute("href") === href
+    ) {
+      return false;
+    }
+    const svg = document.createElementNS(
+      namespace,
+      "svg"
+    );
+    svg.setAttribute(
+      "viewBox",
+      "0 0 24 24"
+    );
+    svg.setAttribute(
+      "aria-hidden",
+      "true"
+    );
+    if (normalizedClassName) {
+      svg.setAttribute(
+        "class",
+        normalizedClassName
+      );
+    }
+    const use = document.createElementNS(
+      namespace,
+      "use"
+    );
+    use.setAttribute("href", href);
+    svg.appendChild(use);
+    element.replaceChildren(svg);
+    return true;
+  }
+
 function refreshVisibleApiCompositeInspectorSaveActions() {
     if (!dom.inspectorContent) {
       return;
@@ -16557,9 +16875,26 @@ function refreshVisibleSavedApiCompositeUpdateActions() {
           : window.RMLI18n.t("ui.literal.09a0c2770ee7"))
       );
       if (!compatibilityIssue && !currentOpen && available) {
-        marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg>`;
+        setSavedApiCompositeIcon(
+          marker,
+          "add",
+          "rml-inline-icon"
+        );
       } else {
-        marker.textContent = compatibilityIssue ? "!" : currentOpen ? window.RMLI18n.t("composite.library.status_open") : "·";
+        const markerText =
+          compatibilityIssue
+            ? "!"
+            : currentOpen
+              ? window.RMLI18n.t(
+                  "composite.library.status_open"
+                )
+              : "·";
+        if (
+          marker.childElementCount > 0 ||
+          marker.textContent !== markerText
+        ) {
+          marker.textContent = markerText;
+        }
       }
       button.title = compatibilityIssue
         ? window.RMLI18n.format("composite.library.compatibility_retry", { issue: compatibilityIssue })
@@ -16744,7 +17079,10 @@ function synchronizeSavedApiCompositeUpdateAction(
       updateGraphButton =
         document.createElement("button");
       updateGraphButton.type = "button";
-      updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-update"></use></svg>`;
+      setSavedApiCompositeIcon(
+        updateGraphButton,
+        "update"
+      );
       updateGraphButton.dataset
         .savedApiCompositeGraphUpdate =
         "true";
@@ -16817,7 +17155,10 @@ function synchronizeSavedApiCompositeUpdateAction(
       updatesOpenComposite
         ? "graph-to-library"
         : "library-to-graph";
-    updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-update"></use></svg>`;
+    setSavedApiCompositeIcon(
+      updateGraphButton,
+      "update"
+    );
     updateGraphButton.setAttribute(
       "aria-label",
       updatesOpenComposite
@@ -16928,7 +17269,7 @@ function createSavedApiCompositePaletteItem(
     const add =
       document.createElement("small");
     if (!compatibilityIssue && !currentOpen && savedCompositeAvailable) {
-      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg>`;
+      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg>`;
     } else {
       add.textContent = compatibilityIssue ? "!" : currentOpen ? window.RMLI18n.t("composite.library.status_open") : "·";
     }
@@ -16993,7 +17334,7 @@ function createSavedApiCompositePaletteItem(
     const exportButton =
       document.createElement("button");
     exportButton.type = "button";
-    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-download"></use></svg>`;
+    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-download"></use></svg>`;
     exportButton.title =
       window.RMLI18n.format("composite.actions.export_title", { name: record.name });
     exportButton.addEventListener(
@@ -17052,7 +17393,7 @@ function createSavedApiCompositePaletteItem(
     const deleteButton =
       document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-close"></use></svg>`;
+    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-close"></use></svg>`;
     deleteButton.title =
       window.RMLI18n.format("composite.actions.delete_title", { name: record.name });
     deleteButton.addEventListener(
@@ -17081,7 +17422,7 @@ function createSavedApiCompositePaletteItem(
     const menuTrigger = document.createElement("button");
     menuTrigger.type = "button";
     menuTrigger.className = "rml-saved-api-composite-menu-trigger";
-    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-more"></use></svg>`;
+    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-more"></use></svg>`;
     menuTrigger.setAttribute("aria-haspopup", "menu");
     menuTrigger.setAttribute("aria-expanded", "false");
     menuTrigger.setAttribute(
@@ -17187,7 +17528,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+      "1.21.76-custom-csharp-catalog-provenance",
     writable: false,
     enumerable: true,
     configurable: true

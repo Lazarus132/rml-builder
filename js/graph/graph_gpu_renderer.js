@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = 24;
+  const VERSION = 26;
   const WIRE_CULL_CELL_SIZE = 960;
   const NODE_CELL_SIZE = 360;
   const WIRE_LINEAR_PICK_LIMIT = 512;
@@ -27,6 +27,7 @@
     "auto",
     "wgsl",
     "glsl",
+    "canvas2d",
     "svg"
   ]);
 
@@ -239,6 +240,7 @@
   webGpuRuntime.ready = (async () => {
     if (
       rendererBackendPreference === "glsl" ||
+      rendererBackendPreference === "canvas2d" ||
       rendererBackendPreference === "svg" ||
       typeof navigator === "undefined" ||
       !navigator.gpu
@@ -631,19 +633,52 @@
     return y * SPATIAL_KEY_STRIDE + x;
   }
 
-  function addToSpatialIndex(index, bounds, cellSize, value, padding = 0) {
+  function addToSpatialIndex(
+    index,
+    bounds,
+    cellSize,
+    value,
+    padding = 0,
+    collectKeys = true
+  ) {
     const range = cellRange(bounds, cellSize, padding);
-    const keys = [];
+    const keys = collectKeys ? [] : null;
     for (let y = range.minimumY; y <= range.maximumY; y += 1) {
       for (let x = range.minimumX; x <= range.maximumX; x += 1) {
         const key = spatialKey(x, y);
         const values = index.get(key) || [];
         values.push(value);
         index.set(key, values);
-        keys.push(key);
+        if (keys) {
+          keys.push(key);
+        }
       }
     }
     return keys;
+  }
+
+  function removeBoundsFromSpatialIndex(
+    index,
+    bounds,
+    cellSize,
+    value,
+    padding = 0
+  ) {
+    const range = cellRange(bounds, cellSize, padding);
+    for (let y = range.minimumY; y <= range.maximumY; y += 1) {
+      for (let x = range.minimumX; x <= range.maximumX; x += 1) {
+        const key = spatialKey(x, y);
+        const values = index.get(key);
+        if (!values) continue;
+        const position = values.indexOf(value);
+        if (position >= 0) {
+          values.splice(position, 1);
+        }
+        if (values.length === 0) {
+          index.delete(key);
+        }
+      }
+    }
   }
 
   function removeFromSpatialIndex(index, keys, value) {
@@ -817,7 +852,11 @@
       this.canvas.setAttribute("aria-hidden", "true");
       this.canvas.dataset.rmlRendererLifecycle =
         this.lifecycleState;
+      this.canvas.dataset.rmlRendererBackend =
+        this.backendKind;
       this.canvas.tabIndex = -1;
+      this.labelCanvas = null;
+      this.labelContext = null;
       this.scene = {
         segments: [],
         nodes: []
@@ -840,6 +879,7 @@
       this.disposed = false;
       this.frame = 0;
       this.resizeObserver = null;
+      this.resizeListenersInstalled = false;
       this.gridProgram = null;
       this.wireProgram = null;
       this.nodeProgram = null;
@@ -971,6 +1011,21 @@
           this.onRecoveryComplete?.(false);
         });
       };
+      this.handleViewportResize = () => {
+        if (
+          this.disposed ||
+          !this.viewport
+        ) {
+          return;
+        }
+        this.refreshViewportSurface();
+      };
+      this.handleViewportActivation = () => {
+        if (document.hidden === true) {
+          return;
+        }
+        this.refreshViewportSurface();
+      };
       if (!options.deferGraphics) {
         this.canvas.addEventListener(
           "webglcontextlost",
@@ -1002,6 +1057,7 @@
       this.setLifecycleState("confirmed-fallback");
       this.available = false;
       this.canvas.classList.remove("available");
+      this.releaseLabelCanvas();
       this.stats.renderer = "svg-fallback";
       activeRendererBackend = "svg-fallback";
       this.onAvailabilityChange?.(false);
@@ -1010,6 +1066,161 @@
 
     fallbackCanvasAvailable() {
       return false;
+    }
+
+    releaseLabelCanvas() {
+      if (!this.labelCanvas) return;
+      this.labelCanvas.remove();
+      this.labelCanvas.width = 1;
+      this.labelCanvas.height = 1;
+      this.labelCanvas = null;
+      this.labelContext = null;
+    }
+
+    ensureLabelCanvas() {
+      if (!this.labelCanvas) {
+        const canvas = document.createElement("canvas");
+        canvas.className = "rml-graph-label-canvas";
+        canvas.setAttribute("aria-hidden", "true");
+        canvas.tabIndex = -1;
+        this.labelCanvas = canvas;
+        this.labelContext = canvas.getContext("2d", {
+          alpha: true
+        });
+      }
+      if (
+        this.canvas.parentNode &&
+        this.labelCanvas.parentNode !==
+          this.canvas.parentNode
+      ) {
+        this.canvas.insertAdjacentElement(
+          "afterend",
+          this.labelCanvas
+        );
+      }
+      return this.labelContext;
+    }
+
+    drawLabelOverlay() {
+      if (
+        this.disposed ||
+        !this.viewport ||
+        this.backendKind === "canvas2d"
+      ) {
+        this.releaseLabelCanvas();
+        return;
+      }
+      const records =
+        this.visibleNodeRecordsForCamera();
+      if (records.length === 0) {
+        this.releaseLabelCanvas();
+        return;
+      }
+      const context = this.ensureLabelCanvas();
+      const canvas = this.labelCanvas;
+      if (!context || !canvas) return;
+      const labelRasterScale =
+        this.presentationDetailTier === "full"
+          ? Math.min(1, this.rasterScale)
+          : Math.min(0.75, this.rasterScale);
+      const ratio = Math.max(
+        0.5,
+        this.nativePixelRatio * labelRasterScale
+      );
+      const width = Math.max(
+        1,
+        Math.round(this.cssWidth * ratio)
+      );
+      const height = Math.max(
+        1,
+        Math.round(this.cssHeight * ratio)
+      );
+      if (
+        canvas.width !== width ||
+        canvas.height !== height
+      ) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      context.setTransform(
+        ratio,
+        0,
+        0,
+        ratio,
+        0,
+        0
+      );
+      context.clearRect(
+        0,
+        0,
+        this.cssWidth,
+        this.cssHeight
+      );
+      const scale = this.camera.scale;
+      const titlePixels = clamp(
+        14 * scale,
+        5,
+        14
+      );
+      const subtitlePixels = clamp(
+        10 * scale,
+        4,
+        10
+      );
+      if (titlePixels < 5) return;
+      context.textBaseline = "top";
+      context.fillStyle =
+        "rgba(239, 247, 255, 0.94)";
+      context.font =
+        `600 ${titlePixels}px Inter, Segoe UI, sans-serif`;
+      for (const record of records) {
+        const screenLeft =
+          record.left * scale + this.camera.x;
+        const screenTop =
+          record.top * scale + this.camera.y;
+        const screenWidth =
+          (record.right - record.left) * scale;
+        if (
+          screenWidth < 12 ||
+          screenLeft > this.cssWidth ||
+          screenTop > this.cssHeight
+        ) continue;
+        const padding = Math.max(3, 12 * scale);
+        const maximumWidth = Math.max(
+          1,
+          screenWidth - padding * 2
+        );
+        context.fillText(
+          record.title || "",
+          screenLeft + padding,
+          screenTop + Math.max(3, 8 * scale),
+          maximumWidth
+        );
+        if (
+          record.subtitle &&
+          subtitlePixels >= 5 &&
+          45 * scale >= titlePixels +
+            subtitlePixels + 8
+        ) {
+          context.fillStyle =
+            "rgba(173, 190, 207, 0.86)";
+          context.font =
+            `500 ${subtitlePixels}px Inter, Segoe UI, sans-serif`;
+          context.fillText(
+            record.subtitle,
+            screenLeft + padding,
+            screenTop + Math.max(
+              titlePixels + 5,
+              25 * scale
+            ),
+            maximumWidth
+          );
+          context.fillStyle =
+            "rgba(239, 247, 255, 0.94)";
+          context.font =
+            `600 ${titlePixels}px Inter, Segoe UI, sans-serif`;
+        }
+      }
     }
 
     setCameraCompositeContentReady() {
@@ -1059,6 +1270,8 @@
       const next = value === true;
       if (next) {
         this.setLifecycleState("active");
+      } else {
+        this.releaseLabelCanvas();
       }
       if (this.available === next) {
         return;
@@ -1125,6 +1338,7 @@
 
       this.resizeObserver?.disconnect();
       this.resizeObserver = null;
+      this.removeViewportResizeListeners();
       this.viewport = options.viewport || null;
       this.onAvailabilityChange =
         typeof options.onAvailabilityChange === "function"
@@ -1147,6 +1361,7 @@
           new ResizeObserver(() => this.resize());
         this.resizeObserver.observe(this.viewport);
       }
+      this.installViewportResizeListeners();
 
       this.onAvailabilityChange?.(
         this.available
@@ -1168,6 +1383,7 @@
       }
       this.resizeObserver?.disconnect();
       this.resizeObserver = null;
+      this.removeViewportResizeListeners();
       this.viewport = null;
       this.onAvailabilityChange = null;
       this.onRecoveryComplete = null;
@@ -1181,6 +1397,7 @@
       }
       this.clearScene();
       this.canvas.remove();
+      this.releaseLabelCanvas();
 
       this.canvas.width = 1;
       this.canvas.height = 1;
@@ -1492,7 +1709,7 @@
           vColor = aColor;
           vEdgePixels = side * extrusionHalfWidth * uScale;
           vCoreHalfPixels = max(0.05, 2.0 * uScale);
-          vDistance = t * aLength;
+          vDistance = t * aLength * uScale;
           vDash = aDash;
           vStyle = aStyle;
         }`,
@@ -1786,9 +2003,102 @@
       gl.bindVertexArray(null);
     }
 
+    installViewportResizeListeners() {
+      if (
+        this.resizeListenersInstalled ||
+        !this.viewport
+      ) {
+        return;
+      }
+      this.resizeListenersInstalled = true;
+      window.addEventListener?.(
+        "resize",
+        this.handleViewportResize,
+        { passive: true }
+      );
+      window.addEventListener?.(
+        "focus",
+        this.handleViewportActivation,
+        { passive: true }
+      );
+      window.addEventListener?.(
+        "pageshow",
+        this.handleViewportActivation,
+        { passive: true }
+      );
+      window.addEventListener?.(
+        "scroll",
+        this.handleViewportActivation,
+        { passive: true }
+      );
+      document.addEventListener?.(
+        "visibilitychange",
+        this.handleViewportActivation,
+        { passive: true }
+      );
+      window.visualViewport?.addEventListener?.(
+        "resize",
+        this.handleViewportResize,
+        { passive: true }
+      );
+      window.visualViewport?.addEventListener?.(
+        "scroll",
+        this.handleViewportActivation,
+        { passive: true }
+      );
+    }
+
+    removeViewportResizeListeners() {
+      if (!this.resizeListenersInstalled) {
+        return;
+      }
+      this.resizeListenersInstalled = false;
+      window.removeEventListener?.(
+        "resize",
+        this.handleViewportResize
+      );
+      window.removeEventListener?.(
+        "focus",
+        this.handleViewportActivation
+      );
+      window.removeEventListener?.(
+        "pageshow",
+        this.handleViewportActivation
+      );
+      window.removeEventListener?.(
+        "scroll",
+        this.handleViewportActivation
+      );
+      document.removeEventListener?.(
+        "visibilitychange",
+        this.handleViewportActivation
+      );
+      window.visualViewport?.removeEventListener?.(
+        "resize",
+        this.handleViewportResize
+      );
+      window.visualViewport?.removeEventListener?.(
+        "scroll",
+        this.handleViewportActivation
+      );
+    }
+
+    refreshViewportSurface() {
+      if (
+        this.disposed ||
+        !this.viewport
+      ) {
+        return false;
+      }
+      const changed = this.resize();
+      this.invalidateGpuCulling?.();
+      this.scheduleDraw();
+      return changed;
+    }
+
     resize() {
       if (!this.viewport || this.disposed) {
-        return;
+        return false;
       }
       const rectangle = this.viewport.getBoundingClientRect();
       const width = Math.max(1, Math.round(rectangle.width));
@@ -1842,6 +2152,7 @@
         this.visibleNodeSelectionDirty = true;
         this.scheduleDraw();
       }
+      return changed;
     }
 
     setPresentationQuality(plan = {}) {
@@ -2043,11 +2354,13 @@
           index
         );
         if (!this.nodeSpatialIndexDirty) {
-          record.spatialKeys = addToSpatialIndex(
+          addToSpatialIndex(
             this.nodeSpatialIndex,
             record,
             NODE_CELL_SIZE,
-            record
+            record,
+            0,
+            false
           );
         }
         const dataOffset =
@@ -2122,9 +2435,10 @@
         ) {
           removed += 1;
           if (!this.nodeSpatialIndexDirty) {
-            removeFromSpatialIndex(
+            removeBoundsFromSpatialIndex(
               this.nodeSpatialIndex,
-              record.spatialKeys,
+              record,
+              NODE_CELL_SIZE,
               record
             );
           }
@@ -2239,9 +2553,10 @@
         const previous =
           this.nodeRecords[update.index];
         if (!this.nodeSpatialIndexDirty) {
-          removeFromSpatialIndex(
+          removeBoundsFromSpatialIndex(
             this.nodeSpatialIndex,
-            previous.spatialKeys,
+            previous,
+            NODE_CELL_SIZE,
             previous
           );
         }
@@ -2250,13 +2565,14 @@
         this.nodeRecords[update.index] =
           update.record;
         if (!this.nodeSpatialIndexDirty) {
-          update.record.spatialKeys =
-            addToSpatialIndex(
-              this.nodeSpatialIndex,
-              update.record,
-              NODE_CELL_SIZE,
-              update.record
-            );
+          addToSpatialIndex(
+            this.nodeSpatialIndex,
+            update.record,
+            NODE_CELL_SIZE,
+            update.record,
+            0,
+            false
+          );
         }
         const offset =
           update.index *
@@ -2425,7 +2741,8 @@
           node.configuration === true,
         selected:
           node.selected === true,
-        spatialKeys: null
+        title: String(node.title || ""),
+        subtitle: String(node.subtitle || "")
       };
     }
 
@@ -2913,11 +3230,13 @@
       const started = performance.now();
       this.nodeSpatialIndex.clear();
       for (const record of this.nodeRecords) {
-        record.spatialKeys = addToSpatialIndex(
+        addToSpatialIndex(
           this.nodeSpatialIndex,
           record,
           NODE_CELL_SIZE,
-          record
+          record,
+          0,
+          false
         );
       }
       this.nodeSpatialIndexDirty = false;
@@ -3836,6 +4155,7 @@
       ) {
         return false;
       }
+      this.resize();
       const started = performance.now();
       this.prepareVisibleInstances();
       const curveSteps = curveStepsForPresentation(
@@ -3967,6 +4287,7 @@
       this.stats.averageDrawMilliseconds +=
         (elapsed - this.stats.averageDrawMilliseconds) /
         this.drawSamples;
+      this.drawLabelOverlay();
       return true;
     }
 
@@ -4231,9 +4552,11 @@
       }
       this.resizeObserver?.disconnect();
       this.resizeObserver = null;
+      this.removeViewportResizeListeners();
       this.clearScene();
       this.deleteGpuResources();
       this.canvas.remove();
+      this.releaseLabelCanvas();
       this.setAvailability(false);
       this.canvas.removeEventListener(
         "webglcontextlost",
@@ -4246,6 +4569,417 @@
       this.viewport = null;
       this.onCameraCommitted = null;
       this.gl = null;
+    }
+  }
+
+  function traceCanvasCurve(context, curve) {
+    context.beginPath();
+    context.moveTo(curve.p0.x, curve.p0.y);
+    context.bezierCurveTo(
+      curve.p1.x,
+      curve.p1.y,
+      curve.p2.x,
+      curve.p2.y,
+      curve.p3.x,
+      curve.p3.y
+    );
+  }
+
+  function roundedCanvasRectangle(
+    context,
+    x,
+    y,
+    width,
+    height,
+    radius
+  ) {
+    const safeRadius = Math.min(
+      Math.max(0, radius),
+      width * 0.5,
+      height * 0.5
+    );
+    context.beginPath();
+    if (typeof context.roundRect === "function") {
+      context.roundRect(
+        x,
+        y,
+        width,
+        height,
+        safeRadius
+      );
+      return;
+    }
+    context.moveTo(x + safeRadius, y);
+    context.lineTo(x + width - safeRadius, y);
+    context.quadraticCurveTo(
+      x + width,
+      y,
+      x + width,
+      y + safeRadius
+    );
+    context.lineTo(
+      x + width,
+      y + height - safeRadius
+    );
+    context.quadraticCurveTo(
+      x + width,
+      y + height,
+      x + width - safeRadius,
+      y + height
+    );
+    context.lineTo(x + safeRadius, y + height);
+    context.quadraticCurveTo(
+      x,
+      y + height,
+      x,
+      y + height - safeRadius
+    );
+    context.lineTo(x, y + safeRadius);
+    context.quadraticCurveTo(x, y, x + safeRadius, y);
+    context.closePath();
+  }
+
+  class GraphCanvas2DRenderer extends GraphHybridRenderer {
+    constructor(options = {}) {
+      super({
+        ...options,
+        deferGraphics: true,
+        backendKind: "canvas2d"
+      });
+      this.canRecoverContext = false;
+      try {
+        this.context2d = this.canvas.getContext("2d", {
+          alpha: false,
+          desynchronized: true
+        });
+      } catch {
+        this.context2d = null;
+      }
+      if (this.context2d) {
+        this.setAvailability(true);
+        this.stats.renderer = "canvas2d";
+        activeRendererBackend = "canvas2d";
+        this.resize();
+        this.scheduleDraw();
+      } else {
+        this.confirmFallback();
+      }
+    }
+
+    fallbackCanvasAvailable() {
+      return Boolean(
+        this.available && this.context2d
+      );
+    }
+
+    rebuildWireBuffers() {
+      this.wireInstanceData = new Float32Array(0);
+      this.wireInstanceCapacity = 0;
+      this.wireDataRevision += 1;
+      this.visibleWireSelectionDirty = true;
+    }
+
+    rebuildNodeBuffers() {
+      this.nodeInstanceData = new Float32Array(0);
+      this.nodeInstanceCapacity = 0;
+      this.nodeDataRevision += 1;
+      this.visibleNodeSelectionDirty = true;
+    }
+
+    deleteGpuResources() {
+      super.deleteGpuResources();
+      this.context2d = null;
+    }
+
+    prepareVisibleInstances() {
+      this.visibleWireRecords =
+        this.visibleWireRecordsForCamera(
+          this.viewportGraphBounds(
+            WIRE_CULL_MARGIN_PIXELS
+          )
+        );
+      this.visibleNodeRecords =
+        this.visibleNodeRecordsForCamera();
+      this.wireInstanceCount =
+        this.visibleWireRecords.length;
+      this.nodeInstanceCount =
+        this.visibleNodeRecords.length;
+      this.stats.wireInstances =
+        this.wireInstanceCount;
+      this.stats.nodeInstances =
+        this.nodeInstanceCount;
+      this.stats.visibleSegments =
+        this.visibleWireRecords.length;
+      this.stats.culledSegments = Math.max(
+        0,
+        this.wireRecords.length -
+          this.visibleWireRecords.length
+      );
+      this.stats.visibleNodes =
+        this.visibleNodeRecords.length;
+      this.stats.culledNodes = Math.max(
+        0,
+        this.nodeRecords.length -
+          this.visibleNodeRecords.length
+      );
+    }
+
+    setPreview(segment = null) {
+      this.previewSegment =
+        segment && typeof segment === "object"
+          ? segment
+          : null;
+      this.previewInstanceCount =
+        this.previewSegment ? 1 : 0;
+      this.stats.previewInstances =
+        this.previewInstanceCount;
+      this.scheduleDraw();
+      return true;
+    }
+
+    drawCanvasGrid(context) {
+      context.setTransform(
+        this.pixelRatio,
+        0,
+        0,
+        this.pixelRatio,
+        0,
+        0
+      );
+      context.fillStyle = "#080a10";
+      context.fillRect(
+        0,
+        0,
+        this.cssWidth,
+        this.cssHeight
+      );
+      context.lineWidth = 1;
+      for (const [spacing, color] of [
+        [18, "rgba(255,255,255,0.025)"],
+        [90, "rgba(86,166,222,0.025)"]
+      ]) {
+        context.beginPath();
+        for (
+          let x = 0.5;
+          x <= this.cssWidth;
+          x += spacing
+        ) {
+          context.moveTo(x, 0);
+          context.lineTo(x, this.cssHeight);
+        }
+        for (
+          let y = 0.5;
+          y <= this.cssHeight;
+          y += spacing
+        ) {
+          context.moveTo(0, y);
+          context.lineTo(this.cssWidth, y);
+        }
+        context.strokeStyle = color;
+        context.stroke();
+      }
+    }
+
+    drawCanvasWire(context, record) {
+      if (!record || record.hidden === true) return;
+      const inverseScale =
+        1 / Math.max(0.0001, this.camera.scale);
+      traceCanvasCurve(context, record.curve);
+      context.setLineDash([]);
+      context.lineCap = "round";
+      context.lineJoin = "round";
+      context.strokeStyle = "rgba(0,0,0,0.20)";
+      context.lineWidth = 14 * inverseScale;
+      context.stroke();
+      traceCanvasCurve(context, record.curve);
+      context.strokeStyle =
+        record.targetState === "invalid"
+          ? "#ff5e73"
+          : record.targetState === "valid"
+            ? "#61d99b"
+            : String(record.color || "#9da8b4");
+      context.lineWidth =
+        (record.selected ? 6 : 4) * inverseScale;
+      if (record.impulse === true) {
+        context.setLineDash([
+          10 * inverseScale,
+          7 * inverseScale
+        ]);
+      }
+      context.stroke();
+      context.setLineDash([]);
+    }
+
+    drawCanvasNode(context, record) {
+      const width = record.right - record.left;
+      const height = record.bottom - record.top;
+      const inverseScale =
+        1 / Math.max(0.0001, this.camera.scale);
+      roundedCanvasRectangle(
+        context,
+        record.left,
+        record.top,
+        width,
+        height,
+        10
+      );
+      context.fillStyle =
+        record.configuration === true
+          ? "#101c27"
+          : "#13171f";
+      context.fill();
+      context.save();
+      roundedCanvasRectangle(
+        context,
+        record.left,
+        record.top,
+        width,
+        height,
+        10
+      );
+      context.clip();
+      const headerHeight = Math.min(45, height);
+      const gradient = context.createLinearGradient(
+        0,
+        record.top,
+        0,
+        record.top + headerHeight
+      );
+      gradient.addColorStop(0, "#222b36");
+      gradient.addColorStop(1, "#171d25");
+      context.fillStyle = gradient;
+      context.fillRect(
+        record.left,
+        record.top,
+        width,
+        headerHeight
+      );
+      context.strokeStyle = "#2a343f";
+      context.lineWidth = inverseScale;
+      context.beginPath();
+      context.moveTo(
+        record.left,
+        record.top + headerHeight
+      );
+      context.lineTo(
+        record.right,
+        record.top + headerHeight
+      );
+      context.stroke();
+      context.restore();
+      roundedCanvasRectangle(
+        context,
+        record.left,
+        record.top,
+        width,
+        height,
+        10
+      );
+      context.strokeStyle =
+        record.selected === true
+          ? "#70cfff"
+          : record.configuration === true
+            ? "#58bfff"
+            : "#34414f";
+      context.lineWidth =
+        (record.selected ? 2 : 1) * inverseScale;
+      context.stroke();
+
+      if (this.camera.scale < 0.055) return;
+      context.save();
+      roundedCanvasRectangle(
+        context,
+        record.left,
+        record.top,
+        width,
+        height,
+        10
+      );
+      context.clip();
+      context.fillStyle = "#eff7ff";
+      context.textBaseline = "top";
+      context.font =
+        "600 14px Inter, Segoe UI, sans-serif";
+      context.fillText(
+        record.title || "",
+        record.left + 12,
+        record.top + 8,
+        Math.max(1, width - 24)
+      );
+      if (record.subtitle && headerHeight >= 42) {
+        context.fillStyle = "#adbecf";
+        context.font =
+          "500 10px Inter, Segoe UI, sans-serif";
+        context.fillText(
+          record.subtitle,
+          record.left + 12,
+          record.top + 27,
+          Math.max(1, width - 24)
+        );
+      }
+      context.restore();
+    }
+
+    draw() {
+      const context = this.context2d;
+      if (
+        !context ||
+        !this.available ||
+        !this.viewport ||
+        this.disposed
+      ) {
+        return false;
+      }
+      const started = performance.now();
+      this.prepareVisibleInstances();
+      this.drawCanvasGrid(context);
+      context.save();
+      context.setTransform(
+        this.pixelRatio * this.camera.scale,
+        0,
+        0,
+        this.pixelRatio * this.camera.scale,
+        this.pixelRatio * this.camera.x,
+        this.pixelRatio * this.camera.y
+      );
+      for (const record of this.visibleWireRecords) {
+        this.drawCanvasWire(context, record);
+      }
+      if (this.previewSegment) {
+        const preview = this.prepareWireRecord(
+          this.previewSegment
+        );
+        preview.selected = true;
+        this.drawCanvasWire(context, preview);
+      }
+      for (const record of this.visibleNodeRecords) {
+        this.drawCanvasNode(context, record);
+      }
+      context.restore();
+      this.stats.drawCalls = 1;
+      this.stats.curveSteps = 0;
+      const elapsed = performance.now() - started;
+      this.drawSamples += 1;
+      this.stats.lastDrawMilliseconds = elapsed;
+      this.stats.maximumDrawMilliseconds = Math.max(
+        this.stats.maximumDrawMilliseconds,
+        elapsed
+      );
+      this.stats.averageDrawMilliseconds +=
+        (elapsed - this.stats.averageDrawMilliseconds) /
+        this.drawSamples;
+      this.drawLabelOverlay();
+      return true;
+    }
+
+    whenSubmittedWorkDone() {
+      return Promise.resolve(
+        Boolean(
+          this.context2d &&
+          this.available &&
+          !this.disposed
+        )
+      );
     }
   }
 
@@ -4397,6 +5131,34 @@
         );
         this.deleteGpuResources();
         return this.confirmFallback();
+      }
+    }
+
+    resize() {
+      const changed = super.resize();
+      if (
+        changed &&
+        this.gpuBuffers
+      ) {
+        this.invalidateGpuCulling();
+      }
+      return changed;
+    }
+
+    setCamera(camera = {}) {
+      const previousX = this.camera.x;
+      const previousY = this.camera.y;
+      const previousScale = this.camera.scale;
+      super.setCamera(camera);
+      if (
+        this.gpuBuffers &&
+        (
+          this.camera.x !== previousX ||
+          this.camera.y !== previousY ||
+          this.camera.scale !== previousScale
+        )
+      ) {
+        this.invalidateGpuCulling();
       }
     }
 
@@ -4823,7 +5585,7 @@
               );
               output.edgePixels = side * extrusion * scene.scale;
               output.coreHalfPixels = max(0.05, 2.0 * scene.scale);
-              output.distance = t * wireValue(instance, 14u);
+              output.distance = t * wireValue(instance, 14u) * scene.scale;
               output.dash = wireValue(instance, 13u);
               output.style = wireValue(instance, 12u);
               return output;
@@ -5213,7 +5975,9 @@
         indexComplete: false,
         index: new Map(),
         overflow: [],
-        spatialKeys: new Array(records.length),
+        spatialKeys: isWire
+          ? new Array(records.length)
+          : null,
         workMilliseconds: 0
       };
       task.promise = new Promise((resolve, reject) => {
@@ -5307,13 +6071,14 @@
                   );
               }
             } else {
-              task.spatialKeys[task.position] =
-                addToSpatialIndex(
-                  task.index,
-                  record,
-                  NODE_CELL_SIZE,
-                  record
-                );
+              addToSpatialIndex(
+                task.index,
+                record,
+                NODE_CELL_SIZE,
+                record,
+                0,
+                false
+              );
             }
             task.position += 1;
             processed += 1;
@@ -5341,8 +6106,8 @@
           )
         ) {
           const index = task.commitPosition;
-          records[index].spatialKeys = task.spatialKeys[index];
           if (isWire) {
+            records[index].spatialKeys = task.spatialKeys[index];
             records[index].spatialOverflow =
               task.spatialKeys[index] === null;
           }
@@ -5759,6 +6524,11 @@
           this.gpuPipelines.wire,
           buffers.wireVisible
         );
+      this.gpuBindGroups.wireMaster =
+        renderGroup(
+          this.gpuPipelines.wire,
+          buffers.wireMaster
+        );
       this.gpuBindGroups.preview =
         renderGroup(
           this.gpuPipelines.wire,
@@ -5798,7 +6568,10 @@
     ) {
       return geometryReused
         ? previous.length
-        : 0;
+        : approximateCubicLength(
+            curve,
+            12
+          );
     }
 
     rebuildNodeBuffers() {
@@ -6335,6 +7108,7 @@
       ) {
         return false;
       }
+      this.resize();
       const started = performance.now();
       const device = this.gpuDevice;
       const viewportBounds = this.viewportGraphBounds(
@@ -6475,11 +7249,11 @@
         );
         render.setBindGroup(
           0,
-          this.gpuBindGroups.wire
+          this.gpuBindGroups.wireMaster
         );
-        render.drawIndirect(
-          this.gpuBuffers.wireIndirect,
-          0
+        render.draw(
+          (curveSteps + 1) * 2,
+          this.wireRecords.length
         );
         drawCalls += 1;
       }
@@ -6522,7 +7296,7 @@
       this.stats.culledSegments = null;
       this.stats.culledNodes = null;
       this.stats.gpuSubmittedSegments =
-        this.gpuWireCandidateCount;
+        this.wireRecords.length;
       this.stats.gpuSubmittedNodes =
         this.gpuNodeCandidateCount;
       this.stats.gpuMasterSegments =
@@ -6540,6 +7314,7 @@
       this.stats.averageDrawMilliseconds +=
         (elapsed - this.stats.averageDrawMilliseconds) /
         this.drawSamples;
+      this.drawLabelOverlay();
       return true;
     }
 
@@ -6722,7 +7497,7 @@
       normalizeRendererBackend(value);
     if (!normalized) {
       throw new TypeError(
-        "Unknown graph renderer backend. Use auto, wgsl, glsl or svg."
+        "Unknown graph renderer backend. Use auto, wgsl, glsl, canvas2d or svg."
       );
     }
     rendererBackendPreference = normalized;
@@ -6751,7 +7526,20 @@
         setBackend: setRendererBackend,
         create(options) {
           if (
+            rendererBackendPreference ===
+              "canvas2d"
+          ) {
+            const renderer =
+              new GraphCanvas2DRenderer(options);
+            activeRendererBackend =
+              renderer.available
+                ? "canvas2d"
+                : "svg-fallback";
+            return renderer;
+          }
+          if (
             rendererBackendPreference !== "glsl" &&
+            rendererBackendPreference !== "canvas2d" &&
             rendererBackendPreference !== "svg" &&
             !rendererBackendTemporarilyUnavailable("webgpu-wgsl") &&
             webGpuRuntime.device
@@ -6768,7 +7556,7 @@
             }
             renderer.dispose();
           }
-          const renderer =
+          let renderer =
             new GraphHybridRenderer(
               rendererBackendPreference === "svg" ||
                 rendererBackendTemporarilyUnavailable("webgl2-glsl")
@@ -6781,11 +7569,19 @@
                 : {
                     ...options,
                     backendKind: "webgl2-glsl"
-                  }
+                }
             );
+          if (
+            renderer.available !== true &&
+            rendererBackendPreference !== "svg"
+          ) {
+            renderer.dispose();
+            renderer =
+              new GraphCanvas2DRenderer(options);
+          }
           activeRendererBackend =
             renderer.available
-              ? "webgl2-glsl"
+              ? renderer.backendKind
               : "svg-fallback";
           return renderer;
         }

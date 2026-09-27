@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
+    "1.21.76-custom-csharp-catalog-provenance";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 2;
@@ -314,7 +314,6 @@
     if (
       definition?.catalogGenerated !== true ||
       definition?.customCSharpCatalogNode !== true ||
-      contract?.catalogSource !== "scanner" ||
       !String(
         contract?.catalogFingerprint || ""
       ).trim()
@@ -2686,6 +2685,21 @@
     lease,
     options = {}
   ) {
+    const signal = options?.signal || null;
+    const assertNotCancelled = action => {
+      if (!signal?.aborted) return;
+      if (signal.reason instanceof Error) {
+        throw signal.reason;
+      }
+      const error = new Error(
+        `The catalog factory rebuild was cancelled before ${String(action || "completion")}.`
+      );
+      error.name = "AbortError";
+      error.code =
+        "RML_CATALOG_FACTORY_ABORTED";
+      throw error;
+    };
+    assertNotCancelled("it started");
     assertFactoryOperationLease(
       lease,
       "starting a catalog factory rebuild"
@@ -2823,6 +2837,9 @@
         false,
         stagedCatalogProjectionRevision
       );
+      assertNotCancelled(
+        "publishing its staged definitions"
+      );
       let stagedCatalogProjectionIndex =
         catalogProjectionIndexByReport.get(
           report
@@ -2858,6 +2875,9 @@
         lease,
         "committing the rebuilt catalog factory"
       );
+      assertNotCancelled(
+        "committing its staged definitions"
+      );
 
       const generatedDefinitions =
         Object.entries(
@@ -2875,21 +2895,6 @@
           id,
           definition
         );
-        const current =
-          definitions[id];
-        if (
-          current
-            ?.unavailableApiContract ===
-              true &&
-          !placeholderMatchesGeneratedContract(
-            current,
-            definition
-          )
-        ) {
-          throw new Error(
-            `Live API node '${id}' does not exactly match the preserved portable contract. The unavailable placeholder was retained.`
-          );
-        }
       }
       stagedCatalogProjectionIndex =
         completeCatalogProjectionIndex(
@@ -3151,6 +3156,9 @@
         );
       }
       await yieldToBrowser();
+      assertNotCancelled(
+        "announcing its completed publication"
+      );
       window.dispatchEvent(
         new CustomEvent(
           "rml-api-node-factory-ready",
@@ -3512,6 +3520,20 @@
     const enumRows = Array.isArray(catalog.enums)
       ? catalog.enums.filter(Boolean)
       : [];
+    const demandRequiredOperatorIds =
+      catalog.catalogDemandPartial === true &&
+      Array.isArray(
+        catalog.catalogDemandRequiredOperatorIds
+      ) &&
+      catalog.catalogDemandRequiredOperatorIds.length > 0
+        ? new Set(
+            catalog.catalogDemandRequiredOperatorIds
+              .map(value =>
+                String(value || "").trim()
+              )
+              .filter(Boolean)
+          )
+        : null;
     const definitions = getNodeDefinitions();
     const typeByName = new Map();
     const genericTypeRowsByShape = new Map();
@@ -4230,6 +4252,12 @@
       }
       const csType = normalizeCsType(row.fullName);
       const id = `api.type.${stableHash(csType)}`;
+      if (
+        demandRequiredOperatorIds &&
+        !demandRequiredOperatorIds.has(id)
+      ) {
+        continue;
+      }
       registerGeneratedNode(id, withReloadContract({
         title: `${row.kind === "enum" ? "Enum type" : "Type"} · ${displayTypeName(row)}`,
         group: groupForType(row, API_GROUPS.types),
@@ -4320,10 +4348,14 @@
       enumNodeCount += 1;
     }
 
-    const eventTemplate = findDefinitionByTitle(
-      definitions,
-      title => /subscribe\b.*\bevent/i.test(title)
-    );
+    const eventTemplateDefinition =
+      definitions["lifecycle.subscribeEvent"];
+    const eventTemplate = eventTemplateDefinition
+      ? [
+          "lifecycle.subscribeEvent",
+          eventTemplateDefinition
+        ]
+      : null;
 
     for (const owner of typeRows) {
       if ((cooperativeWork += 1) % 12 === 0) {
@@ -7397,6 +7429,7 @@
         !row ||
         row.isPublic === false ||
         row.isByRefLike === true ||
+        row.isGeneric === true ||
         !row.fullName
       ) return false;
       if (row.isObsolete || row.isLegacyNamed) return false;

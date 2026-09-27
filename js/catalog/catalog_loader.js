@@ -2,19 +2,28 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
-  const LOADER_VERSION = 85;
+    "1.21.76-custom-csharp-catalog-provenance";
+  const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
-  const DEFAULT_PORT_LAST = 42729;
+  const DEFAULT_PORT_LAST = 42725;
   const CATALOG_PATH = "/resonite_api_catalog.json";
-  const HEALTH_PATH = "/health";
-  const CATALOG_READY_TIMEOUT_MS = 16000;
-  const CATALOG_TRANSFER_TIMEOUT_MS = 30000;
+  const BUILDER_SCANNER_CATALOG_PATH =
+    "/rml-scanner-catalog";
+  const BUILDER_SCANNER_DEMAND_PATH =
+    "/rml-scanner-demand";
+  const SCANNER_HEALTH_SWEEP_TIMEOUT_MS = 1500;
+  const CATALOG_TRANSFER_TIMEOUT_MS = 120000;
   const CACHE_DATABASE_NAME =
     "rml-resonite-api-catalog";
-  const CACHE_DATABASE_VERSION = 1;
+  const CACHE_DATABASE_VERSION = 3;
   const CACHE_STORE_NAME = "catalogs";
+  const STREAM_DEMAND_OPERATOR_OWNER_INDEX =
+    "stream-demand-operator-owner";
   const CACHE_RECORD_KEY = "latest-live";
+  const CACHE_OPEN_TIMEOUT_MS = 3000;
+  const CACHE_REQUEST_TIMEOUT_MS = 5000;
+  const CACHE_TRANSACTION_TIMEOUT_MS = 10000;
+  const CACHE_LOCK_ACQUIRE_TIMEOUT_MS = 1000;
   const KNOWN_SCANNER_URL_STORAGE_KEY =
     "rml-resonite-api-last-scanner-url";
   const REQUIRED_CATALOG_SCHEMA_VERSION = 8;
@@ -47,10 +56,13 @@
   const CACHE_CHUNK_MAX_DEPTH = 128;
   const CACHE_CHUNK_MAX_CONTAINER_ENTRIES =
     5_000_000;
+  const CATALOG_DEMAND_CHUNK_CACHE_LIMIT = 8;
   const CACHE_MANIFEST_MAX_BYTES =
     4 * 1024 * 1024;
   const CACHE_STAGING_RECORD_KEY =
     "catalog-chunk-staging";
+  const CACHE_WRITE_LOCK_NAME =
+    "rml-resonite-api-catalog-write-v1";
   const CACHE_ACTIVE_RECORD_KEY =
     "catalog-chunk-active";
   const DEMAND_CACHE_MANIFEST_KEY =
@@ -60,6 +72,71 @@
   const DEMAND_CACHE_SCHEMA_VERSION = 3;
   const DEMAND_CACHE_MANIFEST_MAX_BYTES =
     32 * 1024 * 1024;
+  const STREAM_DEMAND_PROTOCOL =
+    "rml-catalog-demand-v1";
+  const STREAM_DEMAND_PROTOCOL_VERSION = 1;
+  const LEGACY_STREAM_DEMAND_CACHE_FORMAT =
+    "rml-catalog-demand-records-v2";
+  const LEGACY_STREAM_DEMAND_CACHE_SCHEMA_VERSION = 2;
+  const STREAM_DEMAND_CACHE_FORMAT =
+    "rml-catalog-demand-records-v3";
+  const STREAM_DEMAND_CACHE_SCHEMA_VERSION = 3;
+  const STREAM_DEMAND_ACTIVE_KEY =
+    "catalog-demand-stream-active";
+  const STREAM_DEMAND_STAGING_KEY =
+    "catalog-demand-stream-staging";
+  const STREAM_DEMAND_KEY_PREFIX =
+    "catalog-demand-stream:";
+  const STREAM_DEMAND_MAX_LINE_BYTES =
+    1024 * 1024;
+  const STREAM_DEMAND_MAX_TOTAL_BYTES =
+    1024 * 1024 * 1024;
+  const STREAM_DEMAND_MAX_RECORDS =
+    5_000_000;
+  const STREAM_DEMAND_MAX_JSON_DEPTH = 32;
+  const STREAM_DEMAND_MAX_JSON_NODES = 250_000;
+  const STREAM_DEMAND_TRANSFER_TIMEOUT_MS =
+    10 * 60 * 1000;
+  const STREAM_DEMAND_BATCH_RECORDS = 256;
+  const STREAM_DEMAND_INGEST_BATCH_RECORDS =
+    1024;
+  const STREAM_DEMAND_BATCH_BYTES =
+    1024 * 1024;
+  const STREAM_DEMAND_CACHE_PREPARE_CONCURRENCY = 8;
+  const STREAM_DEMAND_OWNER_CHUNK_RECORDS = 128;
+  const STREAM_DEMAND_OWNER_CHUNK_BYTES =
+    256 * 1024;
+  const STREAM_DEMAND_OWNER_PAYLOAD_ENCODING =
+    "gzip-json-v1";
+  const STREAM_DEMAND_OWNER_IDENTITY_ENCODING =
+    "identity-json-v1";
+  const STREAM_DEMAND_OWNER_STORAGE_ENCODING =
+    "binary-owner-payload-v1";
+  const STREAM_DEMAND_OWNER_PAYLOAD_VERSION = 1;
+  const STREAM_DEMAND_OWNER_PAYLOAD_HASH_ALGORITHM =
+    "sha256-uncompressed-json-v1";
+  const STREAM_DEMAND_OWNER_PAYLOAD_MAX_BYTES =
+    STREAM_DEMAND_MAX_LINE_BYTES + 64 * 1024;
+  const STREAM_DEMAND_OWNER_COMPRESSED_MAX_BYTES =
+    STREAM_DEMAND_OWNER_PAYLOAD_MAX_BYTES +
+      64 * 1024;
+  const STREAM_DEMAND_OWNER_GZIP_MIN_BYTES =
+    32 * 1024;
+  const STREAM_DEMAND_OPERATOR_HASH_PREFIX_LENGTH = 3;
+  const STREAM_DEMAND_OPERATOR_SHARD_RECORDS = 128;
+  const STREAM_DEMAND_OPERATOR_SHARD_BYTES =
+    256 * 1024;
+  const STREAM_DEMAND_OPERATOR_READ_RECORDS = 64;
+  const STREAM_DEMAND_COMPACTION_WRITE_BYTES =
+    128 * 1024;
+  const STREAM_DEMAND_PALETTE_SHARD_RECORDS = 128;
+  const STREAM_DEMAND_PALETTE_SHARD_BYTES =
+    128 * 1024;
+  const STREAM_DEMAND_TRANSIENT_FLUSH_BYTES =
+    2 * 1024 * 1024;
+  const STREAM_DEMAND_QUERY_LIMIT = 240;
+  const STREAM_DEMAND_EPHEMERAL_OWNER_CAP = 32;
+  const STREAM_DEMAND_DEPENDENCY_OWNER_CAP = 2048;
   const REQUIRED_API_FACTORY_VERSION = 38;
   const REQUIRED_API_VERIFICATION_SCHEMA_VERSION = 3;
 
@@ -71,11 +148,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=85-contextual-csharp-api",
+    "../compiler/visual_csharp.js?v=1.21.76-custom-csharp-catalog-provenance",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.24-contextual-csharp-api",
+    "api_nodes.js?v=1.21.76-custom-csharp-catalog-provenance",
     scriptUrl
   ).href;
 
@@ -197,19 +274,16 @@
 
     if (
       !/^[a-f0-9]{64}$/.test(fingerprint) ||
-      version !==
-        REQUIRED_SCANNER_FINGERPRINT_VERSION ||
-      algorithm !==
-        REQUIRED_SCANNER_FINGERPRINT_ALGORITHM ||
+      !Number.isInteger(version) ||
+      version < 1 ||
+      !algorithm ||
       !Number.isInteger(schemaVersion) ||
-      schemaVersion <
-        REQUIRED_CATALOG_SCHEMA_VERSION ||
+      schemaVersion < 1 ||
       !scannerVersion ||
       !Number.isInteger(
         methodIdentityVersion
       ) ||
-      methodIdentityVersion <
-        REQUIRED_METHOD_IDENTITY_VERSION ||
+      methodIdentityVersion < 1 ||
       !methodIdentityAlgorithm
     ) {
       return null;
@@ -227,7 +301,16 @@
       reloadSafetyPolicy,
       reloadSafetyMinimumReaderVersion,
       reloadSafetyMaximumReaderVersion,
-      reloadSafetyCompatible
+      reloadSafetyCompatible,
+      readerCompatible:
+        version ===
+          REQUIRED_SCANNER_FINGERPRINT_VERSION &&
+        algorithm ===
+          REQUIRED_SCANNER_FINGERPRINT_ALGORITHM &&
+        schemaVersion >=
+          REQUIRED_CATALOG_SCHEMA_VERSION &&
+        methodIdentityVersion >=
+          REQUIRED_METHOD_IDENTITY_VERSION
     });
   }
 
@@ -727,13 +810,21 @@
   }
 
   function catalogTypes(raw) {
-    return Array.isArray(raw?.types)
-      ? raw.types.filter(
-          value =>
-            value &&
-            typeof value === "object"
-        )
-      : [];
+    const values = raw?.types;
+    if (!Array.isArray(values)) return [];
+    for (const value of values) {
+      if (
+        !value ||
+        typeof value !== "object"
+      ) {
+        return values.filter(
+          candidate =>
+            candidate &&
+            typeof candidate === "object"
+        );
+      }
+    }
+    return values;
   }
 
   function normalizeCatalog(
@@ -1287,7 +1378,15 @@
   }
 
   let scannerCheckPromise = null;
-  let scannerCheckGeneration = -1;
+  let scannerCheckGeneration = "";
+  let scannerCheckWorkSession = 0;
+  let scannerCheckMismatchSessionKey = "";
+  let scannerCheckPresentedSessionKey = "";
+  let scannerCheckRejectedSessionKey = "";
+  let scannerCheckAbortController = null;
+  let activeBuilderCatalogSessionKey = "";
+  let catalogHealthSweepSequence = 0;
+  let latestCatalogHealthSweepDiagnostics = null;
   let cachedCatalogRecord = null;
   let cachedCatalogStatus = null;
   let catalogAvailabilityKnown = false;
@@ -1306,6 +1405,10 @@
       contentHash: "",
       catalogFingerprint: ""
     });
+  let catalogStreamDemandManifest = null;
+  let catalogStreamDemandIngestPromise = null;
+  let catalogStreamDemandIngestKey = "";
+  let catalogStreamDemandIngestController = null;
   let lastScannerFingerprintSync =
     Object.freeze({
       liveReached: false,
@@ -1315,11 +1418,143 @@
       fingerprint: ""
     });
 
+  function catalogDemandDiagnosticTime() {
+    const now = globalThis.performance?.now?.();
+    return Number.isFinite(now)
+      ? Number(now)
+      : Date.now();
+  }
+
+  function publishCatalogDemandDiagnostics(
+    value
+  ) {
+    const timings = Object.freeze(
+      Object.fromEntries(
+        Object.entries(value?.timings || {})
+          .map(([name, milliseconds]) => [
+            name,
+            Math.max(
+              0,
+              Math.round(
+                (Number(milliseconds) || 0) *
+                  10
+              ) / 10
+            )
+          ])
+      )
+    );
+    const snapshot = Object.freeze({
+      version: 1,
+      status: String(value?.status || "running"),
+      phase: String(value?.phase || "request"),
+      generation: String(
+        value?.generation || ""
+      ).slice(0, 96),
+      recordCount: Math.max(
+        0,
+        Number(value?.recordCount) || 0
+      ),
+      totalBytes: Math.max(
+        0,
+        Number(value?.totalBytes) || 0
+      ),
+      ownerCount: Math.max(
+        0,
+        Number(value?.ownerCount) || 0
+      ),
+      operatorCount: Math.max(
+        0,
+        Number(value?.operatorCount) || 0
+      ),
+      ownerChunkCount: Math.max(
+        0,
+        Number(value?.ownerChunkCount) || 0
+      ),
+      paletteShardCount: Math.max(
+        0,
+        Number(value?.paletteShardCount) || 0
+      ),
+      gzipPayloadCount: Math.max(
+        0,
+        Number(value?.gzipPayloadCount) || 0
+      ),
+      identityPayloadCount: Math.max(
+        0,
+        Number(value?.identityPayloadCount) || 0
+      ),
+      hashCount: Math.max(
+        0,
+        Number(value?.hashCount) || 0
+      ),
+      transactionCount: Math.max(
+        0,
+        Number(value?.transactionCount) || 0
+      ),
+      error: String(value?.error || "")
+        .slice(0, 240),
+      timings
+    });
+    try {
+      Object.defineProperty(
+        window,
+        "RMLCatalogDemandDiagnostics",
+        {
+          configurable: true,
+          enumerable: false,
+          writable: false,
+          value: snapshot
+        }
+      );
+    } catch {}
+    try {
+      document.documentElement.dataset
+        .rmlCatalogDemandDiagnostics =
+          JSON.stringify(snapshot);
+    } catch {}
+    return snapshot;
+  }
+
   function statusCatalog() {
     return (
       window.RMLResoniteApiCatalog ||
       window.RMLFrooxComponentCatalog ||
       null
+    );
+  }
+
+  function verifiedLiveRuntimeCatalog(
+    _catalog,
+    _report
+  ) {
+    const selectedSession =
+      window.RMLScannerHealthSession;
+    const connection =
+      window.RMLRuntimeBridge
+        ?.getConnectionState?.();
+    const selectedHealth =
+      selectedSession?.health;
+    const connectionHealth =
+      connection?.health;
+    return Boolean(
+      selectedSession &&
+      selectedHealth?.ok === true &&
+      selectedHealth.runtimeBridgeReady ===
+        true &&
+      Number(
+        selectedHealth.runtimeBridgeVersion
+      ) === 1 &&
+      connection?.mode === "live" &&
+      connectionHealth?.ok === true &&
+      connectionHealth.runtimeBridgeReady ===
+        true &&
+      Number(
+        connectionHealth.runtimeBridgeVersion
+      ) === 1 &&
+      String(
+        connection.scannerBaseUrl || ""
+      ) === String(
+        selectedSession.scannerBaseUrl || ""
+      )
     );
   }
 
@@ -1333,14 +1568,9 @@
       return;
     }
 
-    const connection =
-      window.RMLRuntimeBridge
-        ?.getConnectionState?.() ||
-      null;
-
     if (
-      connection?.mode === "checking" ||
-      connection?.mode === "live"
+      element.dataset.source === "updating" &&
+      element.getAttribute("aria-busy") === "true"
     ) {
       return;
     }
@@ -1348,6 +1578,32 @@
     const catalog =
       statusCatalog() ||
       cachedCatalogStatus;
+    const report =
+      window.RMLApiNodeFactoryReport;
+    const live =
+      verifiedLiveRuntimeCatalog(
+        catalog,
+        report
+      );
+
+    if (live) {
+      element.dataset.source = "scanner";
+      element.textContent =
+        "Resonite API · Live";
+      element.setAttribute(
+        "aria-pressed",
+        "true"
+      );
+      element.setAttribute(
+        "aria-busy",
+        "false"
+      );
+      element.setAttribute(
+        "aria-label",
+        element.textContent
+      );
+      return;
+    }
 
     if (
       catalogAvailabilityKnown &&
@@ -1363,6 +1619,8 @@
         "aria-label",
         window.RMLI18n.t("{{i18n:index.text.87602dd154de}}")
       );
+      element.setAttribute("aria-pressed", "false");
+      element.setAttribute("aria-busy", "false");
       return;
     }
     if (!catalog) {
@@ -1377,12 +1635,22 @@
         "aria-label",
         window.RMLI18n.t("{{i18n:index.text.87602dd154de}}")
       );
+      element.setAttribute("aria-pressed", "false");
+      element.setAttribute("aria-busy", "false");
       return;
     }
 
     element.dataset.source = "cache";
     element.textContent =
       window.RMLI18n.t("{{i18n:js.presentation.925dcc9e0d7e}}");
+    element.setAttribute(
+      "aria-pressed",
+      "false"
+    );
+    element.setAttribute(
+      "aria-busy",
+      "false"
+    );
 
     element.setAttribute(
       "aria-label",
@@ -1421,6 +1689,69 @@
     );
   }
 
+  function catalogAbortError(
+    signal,
+    label = "The catalog operation"
+  ) {
+    if (signal?.reason instanceof Error) {
+      return signal.reason;
+    }
+    const error = new Error(
+      `${String(label || "The catalog operation")} was cancelled before it completed.`
+    );
+    error.name = "AbortError";
+    error.code = "RML_CATALOG_OPERATION_ABORTED";
+    return error;
+  }
+
+  function awaitCatalogSettlement(
+    operation,
+    signal = null,
+    label = "The catalog operation"
+  ) {
+    const pending = Promise.resolve(operation);
+    if (!signal) return pending;
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener?.(
+          "abort",
+          onAbort
+        );
+        callback(value);
+      };
+      const onAbort = () => {
+        pending.catch(error => {
+          console.error(
+            `[RML BUILDER INTERNAL FAILURE] ${String(label)} failed after it was cancelled.`,
+            error
+          );
+        });
+        finish(
+          reject,
+          catalogAbortError(signal, label)
+        );
+      };
+
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        onAbort,
+        { once: true }
+      );
+      pending.then(
+        value => finish(resolve, value),
+        error => finish(reject, error)
+      );
+    });
+  }
+
   async function fetchJson(url, timeoutMs, signal = null) {
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -1429,8 +1760,17 @@
     const timeout = Number(timeoutMs) > 0
       ? window.setTimeout(abort, Number(timeoutMs)) : 0;
     try {
-      const response = await fetch(url, { cache: "no-store", mode: "cors",
-        credentials: "omit", redirect: "error", signal: controller.signal,
+      const requestUrl = new URL(
+        url,
+        window.location.href
+      );
+      const sameOrigin =
+        requestUrl.origin ===
+        window.location.origin;
+      const response = await fetch(requestUrl.href, { cache: "no-store",
+        mode: sameOrigin ? "same-origin" : "cors",
+        credentials: sameOrigin ? "same-origin" : "omit",
+        redirect: "error", signal: controller.signal,
         headers: { Accept: "application/json" } });
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       const value = await response.json();
@@ -1506,13 +1846,13 @@
     }
 
     if (
-      fingerprint !==
-        String(live?.fingerprint || "")
-          .trim()
-          .toLowerCase()
+      live?.fingerprint &&
+      String(live.fingerprint)
+        .trim()
+        .toLowerCase() !== fingerprint
     ) {
       throw new Error(
-        window.RMLI18n.t("ui.literal.d449d34b5f6e")
+        "The scanner catalog changed while it was being transferred. The current cache remains active and the new revision will be requested again."
       );
     }
 
@@ -1531,43 +1871,105 @@
           return;
         }
 
+        let settled = false;
         const request =
           window.indexedDB.open(
             CACHE_DATABASE_NAME,
             CACHE_DATABASE_VERSION
           );
+        const finish = (callback, value) => {
+          if (settled) {
+            if (
+              callback === resolve &&
+              value &&
+              typeof value.close === "function"
+            ) {
+              value.close();
+            }
+            return;
+          }
+          settled = true;
+          window.clearTimeout(timeout);
+          callback(value);
+        };
+        const timeout = window.setTimeout(
+          () => finish(
+            reject,
+            new Error(
+              "The local catalog cache did not open in time; the Builder will continue without waiting for it."
+            )
+          ),
+          CACHE_OPEN_TIMEOUT_MS
+        );
 
         request.onupgradeneeded =
           () => {
             const database =
               request.result;
-
+            let store;
             if (
               !database.objectStoreNames
                 .contains(
                   CACHE_STORE_NAME
                 )
             ) {
-              database.createObjectStore(
+              store = database.createObjectStore(
                 CACHE_STORE_NAME,
                 { keyPath: "id" }
+              );
+            } else {
+              store = request.transaction
+                .objectStore(
+                  CACHE_STORE_NAME
+                );
+            }
+            if (
+              store &&
+              store.indexNames.contains(
+                "stream-demand-operator-stage"
+              )
+            ) {
+              store.deleteIndex(
+                "stream-demand-operator-stage"
+              );
+            }
+            if (
+              store &&
+              !store.indexNames.contains(
+                STREAM_DEMAND_OPERATOR_OWNER_INDEX
+              )
+            ) {
+              store.createIndex(
+                STREAM_DEMAND_OPERATOR_OWNER_INDEX,
+                "operatorStageKeys",
+                {
+                  unique: true,
+                  multiEntry: true
+                }
               );
             }
           };
 
         request.onsuccess =
-          () => resolve(
-            request.result
-          );
+          () => {
+            request.result.onversionchange =
+              () => request.result.close();
+            finish(
+              resolve,
+              request.result
+            );
+          };
         request.onerror =
-          () => reject(
+          () => finish(
+            reject,
             request.error ||
             new Error(
               window.RMLI18n.t("ui.literal.96ef78a457d3")
             )
           );
         request.onblocked =
-          () => reject(
+          () => finish(
+            reject,
             new Error(
               window.RMLI18n.t("ui.literal.cbb79c27ce96")
             )
@@ -1576,12 +1978,37 @@
     );
   }
 
+  function catalogCacheCapacityFailure(
+    error
+  ) {
+    const messages = [];
+    let current = error;
+    for (
+      let depth = 0;
+      current && depth < 6;
+      depth += 1
+    ) {
+      messages.push(
+        String(
+          current?.name || ""
+        ),
+        String(
+          current?.message || current || ""
+        )
+      );
+      current = current?.cause;
+    }
+    return /FILE_ERROR_NO_SPACE|QuotaExceededError|quota.{0,24}(?:exceed|full)|(?:disk|storage).{0,24}(?:full|space)|no space/i
+      .test(messages.join(" "));
+  }
+
   function readCatalogCacheValue(
     database,
     key
   ) {
     return new Promise(
       (resolve, reject) => {
+        let settled = false;
         const transaction =
           database.transaction(
             CACHE_STORE_NAME,
@@ -1590,17 +2017,97 @@
         const request = transaction
           .objectStore(CACHE_STORE_NAME)
           .get(key);
+        const finish = (callback, value) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeout);
+          callback(value);
+        };
+        const fail = error => finish(
+          reject,
+          error ||
+          new Error(
+            window.RMLI18n.t("ui.literal.0e2d6d316dae")
+          )
+        );
+        const timeout = window.setTimeout(() => {
+          try {
+            transaction.abort();
+          } catch {}
+          fail(new Error(
+            "The local catalog cache did not answer in time; the Builder will continue without waiting for it."
+          ));
+        }, CACHE_REQUEST_TIMEOUT_MS);
         request.onsuccess = () =>
-          resolve(request.result || null);
+          finish(resolve, request.result || null);
         request.onerror = () =>
-          reject(
-            request.error ||
-            new Error(
-              window.RMLI18n.t("ui.literal.0e2d6d316dae")
-            )
-          );
+          fail(request.error);
+        transaction.onerror = () =>
+          fail(transaction.error);
+        transaction.onabort = () =>
+          fail(transaction.error);
       }
     );
+  }
+
+  function waitForCatalogCacheTransaction(
+    transaction,
+    {
+      errorMessage,
+      abortMessage,
+      timeoutMessage,
+      timeoutMs = CACHE_TRANSACTION_TIMEOUT_MS
+    }
+  ) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        callback(value);
+      };
+      const timeout = window.setTimeout(() => {
+        try {
+          transaction.abort();
+        } catch {}
+        finish(
+          reject,
+          new Error(timeoutMessage)
+        );
+      }, Math.max(
+        1,
+        Number(timeoutMs) ||
+          CACHE_TRANSACTION_TIMEOUT_MS
+      ));
+      transaction.oncomplete = () =>
+        finish(resolve, true);
+      transaction.onerror = () =>
+        finish(
+          reject,
+          transaction.error ||
+          new Error(errorMessage)
+        );
+      transaction.onabort = () =>
+        finish(
+          reject,
+          transaction.error ||
+          new Error(abortMessage)
+        );
+    });
+  }
+
+  function catalogCachePersistenceError(
+    error,
+    message
+  ) {
+    const wrapped = new Error(
+      `${String(message || "The local catalog cache could not be persisted.")} ${String(error?.message || error || "")}`.trim(),
+      { cause: error }
+    );
+    wrapped.code =
+      "RML_CATALOG_CACHE_PERSIST_FAILED";
+    return wrapped;
   }
 
   function readCatalogCacheRecord(
@@ -1616,74 +2123,61 @@
     database,
     record
   ) {
-    return new Promise(
-      (resolve, reject) => {
-        const transaction =
-          database.transaction(
-            CACHE_STORE_NAME,
-            "readwrite"
-          );
-        transaction.objectStore(
-          CACHE_STORE_NAME
-        ).put(record);
-        transaction.oncomplete =
-          () => resolve(true);
-        transaction.onerror =
-          () => reject(
-            transaction.error ||
-            new Error(
-              window.RMLI18n.t("ui.literal.b86a898007fb")
-            )
-          );
-        transaction.onabort =
-          () => reject(
-            transaction.error ||
-            new Error(
-              window.RMLI18n.t("ui.literal.a4e8e8baf994")
-            )
-          );
+    const transaction =
+      database.transaction(
+        CACHE_STORE_NAME,
+        "readwrite"
+      );
+    transaction.objectStore(
+      CACHE_STORE_NAME
+    ).put(record);
+    return waitForCatalogCacheTransaction(
+      transaction,
+      {
+        errorMessage:
+          window.RMLI18n.t("ui.literal.b86a898007fb"),
+        abortMessage:
+          window.RMLI18n.t("ui.literal.a4e8e8baf994"),
+        timeoutMessage:
+          "The local catalog cache write stopped responding; the active in-memory catalog remains usable."
       }
-    );
+    ).catch(error => {
+      throw catalogCachePersistenceError(
+        error,
+        "The streamed catalog cache batch could not be written."
+      );
+    });
   }
 
   function commitCatalogCacheManifest(
     database,
     manifest
   ) {
-    return new Promise(
-      (resolve, reject) => {
-        const transaction =
-          database.transaction(
-            CACHE_STORE_NAME,
-            "readwrite"
-          );
-        const store = transaction.objectStore(
-          CACHE_STORE_NAME
-        );
-        store.put(manifest);
-        store.put({
-          id: CACHE_ACTIVE_RECORD_KEY,
-          schemaVersion:
-            CACHE_CHUNK_RECORD_SCHEMA_VERSION,
-          generation: manifest.generation,
-          contentHash: manifest.contentHash
-        });
-        transaction.oncomplete =
-          () => resolve(true);
-        transaction.onerror =
-          () => reject(
-            transaction.error ||
-            new Error(
-              window.RMLI18n.t("ui.literal.4b255e933f18")
-            )
-          );
-        transaction.onabort =
-          () => reject(
-            transaction.error ||
-            new Error(
-              window.RMLI18n.t("ui.literal.dd513fe319e9")
-            )
-          );
+    const transaction =
+      database.transaction(
+        CACHE_STORE_NAME,
+        "readwrite"
+      );
+    const store = transaction.objectStore(
+      CACHE_STORE_NAME
+    );
+    store.put(manifest);
+    store.put({
+      id: CACHE_ACTIVE_RECORD_KEY,
+      schemaVersion:
+        CACHE_CHUNK_RECORD_SCHEMA_VERSION,
+      generation: manifest.generation,
+      contentHash: manifest.contentHash
+    });
+    return waitForCatalogCacheTransaction(
+      transaction,
+      {
+        errorMessage:
+          window.RMLI18n.t("ui.literal.4b255e933f18"),
+        abortMessage:
+          window.RMLI18n.t("ui.literal.dd513fe319e9"),
+        timeoutMessage:
+          "The local catalog cache commit stopped responding; the previous committed cache remains active."
       }
     );
   }
@@ -1695,37 +2189,4328 @@
     if (!Array.isArray(keys) || keys.length === 0) {
       return Promise.resolve(true);
     }
-    return new Promise(
-      (resolve, reject) => {
-        const transaction =
-          database.transaction(
-            CACHE_STORE_NAME,
-            "readwrite"
-          );
-        const store = transaction.objectStore(
-          CACHE_STORE_NAME
-        );
-        for (const key of keys) {
-          store.delete(key);
-        }
-        transaction.oncomplete =
-          () => resolve(true);
-        transaction.onerror =
-          () => reject(
-            transaction.error ||
-            new Error(
-              window.RMLI18n.t("ui.literal.98dc843f8986")
-            )
-          );
-        transaction.onabort =
-          () => reject(
-            transaction.error ||
-            new Error(
-              window.RMLI18n.t("ui.literal.7fb445caf1a2")
-            )
-          );
+    const transaction =
+      database.transaction(
+        CACHE_STORE_NAME,
+        "readwrite"
+      );
+    const store = transaction.objectStore(
+      CACHE_STORE_NAME
+    );
+    for (const key of keys) {
+      store.delete(key);
+    }
+    return waitForCatalogCacheTransaction(
+      transaction,
+      {
+        errorMessage:
+          window.RMLI18n.t("ui.literal.98dc843f8986"),
+        abortMessage:
+          window.RMLI18n.t("ui.literal.7fb445caf1a2"),
+        timeoutMessage:
+          "The local catalog cache cleanup stopped responding; the Builder will continue without waiting for it."
       }
     );
+  }
+
+  function catalogStreamDemandGenerationPrefix(
+    generation
+  ) {
+    return `${STREAM_DEMAND_KEY_PREFIX}${String(generation || "")}:`;
+  }
+
+  function catalogStreamDemandKeyPart(value) {
+    return encodeURIComponent(
+      String(value || "")
+    );
+  }
+
+  function catalogStreamDemandIndexPart(index) {
+    return String(
+      Math.max(0, Number(index) || 0)
+    ).padStart(10, "0");
+  }
+
+  function catalogStreamDemandRecordKey(
+    generation,
+    ...parts
+  ) {
+    return (
+      catalogStreamDemandGenerationPrefix(
+        generation
+      ) +
+      parts.map(
+        catalogStreamDemandKeyPart
+      ).join(":")
+    );
+  }
+
+  function catalogStreamDemandManifestKey(
+    generation
+  ) {
+    return catalogStreamDemandRecordKey(
+      generation,
+      "manifest"
+    );
+  }
+
+  async function storeCatalogCacheBatch(
+    database,
+    entries,
+    metrics = null
+  ) {
+    if (
+      !Array.isArray(entries) ||
+      entries.length === 0
+    ) {
+      return true;
+    }
+    const candidates = entries.filter(
+      entry => Boolean(entry?.value)
+    );
+    const prepared = new Array(
+      candidates.length
+    );
+    let nextIndex = 0;
+    const preparationStarted =
+      catalogDemandDiagnosticTime();
+    const prepareNext = async () => {
+      while (nextIndex < candidates.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        prepared[index] =
+          await prepareCatalogStreamCacheEntryForStorage(
+            candidates[index],
+            metrics
+          );
+      }
+    };
+    await Promise.all(
+      Array.from(
+        {
+          length: Math.min(
+            STREAM_DEMAND_CACHE_PREPARE_CONCURRENCY,
+            candidates.length
+          )
+        },
+        () => prepareNext()
+      )
+    );
+    if (metrics) {
+      metrics.batchPreparationMs =
+        (Number(metrics.batchPreparationMs) || 0) +
+        (
+          catalogDemandDiagnosticTime() -
+          preparationStarted
+        );
+    }
+    const transactionStarted =
+      catalogDemandDiagnosticTime();
+    let transaction;
+    try {
+      transaction = database.transaction(
+        CACHE_STORE_NAME,
+        "readwrite",
+        { durability: "relaxed" }
+      );
+    } catch {
+      transaction = database.transaction(
+        CACHE_STORE_NAME,
+        "readwrite"
+      );
+    }
+    if (metrics) {
+      metrics.transactionCount =
+        (Number(metrics.transactionCount) || 0) + 1;
+    }
+    const store = transaction.objectStore(
+      CACHE_STORE_NAME
+    );
+    for (const entry of prepared) {
+      if (entry.add === true) {
+        store.add(entry.value);
+      } else {
+        store.put(entry.value);
+      }
+    }
+    try {
+      return await waitForCatalogCacheTransaction(
+        transaction,
+        {
+          errorMessage:
+            "The streamed catalog cache batch could not be written.",
+          abortMessage:
+            "The streamed catalog cache batch was rejected.",
+          timeoutMessage:
+            "The streamed catalog cache write stopped responding."
+        }
+      );
+    } finally {
+      if (metrics) {
+        metrics.transactionMs =
+          (Number(metrics.transactionMs) || 0) +
+          (
+            catalogDemandDiagnosticTime() -
+            transactionStarted
+          );
+      }
+    }
+  }
+
+  function readCatalogCachePrefixBatch(
+    database,
+    prefix,
+    afterKey = "",
+    maximumRecords = 8
+  ) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const records = [];
+      let lastKey = "";
+      const transaction = database.transaction(
+        CACHE_STORE_NAME,
+        "readonly"
+      );
+      const store = transaction.objectStore(
+        CACHE_STORE_NAME
+      );
+      const lower = afterKey || prefix;
+      const range = IDBKeyRange.bound(
+        lower,
+        `${prefix}\uffff`,
+        Boolean(afterKey),
+        false
+      );
+      const request = store.openCursor(range);
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        callback(value);
+      };
+      const fail = error => finish(
+        reject,
+        error || transaction.error ||
+          new Error(
+            "The streamed catalog cache prefix batch failed."
+          )
+      );
+      const timeout = window.setTimeout(() => {
+        try {
+          transaction.abort();
+        } catch {}
+        fail(new Error(
+          "The streamed catalog cache prefix batch stopped responding."
+        ));
+      }, CACHE_TRANSACTION_TIMEOUT_MS);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        const key = String(cursor.key || "");
+        if (!key.startsWith(prefix)) {
+          try {
+            transaction.abort();
+          } catch {}
+          fail(new Error(
+            "A streamed catalog cache key escaped its requested prefix."
+          ));
+          return;
+        }
+        records.push(cursor.value);
+        lastKey = key;
+        if (records.length < maximumRecords) {
+          cursor.continue();
+        }
+      };
+      request.onerror = () => fail(request.error);
+      transaction.onerror = () =>
+        fail(transaction.error);
+      transaction.onabort = () =>
+        fail(transaction.error);
+      transaction.oncomplete = () => finish(
+        resolve,
+        { records, lastKey }
+      );
+    });
+  }
+
+  function readCatalogCachePrefix(
+    database,
+    prefix,
+    visit,
+    maximumRecords =
+      STREAM_DEMAND_MAX_RECORDS
+  ) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let visited = 0;
+      const transaction = database.transaction(
+        CACHE_STORE_NAME,
+        "readonly"
+      );
+      const store = transaction.objectStore(
+        CACHE_STORE_NAME
+      );
+      const range = IDBKeyRange.bound(
+        prefix,
+        `${prefix}\uffff`,
+        false,
+        false
+      );
+      const request = store.openCursor(range);
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        callback(value);
+      };
+      const fail = error => finish(
+        reject,
+        error || transaction.error ||
+          new Error(
+            "The streamed catalog cache cursor failed."
+          )
+      );
+      const timeout = window.setTimeout(() => {
+        try {
+          transaction.abort();
+        } catch {}
+        fail(new Error(
+          "The streamed catalog cache cursor stopped responding."
+        ));
+      }, CACHE_TRANSACTION_TIMEOUT_MS);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        visited += 1;
+        if (visited > maximumRecords) {
+          try {
+            transaction.abort();
+          } catch {}
+          fail(new Error(
+            "The streamed catalog cache cursor exceeded its record bound."
+          ));
+          return;
+        }
+        let keepGoing = true;
+        try {
+          keepGoing = visit(
+            cursor.value,
+            visited - 1
+          ) !== false;
+        } catch (error) {
+          try {
+            transaction.abort();
+          } catch {}
+          fail(error);
+          return;
+        }
+        if (keepGoing) {
+          cursor.continue();
+        }
+      };
+      request.onerror = () =>
+        fail(request.error);
+      transaction.onerror = () =>
+        fail(transaction.error);
+      transaction.onabort = () =>
+        fail(transaction.error);
+      transaction.oncomplete = () =>
+        finish(resolve, visited);
+    });
+  }
+
+  async function readCatalogCacheIndexValues(
+    database,
+    indexName,
+    keys
+  ) {
+    const uniqueKeys = [...new Set(
+      (Array.isArray(keys) ? keys : [])
+        .map(String)
+    )];
+    if (uniqueKeys.length === 0) {
+      return new Map();
+    }
+    const primaryKeys = await new Promise((resolve, reject) => {
+      let settled = false;
+      const values = new Map();
+      const transaction = database.transaction(
+        CACHE_STORE_NAME,
+        "readonly"
+      );
+      const store = transaction.objectStore(
+        CACHE_STORE_NAME
+      );
+      const index = store.index(indexName);
+      if (typeof index.getKey !== "function") {
+        reject(new Error(
+          "The browser cannot perform bounded catalog index lookups."
+        ));
+        return;
+      }
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        callback(value);
+      };
+      const fail = error => finish(
+        reject,
+        error || transaction.error ||
+          new Error(
+            "The streamed catalog cache index batch read failed."
+          )
+      );
+      const timeout = window.setTimeout(() => {
+        try {
+          transaction.abort();
+        } catch {}
+        fail(new Error(
+          "The streamed catalog cache index batch read stopped responding."
+        ));
+      }, CACHE_TRANSACTION_TIMEOUT_MS);
+      for (const key of uniqueKeys) {
+        const request = index.getKey(key);
+        request.onsuccess = () => {
+          if (request.result != null) {
+            values.set(
+              key,
+              String(request.result)
+            );
+          }
+        };
+        request.onerror = () =>
+          fail(request.error);
+      }
+      transaction.onerror = () =>
+        fail(transaction.error);
+      transaction.onabort = () =>
+        fail(transaction.error);
+      transaction.oncomplete = () =>
+        finish(resolve, values);
+    });
+    const records = await readCatalogCacheValues(
+      database,
+      [...new Set(primaryKeys.values())]
+    );
+    const values = new Map();
+    for (const [indexKey, primaryKey] of primaryKeys) {
+      const record = records.get(primaryKey);
+      if (record) values.set(indexKey, record);
+    }
+    return values;
+  }
+
+  function readCatalogCacheIndexBatch(
+    database,
+    indexName,
+    prefix,
+    afterKey = "",
+    maximumRecords =
+      STREAM_DEMAND_COMPACTION_READ_RECORDS
+  ) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const records = [];
+      let lastKey = "";
+      const transaction = database.transaction(
+        CACHE_STORE_NAME,
+        "readonly"
+      );
+      const store = transaction.objectStore(
+        CACHE_STORE_NAME
+      );
+      const index = store.index(indexName);
+      const lower = afterKey || prefix;
+      const range = IDBKeyRange.bound(
+        lower,
+        `${prefix}\uffff`,
+        Boolean(afterKey),
+        false
+      );
+      const request = index.openCursor(range);
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        callback(value);
+      };
+      const fail = error => finish(
+        reject,
+        error || transaction.error ||
+          new Error(
+            "The streamed catalog cache index cursor failed."
+          )
+      );
+      const timeout = window.setTimeout(() => {
+        try {
+          transaction.abort();
+        } catch {}
+        fail(new Error(
+          "The streamed catalog cache index cursor stopped responding."
+        ));
+      }, CACHE_TRANSACTION_TIMEOUT_MS);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        const key = String(cursor.key || "");
+        if (!key.startsWith(prefix)) {
+          try {
+            transaction.abort();
+          } catch {}
+          fail(new Error(
+            "A streamed catalog cache index key escaped its generation prefix."
+          ));
+          return;
+        }
+        records.push(cursor.value);
+        lastKey = key;
+        if (records.length < maximumRecords) {
+          cursor.continue();
+        }
+      };
+      request.onerror = () =>
+        fail(request.error);
+      transaction.onerror = () =>
+        fail(transaction.error);
+      transaction.onabort = () =>
+        fail(transaction.error);
+      transaction.oncomplete = () =>
+        finish(resolve, {
+          records,
+          lastKey
+        });
+    });
+  }
+
+  async function deleteCatalogCachePrefixBatches(
+    database,
+    prefix
+  ) {
+    let deleted = 0;
+    let batches = 0;
+    let previousFirstKey = "";
+    while (true) {
+      const keys = [];
+      await readCatalogCachePrefix(
+        database,
+        prefix,
+        record => {
+          const key = String(
+            record?.id || ""
+          );
+          if (!key.startsWith(prefix)) {
+            throw new Error(
+              "A streamed staging key escaped its generation prefix."
+            );
+          }
+          keys.push(key);
+          return keys.length <
+            STREAM_DEMAND_BATCH_RECORDS;
+        },
+        STREAM_DEMAND_BATCH_RECORDS
+      );
+      if (keys.length === 0) {
+        return deleted;
+      }
+      if (keys[0] === previousFirstKey) {
+        throw new Error(
+          "The streamed staging cleanup stopped making progress."
+        );
+      }
+      previousFirstKey = keys[0];
+      deleted += keys.length;
+      await deleteCatalogCacheKeys(
+        database,
+        keys
+      );
+      batches += 1;
+      if (
+        keys.length <
+          STREAM_DEMAND_BATCH_RECORDS
+      ) {
+        return deleted;
+      }
+      if (batches % 8 === 0) {
+        await yieldCatalogCacheWork();
+      }
+    }
+    return deleted;
+  }
+
+  async function reclaimObsoleteCatalogStorage(
+    database
+  ) {
+    const active =
+      await readCatalogCacheValue(
+        database,
+        STREAM_DEMAND_ACTIVE_KEY
+      );
+    const activeGeneration = String(
+      active?.generation || ""
+    );
+    const staging =
+      await readCatalogCacheValue(
+        database,
+        STREAM_DEMAND_STAGING_KEY
+      );
+    if (staging) {
+      const stagedGeneration = String(
+        staging.generation || ""
+      );
+      if (
+        /^[a-z0-9-]{12,96}$/i.test(
+          stagedGeneration
+        ) &&
+        stagedGeneration !== activeGeneration
+      ) {
+        await deleteCatalogCachePrefixBatches(
+          database,
+          catalogStreamDemandGenerationPrefix(
+            stagedGeneration
+          )
+        );
+      }
+      await deleteCatalogCacheKeys(
+        database,
+        [STREAM_DEMAND_STAGING_KEY]
+      );
+    }
+    const activeManifest = active?.manifestId
+      ? await readCatalogCacheValue(
+          database,
+          active.manifestId
+        )
+      : null;
+    const streamedCacheIsValid = Boolean(
+      activeGeneration &&
+      activeManifest?.generation ===
+        activeGeneration &&
+      validCatalogStreamDemandManifest(
+        activeManifest
+      )
+    );
+    if (!streamedCacheIsValid) {
+      return false;
+    }
+
+    const previousGeneration = String(
+      active?.previousGeneration || ""
+    );
+    if (
+      previousGeneration &&
+      previousGeneration !== activeGeneration
+    ) {
+      await deleteCatalogCachePrefixBatches(
+        database,
+        catalogStreamDemandGenerationPrefix(
+          previousGeneration
+        )
+      );
+    }
+
+    const fullManifest =
+      await readCatalogCacheValue(
+        database,
+        CACHE_RECORD_KEY
+      );
+    if (fullManifest?.generation) {
+      await removeCatalogCacheGeneration(
+        database,
+        String(fullManifest.generation),
+        Math.max(
+          0,
+          Number(fullManifest.chunkCount) || 0
+        )
+      );
+    }
+    const staleStaging =
+      await readCatalogCacheValue(
+        database,
+        CACHE_STAGING_RECORD_KEY
+      );
+    if (
+      staleStaging?.generation &&
+      staleStaging.generation !==
+        fullManifest?.generation
+    ) {
+      await removeCatalogCacheGeneration(
+        database,
+        String(staleStaging.generation),
+        Math.max(
+          0,
+          Number(staleStaging.chunkCount) || 0
+        )
+      );
+    }
+    await deleteCatalogCacheKeys(
+      database,
+      [
+        CACHE_RECORD_KEY,
+        CACHE_ACTIVE_RECORD_KEY,
+        CACHE_STAGING_RECORD_KEY,
+        DEMAND_CACHE_MANIFEST_KEY
+      ]
+    );
+    return true;
+  }
+
+  function readCatalogCacheValues(
+    database,
+    keys
+  ) {
+    const uniqueKeys = [...new Set(
+      (Array.isArray(keys) ? keys : [])
+        .map(String)
+    )];
+    if (uniqueKeys.length === 0) {
+      return Promise.resolve(new Map());
+    }
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const values = new Map();
+      const transaction = database.transaction(
+        CACHE_STORE_NAME,
+        "readonly"
+      );
+      const store = transaction.objectStore(
+        CACHE_STORE_NAME
+      );
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        callback(value);
+      };
+      const fail = error => finish(
+        reject,
+        error || transaction.error ||
+          new Error(
+            "The streamed catalog cache batch read failed."
+          )
+      );
+      const timeout = window.setTimeout(() => {
+        try {
+          transaction.abort();
+        } catch {}
+        fail(new Error(
+          "The streamed catalog cache batch read stopped responding."
+        ));
+      }, CACHE_TRANSACTION_TIMEOUT_MS);
+      for (const key of uniqueKeys) {
+        const request = store.get(key);
+        request.onsuccess = () => {
+          if (request.result) {
+            values.set(key, request.result);
+          }
+        };
+        request.onerror = () =>
+          fail(request.error);
+      }
+      transaction.onerror = () =>
+        fail(transaction.error);
+      transaction.onabort = () =>
+        fail(transaction.error);
+      transaction.oncomplete = () =>
+        finish(resolve, values);
+    });
+  }
+
+  function assertCatalogStreamJsonBounds(
+    value
+  ) {
+    const stack = [{ value, depth: 0 }];
+    let nodes = 0;
+    while (stack.length > 0) {
+      const current = stack.pop();
+      nodes += 1;
+      if (nodes > STREAM_DEMAND_MAX_JSON_NODES) {
+        throw new Error(
+          "A streamed catalog record contains too many JSON values."
+        );
+      }
+      if (
+        current.depth >
+          STREAM_DEMAND_MAX_JSON_DEPTH
+      ) {
+        throw new Error(
+          "A streamed catalog record is nested too deeply."
+        );
+      }
+      const item = current.value;
+      if (
+        !item ||
+        typeof item !== "object"
+      ) {
+        continue;
+      }
+      const values = Array.isArray(item)
+        ? item
+        : Object.values(item);
+      if (
+        values.length >
+          STREAM_DEMAND_MAX_JSON_NODES
+      ) {
+        throw new Error(
+          "A streamed catalog record contains an oversized container."
+        );
+      }
+      for (const child of values) {
+        if (
+          child &&
+          typeof child === "object"
+        ) {
+          stack.push({
+            value: child,
+            depth: current.depth + 1
+          });
+        }
+      }
+    }
+  }
+
+  function catalogStreamDemandCounts(value) {
+    const names = [
+      "assemblies",
+      "components",
+      "materials",
+      "commonMaterials",
+      "meshes",
+      "slotAttachOverloads",
+      "types",
+      "enums"
+    ];
+    const counts = {};
+    for (const name of names) {
+      const count = Number(value?.[name]);
+      if (
+        !Number.isInteger(count) ||
+        count < 0 ||
+        count >
+          CACHE_CHUNK_MAX_CONTAINER_ENTRIES
+      ) {
+        throw new Error(
+          `The streamed catalog count '${name}' is invalid.`
+        );
+      }
+      counts[name] = count;
+    }
+    return Object.freeze(counts);
+  }
+
+  function catalogStreamDemandSameCounts(
+    left,
+    right
+  ) {
+    return [
+      "assemblies",
+      "components",
+      "materials",
+      "commonMaterials",
+      "meshes",
+      "slotAttachOverloads",
+      "types",
+      "enums"
+    ].every(name =>
+      Number(left?.[name]) ===
+        Number(right?.[name])
+    );
+  }
+
+  function catalogStreamNormalizeCsType(value) {
+    let text = String(value || "")
+      .trim()
+      .replace(/^global::/, "")
+      .replace(/\s+/g, " ");
+    if (text.endsWith("?")) {
+      text = text.slice(0, -1);
+    }
+    return text;
+  }
+
+  function catalogStreamExactType(value) {
+    return String(value || "")
+      .trim()
+      .replace(/^global::/, "")
+      .replace(/\s+/g, " ");
+  }
+
+  function catalogStreamShortTypeName(value) {
+    const text =
+      catalogStreamNormalizeCsType(value);
+    const generic = text.lastIndexOf("<");
+    const head = generic >= 0
+      ? text.slice(0, generic)
+      : text;
+    const name = head.split(".").pop() ||
+      head || "Type";
+    return generic >= 0
+      ? `${name}${text.slice(generic)}`
+      : name;
+  }
+
+  function catalogStreamSafeType(value) {
+    const text = String(value || "")
+      .trim()
+      .replace(/^global::/, "")
+      .replace(/\s+/g, "");
+    return Boolean(
+      text &&
+      !/[+`();{}=*]/.test(text) &&
+      !text.endsWith("&") &&
+      !text.includes("delegate*") &&
+      ![
+        "System.TypedReference",
+        "System.ArgIterator",
+        "System.RuntimeArgumentHandle"
+      ].includes(text)
+    );
+  }
+
+  function catalogStreamNoisyOwner(ownerRow) {
+    const owner =
+      catalogStreamNormalizeCsType(
+        ownerRow?.fullName || ""
+      );
+    return Boolean(
+      ownerRow?.isObsolete ||
+      ownerRow?.isLegacyNamed ||
+      ownerRow?.isDebugNamed ||
+      ownerRow?.isEditorNamed ||
+      ownerRow?.isToolNamed ||
+      ownerRow?.isGizmoNamed ||
+      owner === "HarmonyLib" ||
+      owner.startsWith("HarmonyLib.")
+    );
+  }
+
+  function catalogStreamParameterIdentity(
+    parameters
+  ) {
+    return (Array.isArray(parameters)
+      ? parameters
+      : []).map((parameter, index) => ({
+        position: Math.max(
+          0,
+          Number(parameter?.position) || index
+        ),
+        type: catalogStreamExactType(
+          parameter?.elementType ||
+          parameter?.type ||
+          "System.Object"
+        ),
+        isByRef:
+          parameter?.isByRef === true ||
+          parameter?.isOut === true,
+        isOut: parameter?.isOut === true
+      }));
+  }
+
+  function catalogStreamCanonicalMemberId(
+    prefix,
+    {
+      kind,
+      owner,
+      memberName = "",
+      parameters = [],
+      returnType = "System.Void",
+      isStatic = false,
+      genericArity = 0
+    }
+  ) {
+    return `${prefix}${stableCatalogHash(
+      JSON.stringify({
+        kind: String(kind || ""),
+        ownerType:
+          catalogStreamNormalizeCsType(owner),
+        memberName: String(memberName || ""),
+        parameters:
+          catalogStreamParameterIdentity(
+            parameters
+          ),
+        returnType:
+          catalogStreamExactType(
+            returnType || "System.Void"
+          ),
+        isStatic: isStatic === true,
+        genericArity: Math.max(
+          0,
+          Number(genericArity) || 0
+        )
+      })
+    )}`;
+  }
+
+  const CATALOG_STREAM_GROUPS =
+    Object.freeze({
+      types: "API · Types & Enums",
+      constructors: "API · Constructors",
+      methods: "API · Methods",
+      properties: "API · Properties",
+      fields: "API · Fields",
+      events: "API · Events",
+      advanced: "Advanced / Raw C#"
+    });
+
+  function catalogStreamDefinition(
+    operatorId,
+    owner,
+    locator,
+    {
+      title,
+      group,
+      symbol,
+      kind,
+      searchText,
+      description = "",
+      customCSharp = true
+    }
+  ) {
+    const definition = Object.freeze({
+      title: String(title || operatorId),
+      description: String(description || ""),
+      apiSearchText: String(
+        searchText || ""
+      ),
+      group: String(group || "Other"),
+      symbol: String(symbol || "API"),
+      expertOnly:
+        group ===
+          CATALOG_STREAM_GROUPS.advanced,
+      hiddenFromPalette: false,
+      catalogGenerated: true,
+      catalogType:
+        catalogStreamNormalizeCsType(owner),
+      apiMemberKind: String(kind || ""),
+      customCSharpCatalogNode:
+        customCSharp === true
+    });
+    return Object.freeze({
+      operatorId,
+      owner:
+        catalogStreamNormalizeCsType(owner),
+      locator: Object.freeze({ ...locator }),
+      definition
+    });
+  }
+
+  function catalogStreamSupportedParameters(
+    parameters
+  ) {
+    return (
+      Array.isArray(parameters) &&
+      parameters.every(parameter =>
+        parameter &&
+        typeof parameter === "object" &&
+        parameter.isPointer !== true &&
+        parameter.isFunctionPointer !== true &&
+        parameter.isByRefLike !== true &&
+        catalogStreamSafeType(
+          parameter.elementType ||
+          parameter.type || ""
+        )
+      )
+    );
+  }
+
+  function catalogStreamDirectMethod(
+    owner,
+    method,
+    parameters
+  ) {
+    const directlyReferenceable = value => {
+      const text =
+        catalogStreamNormalizeCsType(value);
+      return Boolean(
+        catalogStreamSafeType(text) &&
+        !/`\d+/.test(text) &&
+        !/^(?:T|T[A-Z][A-Za-z0-9_]*)$/.test(
+          text
+        ) &&
+        !/(?:^|[<, ])(?:T|T[A-Z][A-Za-z0-9_]*)(?:[>, ]|$)/.test(
+          text
+        )
+      );
+    };
+    return Boolean(
+      directlyReferenceable(owner) &&
+      method?.isPublic !== false &&
+      method?.isSpecialName !== true &&
+      method?.isGenericMethodDefinition !== true &&
+      !parameters.some(parameter =>
+        parameter?.isOptional === true
+      ) &&
+      directlyReferenceable(
+        method?.returnType || "System.Void"
+      ) &&
+      parameters.every(parameter =>
+        directlyReferenceable(
+          parameter?.elementType ||
+          parameter?.type || ""
+        )
+      ) &&
+      /^[A-Za-z_][A-Za-z0-9_]*$/.test(
+        String(method?.name || "")
+      )
+    );
+  }
+
+  function catalogStreamProjectType(
+    record
+  ) {
+    const row = record?.value;
+    const owner =
+      catalogStreamNormalizeCsType(
+        record?.owner || row?.fullName
+      );
+    if (
+      !row ||
+      !owner ||
+      row.isPublic === false ||
+      row.isByRefLike === true ||
+      row.isGeneric === true ||
+      row.isObsolete === true ||
+      row.isLegacyNamed === true ||
+      owner === "System.Void" ||
+      !catalogStreamSafeType(owner) ||
+      owner.includes("<>")
+    ) {
+      return [];
+    }
+    const operatorId =
+      `api.type.${stableCatalogHash(owner)}`;
+    const group = catalogStreamNoisyOwner(row)
+      ? CATALOG_STREAM_GROUPS.advanced
+      : CATALOG_STREAM_GROUPS.types;
+    return [catalogStreamDefinition(
+      operatorId,
+      owner,
+      {
+        record: "type-header",
+        index: Number(record.index)
+      },
+      {
+        title:
+          `${row.kind === "enum" ? "Enum type" : "Type"} · ${row.name || catalogStreamShortTypeName(owner)}`,
+        group,
+        symbol: "TYPE",
+        kind: "type",
+        searchText: `${owner} type typeof`,
+        description:
+          `Exact System.Type constant for ${owner}.`
+      }
+    )];
+  }
+
+  function catalogStreamProjectEnum(
+    record
+  ) {
+    const row = record?.value;
+    const owner =
+      catalogStreamNormalizeCsType(
+        record?.owner || row?.fullName
+      );
+    if (
+      !row ||
+      !owner ||
+      row.isObsolete === true ||
+      Number(record?.counts?.values) < 1 ||
+      !catalogStreamSafeType(owner)
+    ) {
+      return [];
+    }
+    const operatorId =
+      `api.enum.${stableCatalogHash(owner)}`;
+    const group =
+      owner === "HarmonyLib" ||
+      owner.startsWith("HarmonyLib.")
+        ? CATALOG_STREAM_GROUPS.advanced
+        : CATALOG_STREAM_GROUPS.types;
+    return [catalogStreamDefinition(
+      operatorId,
+      owner,
+      {
+        record: "enum-header",
+        index: Number(record.index)
+      },
+      {
+        title:
+          `Enum · ${catalogStreamShortTypeName(owner)}`,
+        group,
+        symbol: "ENUM",
+        kind: "enum",
+        searchText: owner,
+        description:
+          `Typed constant for ${owner}.`
+      }
+    )];
+  }
+
+  function catalogStreamProjectMember(
+    record,
+    ownerRow
+  ) {
+    const member = record?.value;
+    const sourceKind = String(
+      record?.memberKind || ""
+    );
+    const owner =
+      catalogStreamNormalizeCsType(
+        record?.owner ||
+        ownerRow?.fullName ||
+        member?.declaringType
+      );
+    const displayOwner =
+      ownerRow?.name ||
+      catalogStreamShortTypeName(owner);
+    const noisy =
+      catalogStreamNoisyOwner(ownerRow);
+    const group = normal =>
+      noisy
+        ? CATALOG_STREAM_GROUPS.advanced
+        : normal;
+    const locator = {
+      record: "member",
+      memberKind: sourceKind,
+      index: Number(record?.index)
+    };
+    if (
+      !member ||
+      !owner ||
+      ownerRow?.isGeneric === true
+    ) {
+      return [];
+    }
+
+    if (sourceKind === "constructor") {
+      const parameters = member.parameters;
+      if (
+        ownerRow?.isAbstract === true ||
+        ownerRow?.kind === "interface" ||
+        member.isPublic === false ||
+        !catalogStreamSupportedParameters(
+          parameters
+        )
+      ) {
+        return [];
+      }
+      const operatorId =
+        catalogStreamCanonicalMemberId(
+          "api.ctor.",
+          {
+            kind: "constructor",
+            owner,
+            parameters,
+            returnType: owner
+          }
+        );
+      return [catalogStreamDefinition(
+        operatorId,
+        owner,
+        locator,
+        {
+          title: `New · ${displayOwner}`,
+          group: group(
+            CATALOG_STREAM_GROUPS.constructors
+          ),
+          symbol: "new",
+          kind: "constructor",
+          searchText:
+            `${owner} ${member.signature || "constructor new"}`,
+          description:
+            member.signature ||
+            `Constructs ${owner}.`
+        }
+      )];
+    }
+
+    if (sourceKind === "method") {
+      const parameters = Array.isArray(
+        member.parameters
+      ) ? member.parameters : [];
+      const generics = Array.isArray(
+        member.genericParameters
+      ) ? member.genericParameters : [];
+      if (
+        member.isObsolete === true ||
+        !member.name ||
+        member.isPublic === false ||
+        (
+          member.isStatic === true &&
+          member.isAbstract === true
+        ) ||
+        (
+          member.isGenericMethodDefinition === true
+        ) !== (generics.length > 0) ||
+        !catalogStreamSupportedParameters(
+          parameters
+        ) ||
+        !catalogStreamSafeType(
+          member.returnType || "System.Void"
+        )
+      ) {
+        return [];
+      }
+      const direct = catalogStreamDirectMethod(
+        owner,
+        member,
+        parameters
+      );
+      const operatorId =
+        catalogStreamCanonicalMemberId(
+          "api.method.",
+          {
+            kind: "method",
+            owner,
+            memberName: member.name,
+            parameters,
+            returnType:
+              member.returnType ||
+              "System.Void",
+            isStatic:
+              member.isStatic === true,
+            genericArity: generics.length
+          }
+        );
+      return [catalogStreamDefinition(
+        operatorId,
+        owner,
+        locator,
+        {
+          title:
+            `${member.isStatic === true ? "Static" : "Call"} · ${displayOwner}.${member.name}`,
+          group:
+            noisy || !direct
+              ? CATALOG_STREAM_GROUPS.advanced
+              : CATALOG_STREAM_GROUPS.methods,
+          symbol: "ƒ",
+          kind: "method",
+          searchText:
+            `${owner} ${member.name} ${member.signature || ""}`,
+          description:
+            member.signature ||
+            `${owner}.${member.name}`
+        }
+      )];
+    }
+
+    if (sourceKind === "property") {
+      if (
+        member.isObsolete === true ||
+        !member.name ||
+        member.isPublic === false ||
+        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(
+          String(member.name)
+        ) ||
+        !catalogStreamSafeType(
+          member.type || "System.Object"
+        )
+      ) {
+        return [];
+      }
+      const indexes = Array.isArray(
+        member.indexParameters
+      ) ? member.indexParameters : [];
+      if (
+        !catalogStreamSupportedParameters(
+          indexes
+        ) ||
+        (
+          indexes.length > 0 &&
+          member.name !== "Item" &&
+          member.isIndexer !== true
+        )
+      ) {
+        return [];
+      }
+      const results = [];
+      const valueType =
+        member.type || "System.Object";
+      if (
+        member.canRead === true &&
+        member.getterIsPublic !== false
+      ) {
+        const operatorId =
+          catalogStreamCanonicalMemberId(
+            "api.property.get.",
+            {
+              kind: "property-get",
+              owner,
+              memberName: member.name,
+              parameters: indexes,
+              returnType: valueType,
+              isStatic:
+                member.isStatic === true
+            }
+          );
+        results.push(catalogStreamDefinition(
+          operatorId,
+          owner,
+          locator,
+          {
+            title:
+              `Get · ${displayOwner}.${member.name}`,
+            group: group(
+              CATALOG_STREAM_GROUPS.properties
+            ),
+            symbol: "get",
+            kind: "property-get",
+            searchText:
+              `${owner} ${member.name} property get read ${valueType}`,
+            description:
+              `Reads ${owner}.${member.name} (${valueType}).`
+          }
+        ));
+      }
+      if (
+        member.canWrite === true &&
+        member.setterIsPublic !== false
+      ) {
+        const parameters = [
+          ...indexes,
+          {
+            position: indexes.length,
+            type: valueType
+          }
+        ];
+        const operatorId =
+          catalogStreamCanonicalMemberId(
+            "api.property.set.",
+            {
+              kind: "property-set",
+              owner,
+              memberName: member.name,
+              parameters,
+              isStatic:
+                member.isStatic === true
+            }
+          );
+        results.push(catalogStreamDefinition(
+          operatorId,
+          owner,
+          locator,
+          {
+            title:
+              `Set · ${displayOwner}.${member.name}`,
+            group: group(
+              CATALOG_STREAM_GROUPS.properties
+            ),
+            symbol: "set",
+            kind: "property-set",
+            searchText:
+              `${owner} ${member.name} property set write ${valueType}`,
+            description:
+              `Writes ${owner}.${member.name} (${valueType}).`
+          }
+        ));
+      }
+      return results;
+    }
+
+    if (sourceKind === "field") {
+      if (
+        member.isObsolete === true ||
+        !member.name ||
+        member.isPublic === false ||
+        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(
+          String(member.name)
+        ) ||
+        !catalogStreamSafeType(
+          member.type || "System.Object"
+        )
+      ) {
+        return [];
+      }
+      const valueType =
+        member.type || "System.Object";
+      const results = [];
+      const getId =
+        catalogStreamCanonicalMemberId(
+          "api.field.get.",
+          {
+            kind: "field-get",
+            owner,
+            memberName: member.name,
+            returnType: valueType,
+            isStatic:
+              member.isStatic === true
+          }
+        );
+      results.push(catalogStreamDefinition(
+        getId,
+        owner,
+        locator,
+        {
+          title:
+            `Read · ${displayOwner}.${member.name}`,
+          group: group(
+            CATALOG_STREAM_GROUPS.fields
+          ),
+          symbol: "fld",
+          kind: "field-get",
+          searchText:
+            `${owner} ${member.name} field read get ${valueType}`,
+          description:
+            `Reads field ${owner}.${member.name} (${valueType}).`
+        }
+      ));
+      if (
+        member.isReadOnly !== true &&
+        member.isConst !== true
+      ) {
+        const setId =
+          catalogStreamCanonicalMemberId(
+            "api.field.set.",
+            {
+              kind: "field-set",
+              owner,
+              memberName: member.name,
+              parameters: [{
+                position: 0,
+                type: valueType
+              }],
+              isStatic:
+                member.isStatic === true
+            }
+          );
+        results.push(catalogStreamDefinition(
+          setId,
+          owner,
+          locator,
+          {
+            title:
+              `Write · ${displayOwner}.${member.name}`,
+            group: group(
+              CATALOG_STREAM_GROUPS.fields
+            ),
+            symbol: "fld=",
+            kind: "field-set",
+            searchText:
+              `${owner} ${member.name} field write set ${valueType}`,
+            description:
+              `Writes field ${owner}.${member.name} (${valueType}).`
+          }
+        ));
+      }
+      return results;
+    }
+
+    if (sourceKind === "event") {
+      if (
+        member.isObsolete === true ||
+        !member.name
+      ) {
+        return [];
+      }
+      const handler =
+        member.handlerType ||
+        "System.Delegate";
+      const operatorId =
+        `api.event.${stableCatalogHash(
+          `${owner}|${member.name}|${String(member.handlerType)}`
+        )}`;
+      return [catalogStreamDefinition(
+        operatorId,
+        owner,
+        locator,
+        {
+          title:
+            `On · ${displayOwner}.${member.name}`,
+          group: group(
+            CATALOG_STREAM_GROUPS.events
+          ),
+          symbol: "evt",
+          kind: "event",
+          searchText:
+            `${owner} ${member.name} event ${member.handlerType || ""}`,
+          description:
+            `Typed catalog event wrapper for ${owner}.${member.name} (${handler}).`,
+          customCSharp: false
+        }
+      )];
+    }
+    return [];
+  }
+
+  function catalogStreamOperatorHashPrefix(
+    operatorId
+  ) {
+    return stableCatalogHash(
+      String(operatorId || "")
+    ).slice(
+      0,
+      STREAM_DEMAND_OPERATOR_HASH_PREFIX_LENGTH
+    );
+  }
+
+  function catalogStreamProjectionRow(
+    projection
+  ) {
+    return [
+      String(projection?.operatorId || ""),
+      catalogStreamNormalizeCsType(
+        projection?.owner || ""
+      ),
+      projection?.locator || null,
+      projection?.definition || null
+    ];
+  }
+
+  function catalogStreamPaletteFlags(
+    definition
+  ) {
+    return (
+      (definition?.expertOnly === true ? 1 : 0) |
+      (
+        definition?.customCSharpCatalogNode === true
+          ? 2
+          : 0
+      ) |
+      (
+        definition?.hiddenFromPalette === true
+          ? 4
+          : 0
+      )
+    );
+  }
+
+  function retainCatalogStreamHydrationOwner(
+    owner,
+    pinned,
+    pinnedOwners,
+    ephemeralOwners
+  ) {
+    const targetOwners = pinned
+      ? pinnedOwners
+      : ephemeralOwners;
+    if (
+      !pinned &&
+      !targetOwners.has(owner) &&
+      targetOwners.size >=
+        STREAM_DEMAND_EPHEMERAL_OWNER_CAP
+    ) {
+      return false;
+    }
+    targetOwners.add(owner);
+    return true;
+  }
+
+  function catalogStreamOwnerCounts(value) {
+    const names = [
+      "interfaces",
+      "categories",
+      "attributes",
+      "constructors",
+      "methods",
+      "properties",
+      "fields",
+      "events",
+      "enumValues"
+    ];
+    const counts = {};
+    for (const name of names) {
+      const count = Number(value?.[name]);
+      if (
+        !Number.isInteger(count) ||
+        count < 0 ||
+        count >
+          CACHE_CHUNK_MAX_CONTAINER_ENTRIES
+      ) {
+        throw new Error(
+          `The streamed type count '${name}' is invalid.`
+        );
+      }
+      counts[name] = count;
+    }
+    return counts;
+  }
+
+  function catalogStreamEnumCounts(value) {
+    const count = Number(value?.values);
+    if (
+      !Number.isInteger(count) ||
+      count < 0 ||
+      count >
+        CACHE_CHUNK_MAX_CONTAINER_ENTRIES
+    ) {
+      throw new Error(
+        "The streamed enum value count is invalid."
+      );
+    }
+    return { values: count };
+  }
+
+  function catalogStreamCompactRawRecord(record) {
+    const kind = String(record?.record || "");
+    if (![
+      "catalog-list-item",
+      "assembly",
+      "slot-attach-overload",
+      "type-header",
+      "type-list-item",
+      "member",
+      "enum-header",
+      "enum-value"
+    ].includes(kind)) {
+      throw new Error(
+        `Unsupported streamed catalog record '${kind}'.`
+      );
+    }
+    return [
+      kind,
+      String(record.list || ""),
+      String(record.memberKind || ""),
+      Number(record.index),
+      record.counts || null,
+      record.value
+    ];
+  }
+
+  function catalogStreamBinaryPayloadAvailable() {
+    return Boolean(
+      typeof globalThis.TextEncoder === "function" &&
+      typeof globalThis.TextDecoder === "function" &&
+      typeof globalThis.crypto?.subtle?.digest ===
+        "function"
+    );
+  }
+
+  function catalogStreamDecompressionAvailable() {
+    return Boolean(
+      catalogStreamBinaryPayloadAvailable() &&
+      typeof globalThis.Blob === "function" &&
+      typeof globalThis.DecompressionStream ===
+        "function"
+    );
+  }
+
+  function catalogStreamCompressionAvailable() {
+    return Boolean(
+      catalogStreamDecompressionAvailable() &&
+      typeof globalThis.CompressionStream ===
+        "function"
+    );
+  }
+
+  function assertCatalogStreamOwnerPayloadBounds(
+    logical
+  ) {
+    if (
+      !Array.isArray(logical) ||
+      logical.length !== 2 ||
+      !Array.isArray(logical[0]) ||
+      !Array.isArray(logical[1]) ||
+      logical[0].length + logical[1].length < 1 ||
+      logical[0].length + logical[1].length >
+        STREAM_DEMAND_OWNER_CHUNK_RECORDS
+    ) {
+      throw new Error(
+        "A streamed owner chunk has an invalid logical payload bound."
+      );
+    }
+    for (const row of logical[0]) {
+      assertCatalogStreamJsonBounds(row);
+    }
+    for (const row of logical[1]) {
+      assertCatalogStreamJsonBounds(row);
+    }
+  }
+
+  function catalogStreamPayloadBytes(value) {
+    if (value instanceof Uint8Array) {
+      return new Uint8Array(
+        value.buffer,
+        value.byteOffset,
+        value.byteLength
+      );
+    }
+    if (ArrayBuffer.isView(value)) {
+      return new Uint8Array(
+        value.buffer,
+        value.byteOffset,
+        value.byteLength
+      );
+    }
+    if (
+      value instanceof ArrayBuffer ||
+      Object.prototype.toString.call(value) ===
+        "[object ArrayBuffer]"
+    ) {
+      return new Uint8Array(value);
+    }
+    return null;
+  }
+
+  async function catalogStreamCollectTransform(
+    input,
+    Transform,
+    maximumBytes,
+    operation
+  ) {
+    const reader = new globalThis.Blob([input])
+      .stream()
+      .pipeThrough(new Transform("gzip"))
+      .getReader();
+    const chunks = [];
+    let total = 0;
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        const bytes =
+          catalogStreamPayloadBytes(next.value);
+        if (!bytes) {
+          throw new Error(
+            `The streamed catalog ${operation} returned a non-binary chunk.`
+          );
+        }
+        total += bytes.byteLength;
+        if (total > maximumBytes) {
+          throw new Error(
+            `The streamed catalog ${operation} exceeded its bounded payload size.`
+          );
+        }
+        chunks.push(new Uint8Array(bytes));
+      }
+    } catch (error) {
+      try {
+        await reader.cancel(error);
+      } catch {}
+      throw error;
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {}
+    }
+    const output = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      output.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return output;
+  }
+
+  let catalogStreamCompressionProbePromise = null;
+
+  function resetCatalogStreamCompressionProbe() {
+    catalogStreamCompressionProbePromise = null;
+  }
+
+  async function catalogStreamCompressionVerified() {
+    if (!catalogStreamCompressionAvailable()) {
+      return false;
+    }
+    if (!catalogStreamCompressionProbePromise) {
+      catalogStreamCompressionProbePromise =
+        (async () => {
+          const source = Uint8Array.of(
+            0x52,
+            0x4d,
+            0x4c,
+            0x01
+          );
+          try {
+            const compressed =
+              await catalogStreamCollectTransform(
+                source,
+                globalThis.CompressionStream,
+                1024,
+                "codec probe compression"
+              );
+            const restored =
+              await catalogStreamCollectTransform(
+                compressed,
+                globalThis.DecompressionStream,
+                source.byteLength,
+                "codec probe decompression"
+              );
+            return Boolean(
+              restored.byteLength ===
+                source.byteLength &&
+              restored.every(
+                (value, index) =>
+                  value === source[index]
+              )
+            );
+          } catch (error) {
+            console.info(
+              "[RML CATALOG CACHE] Gzip shard storage is unavailable; this generation will use the bounded identity-binary payload fallback.",
+              String(error?.message || error || "")
+            );
+            return false;
+          }
+        })();
+    }
+    return catalogStreamCompressionProbePromise;
+  }
+
+  async function catalogStreamSelectedOwnerPayloadEncoding() {
+    if (!catalogStreamBinaryPayloadAvailable()) {
+      return "legacy-object-v1";
+    }
+    return await catalogStreamCompressionVerified()
+      ? STREAM_DEMAND_OWNER_STORAGE_ENCODING
+      : STREAM_DEMAND_OWNER_IDENTITY_ENCODING;
+  }
+
+  async function catalogStreamPayloadHash(bytes) {
+    const subtle = globalThis.crypto?.subtle;
+    if (
+      !subtle ||
+      typeof subtle.digest !== "function"
+    ) {
+      throw new Error(
+        "The browser cannot integrity-check binary catalog shards."
+      );
+    }
+    return catalogDigestHex(
+      await subtle.digest("SHA-256", bytes)
+    );
+  }
+
+  async function prepareCatalogStreamCacheEntryForStorage(
+    entry,
+    metrics = null
+  ) {
+    const value = entry?.value;
+    if (
+      value?.kind !== "owner-chunk" ||
+      value.payloadEncoding
+    ) {
+      return entry;
+    }
+    const storageEncoding =
+      await catalogStreamSelectedOwnerPayloadEncoding();
+    if (storageEncoding === "legacy-object-v1") {
+      return entry;
+    }
+    if (
+      !Array.isArray(value.rows) ||
+      !Array.isArray(value.operatorRows)
+    ) {
+      throw new Error(
+        "A streamed owner chunk cannot be encoded because its logical payload is invalid."
+      );
+    }
+    const logical = [
+      value.rows,
+      value.operatorRows
+    ];
+    if (metrics) {
+      metrics.ownerPayloadCount =
+        (Number(metrics.ownerPayloadCount) || 0) + 1;
+    }
+    assertCatalogStreamOwnerPayloadBounds(logical);
+    const encoded = new TextEncoder().encode(
+      JSON.stringify(logical)
+    );
+    if (
+      encoded.byteLength < 1 ||
+      encoded.byteLength >
+        STREAM_DEMAND_OWNER_PAYLOAD_MAX_BYTES
+    ) {
+      throw new Error(
+        "A streamed owner chunk exceeds its bounded binary input."
+      );
+    }
+    const useGzip =
+      storageEncoding ===
+        STREAM_DEMAND_OWNER_STORAGE_ENCODING &&
+      encoded.byteLength >=
+        STREAM_DEMAND_OWNER_GZIP_MIN_BYTES;
+    let storedBytes = encoded;
+    if (useGzip) {
+      const compressionStarted =
+        catalogDemandDiagnosticTime();
+      storedBytes =
+        await catalogStreamCollectTransform(
+          encoded,
+          globalThis.CompressionStream,
+          STREAM_DEMAND_OWNER_COMPRESSED_MAX_BYTES,
+          "compression"
+        );
+      if (metrics) {
+        metrics.gzipPayloadCount =
+          (Number(metrics.gzipPayloadCount) || 0) + 1;
+        metrics.compressionMs =
+          (Number(metrics.compressionMs) || 0) +
+          (
+            catalogDemandDiagnosticTime() -
+            compressionStarted
+          );
+      }
+    } else if (metrics) {
+      metrics.identityPayloadCount =
+        (Number(metrics.identityPayloadCount) || 0) + 1;
+    }
+    const hashStarted =
+      catalogDemandDiagnosticTime();
+    const payloadHash =
+      await catalogStreamPayloadHash(encoded);
+    if (metrics) {
+      metrics.hashCount =
+        (Number(metrics.hashCount) || 0) + 1;
+      metrics.hashMs =
+        (Number(metrics.hashMs) || 0) +
+        (
+          catalogDemandDiagnosticTime() -
+          hashStarted
+        );
+    }
+    const payload =
+      storedBytes.byteOffset === 0 &&
+      storedBytes.byteLength ===
+        storedBytes.buffer.byteLength
+        ? storedBytes.buffer
+        : storedBytes.buffer.slice(
+            storedBytes.byteOffset,
+            storedBytes.byteOffset +
+              storedBytes.byteLength
+          );
+    const stored = { ...value };
+    delete stored.rows;
+    delete stored.operatorRows;
+    return {
+      ...entry,
+      value: {
+        ...stored,
+        payloadEncoding:
+          useGzip
+            ? STREAM_DEMAND_OWNER_PAYLOAD_ENCODING
+            : STREAM_DEMAND_OWNER_IDENTITY_ENCODING,
+        payloadVersion:
+          STREAM_DEMAND_OWNER_PAYLOAD_VERSION,
+        payloadHashAlgorithm:
+          STREAM_DEMAND_OWNER_PAYLOAD_HASH_ALGORITHM,
+        payloadHash,
+        payloadUncompressedBytes:
+          encoded.byteLength,
+        payloadByteLength:
+          storedBytes.byteLength,
+        payloadRowCount: value.rows.length,
+        payloadOperatorRowCount:
+          value.operatorRows.length,
+        payload
+      }
+    };
+  }
+
+  async function decodeCatalogStreamOwnerChunk(record) {
+    if (!record?.payloadEncoding) {
+      return record;
+    }
+    const storedBytes =
+      catalogStreamPayloadBytes(record.payload);
+    const uncompressedBytes = Number(
+      record.payloadUncompressedBytes
+    );
+    if (
+      record.kind !== "owner-chunk" ||
+      ![
+        STREAM_DEMAND_OWNER_PAYLOAD_ENCODING,
+        STREAM_DEMAND_OWNER_IDENTITY_ENCODING
+      ].includes(record.payloadEncoding) ||
+      Number(record.payloadVersion) !==
+        STREAM_DEMAND_OWNER_PAYLOAD_VERSION ||
+      record.payloadHashAlgorithm !==
+        STREAM_DEMAND_OWNER_PAYLOAD_HASH_ALGORITHM ||
+      !/^[a-f0-9]{64}$/.test(
+        String(record.payloadHash || "")
+      ) ||
+      !Number.isInteger(uncompressedBytes) ||
+      uncompressedBytes < 1 ||
+      uncompressedBytes >
+        STREAM_DEMAND_OWNER_PAYLOAD_MAX_BYTES ||
+      !storedBytes ||
+      storedBytes.byteLength < 1 ||
+      storedBytes.byteLength !==
+        Number(record.payloadByteLength) ||
+      storedBytes.byteLength >
+        STREAM_DEMAND_OWNER_COMPRESSED_MAX_BYTES ||
+      (
+        record.payloadEncoding ===
+          STREAM_DEMAND_OWNER_IDENTITY_ENCODING &&
+        storedBytes.byteLength !== uncompressedBytes
+      ) ||
+      !Number.isInteger(Number(record.payloadRowCount)) ||
+      !Number.isInteger(
+        Number(record.payloadOperatorRowCount)
+      )
+    ) {
+      throw new Error(
+        "A binary streamed owner chunk has invalid metadata."
+      );
+    }
+    if (!catalogStreamBinaryPayloadAvailable()) {
+      throw new Error(
+        "The browser cannot decode the active catalog cache."
+      );
+    }
+    if (
+      record.payloadEncoding ===
+        STREAM_DEMAND_OWNER_PAYLOAD_ENCODING &&
+      !catalogStreamDecompressionAvailable()
+    ) {
+      throw new Error(
+        "The browser cannot decompress the active catalog cache."
+      );
+    }
+    const decoded = record.payloadEncoding ===
+      STREAM_DEMAND_OWNER_PAYLOAD_ENCODING
+        ? await catalogStreamCollectTransform(
+            storedBytes,
+            globalThis.DecompressionStream,
+            uncompressedBytes,
+            "decompression"
+          )
+        : storedBytes;
+    if (
+      decoded.byteLength !== uncompressedBytes ||
+      await catalogStreamPayloadHash(decoded) !==
+        String(record.payloadHash)
+    ) {
+      throw new Error(
+        "A binary streamed owner chunk failed its integrity check."
+      );
+    }
+    let logical;
+    try {
+      logical = JSON.parse(
+        new TextDecoder(
+          "utf-8",
+          { fatal: true }
+        ).decode(decoded)
+      );
+    } catch (error) {
+      throw new Error(
+        "A binary streamed owner chunk contains invalid JSON.",
+        { cause: error }
+      );
+    }
+    assertCatalogStreamOwnerPayloadBounds(logical);
+    if (
+      logical[0].length !==
+        Number(record.payloadRowCount) ||
+      logical[1].length !==
+        Number(record.payloadOperatorRowCount)
+    ) {
+      throw new Error(
+        "A binary streamed owner chunk has an invalid logical payload."
+      );
+    }
+    const { payload: ignoredPayload, ...metadata } =
+      record;
+    return {
+      ...metadata,
+      rows: logical[0],
+      operatorRows: logical[1]
+    };
+  }
+
+  function catalogStreamRawChunkEntry(
+    generation,
+    {
+      owner = "",
+      section = "root",
+      segment = 0,
+      rows = [],
+      operatorRows = [],
+      operatorStageKeys = [],
+      byteLength = 0,
+      final = false
+    } = {}
+  ) {
+    const normalizedOwner =
+      catalogStreamNormalizeCsType(owner);
+    const ownerChunk = Boolean(normalizedOwner);
+    return {
+      value: {
+        id: catalogStreamDemandRecordKey(
+          generation,
+          ownerChunk
+            ? "owner-chunk"
+            : "root-chunk",
+          ...(ownerChunk
+            ? [normalizedOwner, section]
+            : []),
+          catalogStreamDemandIndexPart(
+            segment
+          )
+        ),
+        schemaVersion:
+          STREAM_DEMAND_CACHE_SCHEMA_VERSION,
+        format: STREAM_DEMAND_CACHE_FORMAT,
+        generation,
+        kind: ownerChunk
+          ? "owner-chunk"
+          : "root-chunk",
+        owner: normalizedOwner,
+        section: String(section || "root"),
+        segment: Number(segment),
+        byteLength: Number(byteLength),
+        final: final === true,
+        rows,
+        ...(ownerChunk
+          ? {
+              operatorRows,
+              operatorStageKeys
+            }
+          : {})
+      },
+      add: true
+    };
+  }
+
+  function catalogStreamOperatorShardEntry(
+    generation,
+    prefix,
+    segment,
+    rows,
+    byteLength
+  ) {
+    return {
+      value: {
+        id: catalogStreamDemandRecordKey(
+          generation,
+          "operator-shard",
+          prefix,
+          catalogStreamDemandIndexPart(
+            segment
+          )
+        ),
+        schemaVersion:
+          STREAM_DEMAND_CACHE_SCHEMA_VERSION,
+        format: STREAM_DEMAND_CACHE_FORMAT,
+        generation,
+        kind: "operator-shard",
+        prefix: String(prefix || ""),
+        segment: Number(segment),
+        byteLength: Number(byteLength),
+        rows
+      },
+      add: true
+    };
+  }
+
+  function catalogStreamBoundedShardBytes(
+    value,
+    maximum,
+    rowCount = 0
+  ) {
+    const bytes = Number(value);
+    return Boolean(
+      Number.isInteger(bytes) &&
+      bytes >= 0 &&
+      (
+        bytes <= maximum ||
+        (
+          rowCount === 1 &&
+          bytes <=
+            STREAM_DEMAND_MAX_LINE_BYTES
+        )
+      )
+    );
+  }
+
+  function catalogStreamCacheVersionSupported(record) {
+    const format = String(record?.format || "");
+    const schemaVersion = Number(
+      record?.schemaVersion
+    );
+    return Boolean(
+      (
+        format === STREAM_DEMAND_CACHE_FORMAT &&
+        schemaVersion ===
+          STREAM_DEMAND_CACHE_SCHEMA_VERSION
+      ) ||
+      (
+        format ===
+          LEGACY_STREAM_DEMAND_CACHE_FORMAT &&
+        schemaVersion ===
+          LEGACY_STREAM_DEMAND_CACHE_SCHEMA_VERSION &&
+        !record?.payloadEncoding
+      )
+    );
+  }
+
+  function catalogStreamRecordMatchesManifest(
+    record,
+    manifest
+  ) {
+    return Boolean(
+      catalogStreamCacheVersionSupported(record) &&
+      catalogStreamCacheVersionSupported(manifest) &&
+      String(record?.format || "") ===
+        String(manifest?.format || "") &&
+      Number(record?.schemaVersion) ===
+        Number(manifest?.schemaVersion)
+    );
+  }
+
+  function validCatalogStreamDemandManifest(
+    manifest
+  ) {
+    return Boolean(
+      manifest &&
+      catalogStreamCacheVersionSupported(manifest) &&
+      (
+        manifest.format ===
+          LEGACY_STREAM_DEMAND_CACHE_FORMAT
+          ? (
+              manifest.ownerPayloadEncoding == null ||
+              manifest.ownerPayloadEncoding === ""
+            )
+          : (
+              manifest.ownerPayloadEncoding ===
+                STREAM_DEMAND_OWNER_STORAGE_ENCODING ||
+              manifest.ownerPayloadEncoding ===
+                STREAM_DEMAND_OWNER_IDENTITY_ENCODING ||
+              manifest.ownerPayloadEncoding ===
+                "legacy-object-v1"
+            )
+      ) &&
+      /^[a-z0-9-]{12,96}$/i.test(
+        String(manifest.generation || "")
+      ) &&
+      /^[a-f0-9]{64}$/.test(
+        String(
+          manifest.catalogFingerprint || ""
+        ).trim().toLowerCase()
+      ) &&
+      /^[a-f0-9]{64}$/.test(
+        String(
+          manifest.assemblyFingerprint || ""
+        ).trim().toLowerCase()
+      ) &&
+      manifest.root &&
+      typeof manifest.root === "object" &&
+      !Array.isArray(manifest.root) &&
+      Number.isInteger(manifest.recordCount) &&
+      manifest.recordCount >= 2 &&
+      manifest.recordCount <=
+        STREAM_DEMAND_MAX_RECORDS &&
+      Number.isInteger(manifest.operatorCount) &&
+      manifest.operatorCount >= 0 &&
+      Number.isInteger(
+        manifest.ownerChunkCount
+      ) &&
+      manifest.ownerChunkCount >= 0 &&
+      manifest.ownerChunkCount <=
+        STREAM_DEMAND_MAX_RECORDS &&
+      Number.isInteger(
+        manifest.rootChunkCount
+      ) &&
+      manifest.rootChunkCount >= 0 &&
+      Number.isInteger(
+        manifest.operatorShardCount
+      ) &&
+      manifest.operatorShardCount === 0 &&
+      manifest.operatorIndexKind ===
+        "owner-multientry-v1" &&
+      manifest.operatorShardCount <=
+        STREAM_DEMAND_MAX_RECORDS &&
+      Array.isArray(
+        manifest.operatorShardCounts
+      ) &&
+      manifest.operatorShardCounts.every(entry =>
+        Array.isArray(entry) &&
+        entry.length === 2 &&
+        /^[a-f0-9]+$/.test(
+          String(entry[0] || "")
+        ) &&
+        String(entry[0]).length ===
+          STREAM_DEMAND_OPERATOR_HASH_PREFIX_LENGTH &&
+        Number.isInteger(entry[1]) &&
+        entry[1] > 0
+      ) &&
+      manifest.operatorShardCounts.reduce(
+        (total, entry) => total + entry[1],
+        0
+      ) === 0 &&
+      Number.isInteger(
+        manifest.paletteShardCount
+      ) &&
+      manifest.paletteShardCount >= 0 &&
+      manifest.paletteShardCount <=
+        STREAM_DEMAND_MAX_RECORDS &&
+      Array.isArray(
+        manifest.paletteShardCounts
+      ) &&
+      manifest.paletteShardCounts.every(entry =>
+        Array.isArray(entry) &&
+        entry.length === 2 &&
+        typeof entry[0] === "string" &&
+        Number.isInteger(entry[1]) &&
+        entry[1] > 0
+      ) &&
+      manifest.paletteShardCounts.reduce(
+        (total, entry) => total + entry[1],
+        0
+      ) === manifest.paletteShardCount &&
+      Number.isInteger(
+        manifest.searchShardCount
+      ) &&
+      manifest.searchShardCount >= 0 &&
+      manifest.searchShardCount <=
+        STREAM_DEMAND_MAX_RECORDS &&
+      Array.isArray(manifest.groupCounts) &&
+      manifest.groupCounts.every(entry =>
+        Array.isArray(entry) &&
+        entry.length === 2 &&
+        typeof entry[0] === "string" &&
+        Number.isInteger(entry[1]) &&
+        entry[1] >= 0
+      ) &&
+      Array.isArray(
+        manifest.visibilityGroupCounts
+      ) &&
+      manifest.visibilityGroupCounts.every(entry =>
+        Array.isArray(entry) &&
+        entry.length === 4 &&
+        typeof entry[0] === "string" &&
+        entry.slice(1).every(value =>
+          Number.isInteger(value) &&
+          value >= 0
+        )
+      )
+    );
+  }
+
+  async function commitCatalogStreamDemandManifest(
+    database,
+    manifest,
+    previousActive = null
+  ) {
+    const transaction = database.transaction(
+      CACHE_STORE_NAME,
+      "readwrite"
+    );
+    const store = transaction.objectStore(
+      CACHE_STORE_NAME
+    );
+    store.add(manifest);
+    store.put({
+      id: STREAM_DEMAND_ACTIVE_KEY,
+      schemaVersion:
+        STREAM_DEMAND_CACHE_SCHEMA_VERSION,
+      format: STREAM_DEMAND_CACHE_FORMAT,
+      generation: manifest.generation,
+      previousGeneration: String(
+        previousActive?.generation || ""
+      ),
+      manifestId: manifest.id,
+      catalogFingerprint:
+        manifest.catalogFingerprint,
+      assemblyFingerprint:
+        manifest.assemblyFingerprint,
+      committedAtUtc:
+        new Date().toISOString()
+    });
+    store.delete(STREAM_DEMAND_STAGING_KEY);
+    try {
+      await waitForCatalogCacheTransaction(
+        transaction,
+        {
+          errorMessage:
+            "The streamed catalog generation could not be committed.",
+          abortMessage:
+            "The streamed catalog generation commit was rejected.",
+          timeoutMessage:
+            "The streamed catalog generation commit stopped responding."
+        }
+      );
+    } catch (error) {
+      throw catalogCachePersistenceError(
+        error,
+        "The streamed catalog generation could not be committed."
+      );
+    }
+  }
+
+  async function stageCatalogStreamDemandGeneration(
+    database,
+    generation
+  ) {
+    const transaction = database.transaction(
+      CACHE_STORE_NAME,
+      "readwrite"
+    );
+    transaction.objectStore(
+      CACHE_STORE_NAME
+    ).put({
+      id: STREAM_DEMAND_STAGING_KEY,
+      schemaVersion:
+        STREAM_DEMAND_CACHE_SCHEMA_VERSION,
+      format: STREAM_DEMAND_CACHE_FORMAT,
+      generation: String(generation || ""),
+      kind: "stream-staging",
+      createdAtUtc: new Date().toISOString()
+    });
+    try {
+      await waitForCatalogCacheTransaction(
+        transaction,
+        {
+          errorMessage:
+            "The streamed catalog staging marker could not be written.",
+          abortMessage:
+            "The streamed catalog staging marker was rejected.",
+          timeoutMessage:
+            "The streamed catalog staging marker stopped responding."
+        }
+      );
+    } catch (error) {
+      throw catalogCachePersistenceError(
+        error,
+        "The streamed catalog staging marker could not be persisted."
+      );
+    }
+  }
+
+  function catalogStreamThrowIfAborted(signal) {
+    if (signal?.aborted !== true) return;
+    const error = new Error(
+      "The streamed catalog operation was cancelled."
+    );
+    error.name = "AbortError";
+    throw error;
+  }
+
+  async function compactCatalogStreamOperators(
+    database,
+    generation,
+    encoder,
+    signal = null
+  ) {
+    const stagePrefix = `${generation}:`;
+    const segmentCounts = new Map();
+    let currentPrefix = "";
+    let currentRows = [];
+    let currentBytes = 0;
+    let shardCount = 0;
+    let rowCount = 0;
+    let afterKey = "";
+    let readBatches = 0;
+    let pendingWrites = [];
+    let pendingWriteBytes = 0;
+
+    const flushWrites = async () => {
+      if (pendingWrites.length === 0) return;
+      const writing = pendingWrites;
+      pendingWrites = [];
+      pendingWriteBytes = 0;
+      await storeCatalogCacheBatch(
+        database,
+        writing
+      );
+    };
+    const flushCurrent = async () => {
+      if (currentRows.length === 0) return;
+      const segment =
+        segmentCounts.get(currentPrefix) || 0;
+      if (
+        pendingWrites.length > 0 &&
+        (
+          pendingWrites.length >=
+            STREAM_DEMAND_BATCH_RECORDS ||
+          pendingWriteBytes + currentBytes >
+            STREAM_DEMAND_COMPACTION_WRITE_BYTES
+        )
+      ) {
+        await flushWrites();
+      }
+      pendingWrites.push(
+        catalogStreamOperatorShardEntry(
+          generation,
+          currentPrefix,
+          segment,
+          currentRows,
+          currentBytes
+        )
+      );
+      pendingWriteBytes += currentBytes;
+      segmentCounts.set(
+        currentPrefix,
+        segment + 1
+      );
+      shardCount += 1;
+      currentRows = [];
+      currentBytes = 0;
+      if (
+        pendingWriteBytes >=
+          STREAM_DEMAND_COMPACTION_WRITE_BYTES
+      ) {
+        await flushWrites();
+      }
+    };
+
+    while (true) {
+      catalogStreamThrowIfAborted(signal);
+      const batch =
+        await readCatalogCacheIndexBatch(
+          database,
+          STREAM_DEMAND_OPERATOR_STAGE_INDEX,
+          stagePrefix,
+          afterKey,
+          STREAM_DEMAND_COMPACTION_READ_RECORDS
+        );
+      if (batch.records.length === 0) break;
+      if (!batch.lastKey || batch.lastKey === afterKey) {
+        throw new Error(
+          "The streamed operator compaction cursor stopped making progress."
+        );
+      }
+      afterKey = batch.lastKey;
+      for (const record of batch.records) {
+        catalogStreamThrowIfAborted(signal);
+        const operatorId = String(
+          record?.operatorId || ""
+        );
+        const prefix = String(
+          record?.operatorPrefix || ""
+        );
+        const row = record?.operatorRow;
+        if (
+          record?.format !==
+            STREAM_DEMAND_CACHE_FORMAT ||
+          Number(record?.schemaVersion) !==
+            STREAM_DEMAND_CACHE_SCHEMA_VERSION ||
+          String(record?.generation || "") !==
+            generation ||
+          record?.kind !== "palette-stage" ||
+          !operatorId.startsWith("api.") ||
+          prefix !==
+            catalogStreamOperatorHashPrefix(
+              operatorId
+            ) ||
+          String(record?.operatorStageKey || "") !==
+            `${generation}:${prefix}:${operatorId}` ||
+          !Array.isArray(row) ||
+          row.length !== 4 ||
+          String(row[0] || "") !== operatorId
+        ) {
+          throw new Error(
+            "A streamed operator staging row is invalid."
+          );
+        }
+        const rowBytes =
+          encoder.encode(
+            JSON.stringify(row)
+          ).byteLength + 1;
+        if (
+          currentRows.length > 0 &&
+          (
+            prefix !== currentPrefix ||
+            currentRows.length >=
+              STREAM_DEMAND_OPERATOR_SHARD_RECORDS ||
+            currentBytes + rowBytes >
+              STREAM_DEMAND_OPERATOR_SHARD_BYTES
+          )
+        ) {
+          await flushCurrent();
+        }
+        currentPrefix = prefix;
+        currentRows.push(row);
+        currentBytes += rowBytes;
+        rowCount += 1;
+      }
+      readBatches += 1;
+      if (readBatches % 8 === 0) {
+        await yieldCatalogCacheWork();
+      }
+    }
+    await flushCurrent();
+    await flushWrites();
+    return Object.freeze({
+      shardCount,
+      rowCount,
+      segmentCounts: Object.freeze(
+        [...segmentCounts.entries()]
+      )
+    });
+  }
+
+  async function reusableCatalogStreamManifest(
+    expectedFingerprint
+  ) {
+    const expected = String(
+      expectedFingerprint || ""
+    ).trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(expected)) {
+      return null;
+    }
+    let database;
+    try {
+      database = await openCatalogCache();
+      const active = await readCatalogCacheValue(
+        database,
+        STREAM_DEMAND_ACTIVE_KEY
+      );
+      if (
+        !catalogStreamCacheVersionSupported(active) ||
+        !active?.manifestId ||
+        String(active.catalogFingerprint || "")
+          .trim().toLowerCase() !== expected
+      ) {
+        return null;
+      }
+      const manifest = await readCatalogCacheValue(
+        database,
+        active.manifestId
+      );
+      if (
+        !validCatalogStreamDemandManifest(manifest) ||
+        !catalogStreamRecordMatchesManifest(
+          active,
+          manifest
+        ) ||
+        String(manifest.generation || "") !==
+          String(active.generation || "") ||
+        String(manifest.catalogFingerprint || "")
+          .trim().toLowerCase() !== expected ||
+        String(manifest.assemblyFingerprint || "") !==
+          String(active.assemblyFingerprint || "")
+      ) {
+        return null;
+      }
+      return Object.freeze(manifest);
+    } catch (error) {
+      console.error(
+        "[RML BUILDER INTERNAL FAILURE] The cross-tab catalog cache recheck failed; the authorized stream import will continue without reusing it.",
+        error
+      );
+      return null;
+    } finally {
+      database?.close?.();
+    }
+  }
+
+  function runCatalogStreamIngestWithWriteLock(
+    run,
+    expectedFingerprint,
+    signal
+  ) {
+    const locks = globalThis.navigator?.locks;
+    if (!locks || typeof locks.request !== "function") {
+      return run();
+    }
+    const options = { mode: "exclusive" };
+    if (signal) options.signal = signal;
+    return locks.request(
+      CACHE_WRITE_LOCK_NAME,
+      options,
+      async () => {
+        catalogStreamThrowIfAborted(signal);
+        const reusable =
+          await reusableCatalogStreamManifest(
+            expectedFingerprint
+          );
+        if (reusable) {
+          catalogStreamDemandManifest = reusable;
+          return reusable;
+        }
+        return run();
+      }
+    );
+  }
+
+  async function ingestCatalogDemandStream(
+    url,
+    {
+      expectedFingerprint = "",
+      sourceUrl = "",
+      signal = null,
+      onProgress = null
+    } = {}
+  ) {
+    const ingestKey = String(
+      expectedFingerprint || url || ""
+    ).trim().toLowerCase();
+    while (catalogStreamDemandIngestPromise) {
+      if (
+        catalogStreamDemandIngestKey ===
+        ingestKey
+      ) {
+        return awaitCatalogSettlement(
+          catalogStreamDemandIngestPromise,
+          signal,
+          "The existing scanner demand-stream transfer"
+        );
+      }
+      catalogStreamDemandIngestController
+        ?.abort();
+      try {
+        await awaitCatalogSettlement(
+          catalogStreamDemandIngestPromise,
+          signal,
+          "The superseded scanner demand-stream transfer"
+        );
+      } catch {}
+    }
+    catalogStreamDemandIngestKey = ingestKey;
+    const run = async () => {
+      const generation =
+        createCatalogCacheGeneration();
+      const diagnosticStartedAt =
+        catalogDemandDiagnosticTime();
+      const diagnosticTimings = {
+        requestMs: 0,
+        cachePrepareMs: 0,
+        codecProbeMs: 0,
+        streamElapsedMs: 0,
+        streamReadWaitMs: 0,
+        parseProjectMs: 0,
+        batchPreparationMs: 0,
+        compressionMs: 0,
+        hashMs: 0,
+        transactionMs: 0,
+        paletteFinalizeMs: 0,
+        commitMs: 0,
+        retiredCleanupMs: 0,
+        elapsedMs: 0
+      };
+      const diagnosticCounts = {
+        recordCount: 0,
+        totalBytes: 0,
+        ownerCount: 0,
+        operatorCount: 0,
+        ownerChunkCount: 0,
+        paletteShardCount: 0,
+        ownerPayloadCount: 0,
+        gzipPayloadCount: 0,
+        identityPayloadCount: 0,
+        hashCount: 0,
+        transactionCount: 0
+      };
+      let diagnosticPhase = "request";
+      let diagnosticStatus = "running";
+      let diagnosticError = "";
+      const publishDiagnostics = () =>
+        publishCatalogDemandDiagnostics({
+          ...diagnosticCounts,
+          status: diagnosticStatus,
+          phase: diagnosticPhase,
+          generation,
+          error: diagnosticError,
+          timings: {
+            ...diagnosticTimings,
+            batchPreparationMs:
+              diagnosticCounts.batchPreparationMs ||
+              diagnosticTimings.batchPreparationMs,
+            compressionMs:
+              diagnosticCounts.compressionMs ||
+              diagnosticTimings.compressionMs,
+            hashMs:
+              diagnosticCounts.hashMs ||
+              diagnosticTimings.hashMs,
+            transactionMs:
+              diagnosticCounts.transactionMs ||
+              diagnosticTimings.transactionMs,
+            elapsedMs:
+              catalogDemandDiagnosticTime() -
+              diagnosticStartedAt
+          }
+        });
+      publishDiagnostics();
+      const requestController =
+        new AbortController();
+      catalogStreamDemandIngestController =
+        requestController;
+      const abort = () =>
+        requestController.abort();
+      if (signal?.aborted) abort();
+      else signal?.addEventListener(
+        "abort",
+        abort,
+        { once: true }
+      );
+      const timeout = window.setTimeout(
+        abort,
+        STREAM_DEMAND_TRANSFER_TIMEOUT_MS
+      );
+      let database;
+      let reader = null;
+      let generationCommitted = false;
+      try {
+        const response =
+          await awaitCatalogSettlement(
+            fetch(
+              new URL(url, window.location.href).href,
+              {
+                cache: "no-store",
+                credentials: "same-origin",
+                redirect: "error",
+                signal: requestController.signal,
+                headers: {
+                  Accept:
+                    "application/x-ndjson"
+                }
+              }
+            ),
+            requestController.signal,
+            "The scanner demand-stream request"
+          );
+        diagnosticTimings.requestMs =
+          catalogDemandDiagnosticTime() -
+          diagnosticStartedAt;
+        diagnosticPhase = "cache-prepare";
+        publishDiagnostics();
+        if (!response.ok) {
+          throw new Error(
+            `${response.status} ${response.statusText}`
+          );
+        }
+        if (!response.body?.getReader) {
+          throw new Error(
+            "The browser cannot incrementally read the scanner demand stream."
+          );
+        }
+        const contentType = String(
+          response.headers.get(
+            "content-type"
+          ) || ""
+        ).toLowerCase();
+        if (
+          !contentType.includes(
+            "application/x-ndjson"
+          )
+        ) {
+          throw new Error(
+            "The scanner demand endpoint did not return NDJSON."
+          );
+        }
+        const cachePrepareStarted =
+          catalogDemandDiagnosticTime();
+        try {
+          database = await awaitCatalogSettlement(
+            openCatalogCache(),
+            requestController.signal,
+            "The streamed catalog cache open"
+          );
+          await awaitCatalogSettlement(
+            reclaimObsoleteCatalogStorage(
+              database
+            ),
+            requestController.signal,
+            "The streamed catalog cache preparation"
+          );
+          await awaitCatalogSettlement(
+            stageCatalogStreamDemandGeneration(
+              database,
+              generation
+            ),
+            requestController.signal,
+            "The streamed catalog staging marker"
+          );
+          diagnosticTimings.cachePrepareMs =
+            catalogDemandDiagnosticTime() -
+            cachePrepareStarted;
+        } catch (error) {
+          throw catalogCachePersistenceError(
+            error,
+            "The streamed catalog cache could not prepare storage for a new generation."
+          );
+        }
+        reader = response.body.getReader();
+        const decoder = new TextDecoder(
+          "utf-8",
+          { fatal: true }
+        );
+        const encoder = new TextEncoder();
+        const codecProbeStarted =
+          catalogDemandDiagnosticTime();
+        const ownerPayloadEncoding =
+          await catalogStreamSelectedOwnerPayloadEncoding();
+        diagnosticTimings.codecProbeMs =
+          catalogDemandDiagnosticTime() -
+          codecProbeStarted;
+        diagnosticPhase = "stream";
+        publishDiagnostics();
+        let buffer = "";
+        let totalBytes = 0;
+        let recordCount = 0;
+        let header = null;
+        let headerCounts = null;
+        let commitSeen = false;
+        let pendingManifest = null;
+        let phase = "header";
+        let currentType = null;
+        let currentEnum = null;
+        let firstOwner = "";
+        let bootstrapOwner = "";
+        let operatorCount = 0;
+        const groupCounts = new Map();
+        const visibilityGroupCounts = new Map();
+        let ownerChunk = null;
+        let ownerChunkCount = 0;
+        let rootChunkRows = [];
+        let rootChunkBytes = 0;
+        let rootChunkIndex = 0;
+        let rootChunkCount = 0;
+        let searchShardIndex = 0;
+        let searchShardRows = [];
+        let searchShardBytes = 0;
+        const paletteShardBuffers = new Map();
+        const paletteShardCounts = new Map();
+        let paletteShardCount = 0;
+        let paletteRowCount = 0;
+        let paletteResidentBytes = 0;
+        let lastProgressBucket = -1;
+        const actual = {
+          assemblies: 0,
+          components: 0,
+          materials: 0,
+          commonMaterials: 0,
+          meshes: 0,
+          slotAttachOverloads: 0,
+          types: 0,
+          enums: 0
+        };
+        let batch = [];
+        let batchBytes = 0;
+        let flushedBatchCount = 0;
+
+        const flush = async () => {
+          if (batch.length === 0) return;
+          const writing = batch;
+          batch = [];
+          batchBytes = 0;
+          await storeCatalogCacheBatch(
+            database,
+            writing,
+            diagnosticCounts
+          );
+          flushedBatchCount += 1;
+        };
+        const queue = (entry, bytes = 0) => {
+          batch.push(entry);
+          batchBytes += Math.max(
+            0,
+            Number(bytes) || 0
+          );
+        };
+        const publishProgress = (
+          progress,
+          detail = {}
+        ) => {
+          const bounded = Math.max(
+            0,
+            Math.min(1, Number(progress) || 0)
+          );
+          const bucket = Math.floor(bounded * 100);
+          if (bucket === lastProgressBucket) {
+            return;
+          }
+          lastProgressBucket = bucket;
+          diagnosticCounts.recordCount =
+            recordCount;
+          diagnosticCounts.totalBytes =
+            totalBytes;
+          diagnosticCounts.ownerCount =
+            Math.max(
+              0,
+              Number(detail.ownerCount) || 0
+            );
+          if (bucket % 10 === 0) {
+            publishDiagnostics();
+          }
+          if (typeof onProgress !== "function") {
+            return;
+          }
+          try {
+            onProgress(Object.freeze({
+              phase: "stream",
+              progress: bounded,
+              recordCount,
+              totalBytes,
+              ...detail
+            }));
+          } catch (error) {
+            console.error(
+              "[RML BUILDER INTERNAL FAILURE] The catalog progress observer failed.",
+              error
+            );
+          }
+        };
+        const flushRootChunk = final => {
+          if (rootChunkRows.length === 0) {
+            return;
+          }
+          queue(
+            catalogStreamRawChunkEntry(
+              generation,
+              {
+                section: "root",
+                segment: rootChunkIndex,
+                rows: rootChunkRows,
+                byteLength: rootChunkBytes,
+                final
+              }
+            ),
+            rootChunkBytes
+          );
+          rootChunkIndex += 1;
+          rootChunkCount += 1;
+          rootChunkRows = [];
+          rootChunkBytes = 0;
+        };
+        const queueRootRaw = (
+          record,
+          bytes
+        ) => {
+          const row =
+            catalogStreamCompactRawRecord(
+              record
+            );
+          const rowBytes = Math.max(
+            1,
+            Number(bytes) || 0
+          ) + 1;
+          if (
+            rootChunkRows.length > 0 &&
+            (
+              rootChunkRows.length >=
+                STREAM_DEMAND_OWNER_CHUNK_RECORDS ||
+              rootChunkBytes + rowBytes >
+                STREAM_DEMAND_OWNER_CHUNK_BYTES
+            )
+          ) {
+            flushRootChunk(false);
+          }
+          rootChunkRows.push(row);
+          rootChunkBytes += rowBytes;
+        };
+        const flushOwnerChunk = final => {
+          if (
+            !ownerChunk?.rows?.length &&
+            !ownerChunk?.operatorRows?.length
+          ) {
+            return;
+          }
+          const current = ownerChunk;
+          queue(
+            catalogStreamRawChunkEntry(
+              generation,
+              {
+                owner: current.owner,
+                section: current.section,
+                segment: current.segment,
+                rows: current.rows,
+                operatorRows:
+                  current.operatorRows,
+                operatorStageKeys:
+                  current.operatorStageKeys,
+                byteLength: current.byteLength,
+                final
+              }
+            ),
+            current.byteLength
+          );
+          ownerChunkCount += 1;
+          diagnosticCounts.ownerChunkCount =
+            ownerChunkCount;
+          ownerChunk = final
+            ? null
+            : {
+                owner: current.owner,
+                section: current.section,
+                segment: current.segment + 1,
+                rows: [],
+                operatorRows: [],
+                operatorStageKeys: [],
+                byteLength: 0
+              };
+        };
+        const queueOwnerRaw = (
+          record,
+          bytes,
+          section
+        ) => {
+          const owner =
+            catalogStreamNormalizeCsType(
+              record?.owner || ""
+            );
+          if (
+            ownerChunk &&
+            (
+              ownerChunk.owner !== owner ||
+              ownerChunk.section !== section
+            )
+          ) {
+            flushOwnerChunk(true);
+          }
+          if (!ownerChunk) {
+            ownerChunk = {
+              owner,
+              section,
+              segment: 0,
+              rows: [],
+              operatorRows: [],
+              operatorStageKeys: [],
+              byteLength: 0
+            };
+          }
+          const row =
+            catalogStreamCompactRawRecord(
+              record
+            );
+          const rowBytes = Math.max(
+            1,
+            Number(bytes) || 0
+          ) + 1;
+          if (
+            (
+              ownerChunk.rows.length > 0 ||
+              ownerChunk.operatorRows.length > 0
+            ) &&
+            (
+              ownerChunk.rows.length +
+                ownerChunk.operatorRows.length >=
+                STREAM_DEMAND_OWNER_CHUNK_RECORDS ||
+              ownerChunk.byteLength + rowBytes >
+                STREAM_DEMAND_OWNER_CHUNK_BYTES
+            )
+          ) {
+            flushOwnerChunk(false);
+          }
+          ownerChunk.rows.push(row);
+          ownerChunk.byteLength += rowBytes;
+        };
+        const queueOwnerProjection = projection => {
+          if (!ownerChunk) {
+            throw new Error(
+              "A streamed operator projection has no active owner chunk."
+            );
+          }
+          const operatorRow =
+            catalogStreamProjectionRow(
+              projection
+            );
+          const rowBytes =
+            encoder.encode(
+              JSON.stringify(operatorRow)
+            ).byteLength + 1;
+          if (
+            (
+              ownerChunk.rows.length > 0 ||
+              ownerChunk.operatorRows.length > 0
+            ) &&
+            (
+              ownerChunk.rows.length +
+                ownerChunk.operatorRows.length >=
+                STREAM_DEMAND_OWNER_CHUNK_RECORDS ||
+              ownerChunk.byteLength + rowBytes >
+                STREAM_DEMAND_OWNER_CHUNK_BYTES
+            )
+          ) {
+            flushOwnerChunk(false);
+          }
+          const operatorId = String(
+            projection?.operatorId || ""
+          );
+          ownerChunk.operatorRows.push(
+            operatorRow
+          );
+          ownerChunk.operatorStageKeys.push(
+            `${generation}:${operatorId}`
+          );
+          ownerChunk.byteLength += rowBytes;
+        };
+        const flushSearchShard = () => {
+          if (searchShardRows.length === 0) {
+            return;
+          }
+          queue({
+            add: true,
+            value: {
+              id: catalogStreamDemandRecordKey(
+                generation,
+                "search-shard",
+                catalogStreamDemandIndexPart(
+                  searchShardIndex
+                )
+              ),
+              schemaVersion:
+                STREAM_DEMAND_CACHE_SCHEMA_VERSION,
+              format:
+                STREAM_DEMAND_CACHE_FORMAT,
+              generation,
+              kind: "search-shard",
+              index: searchShardIndex,
+              byteLength: searchShardBytes,
+              rows: searchShardRows
+            }
+          }, searchShardBytes);
+          searchShardIndex += 1;
+          searchShardRows = [];
+          searchShardBytes = 0;
+        };
+        const queueSearchRow = (
+          operatorId,
+          searchText,
+          group,
+          flags = 0
+        ) => {
+          const row = [
+            String(operatorId || ""),
+            String(searchText || "")
+              .toLocaleLowerCase("en-US"),
+            String(group || ""),
+            Number(flags) || 0
+          ];
+          const bytes = encoder.encode(
+            JSON.stringify(row)
+          ).byteLength + 1;
+          if (
+            searchShardRows.length >= 128 ||
+            (
+              searchShardRows.length > 0 &&
+              searchShardBytes + bytes >
+                128 * 1024
+            )
+          ) {
+            flushSearchShard();
+          }
+          searchShardRows.push(row);
+          searchShardBytes += bytes;
+        };
+        const flushPaletteShard = group => {
+          const shard = paletteShardBuffers.get(group);
+          if (!shard?.rows?.length) return;
+          const segment =
+            paletteShardCounts.get(group) || 0;
+          queue({
+            add: true,
+            value: {
+              id: catalogStreamDemandRecordKey(
+                generation,
+                "palette-shard",
+                group,
+                catalogStreamDemandIndexPart(
+                  segment
+                )
+              ),
+              schemaVersion:
+                STREAM_DEMAND_CACHE_SCHEMA_VERSION,
+              format:
+                STREAM_DEMAND_CACHE_FORMAT,
+              generation,
+              kind: "palette-shard",
+              group,
+              segment,
+              byteLength: shard.byteLength,
+              rows: shard.rows
+            }
+          }, shard.byteLength);
+          paletteResidentBytes -=
+            shard.byteLength;
+          paletteShardBuffers.delete(group);
+          paletteShardCounts.set(
+            group,
+            segment + 1
+          );
+          paletteShardCount += 1;
+          diagnosticCounts.paletteShardCount =
+            paletteShardCount;
+        };
+        const queuePaletteRow = projection => {
+          const operatorId = String(
+            projection?.operatorId || ""
+          );
+          const definition =
+            projection?.definition || {};
+          const group = String(
+            definition.group || "Other"
+          );
+          const flags =
+            catalogStreamPaletteFlags(
+              definition
+            );
+          const row = [operatorId, flags];
+          const bytes = encoder.encode(
+            JSON.stringify(row)
+          ).byteLength + 1;
+          let shard =
+            paletteShardBuffers.get(group);
+          if (
+            shard?.rows?.length &&
+            (
+              shard.rows.length >=
+                STREAM_DEMAND_PALETTE_SHARD_RECORDS ||
+              shard.byteLength + bytes >
+                STREAM_DEMAND_PALETTE_SHARD_BYTES
+            )
+          ) {
+            flushPaletteShard(group);
+            shard = null;
+          }
+          if (!shard) {
+            shard = {
+              rows: [],
+              byteLength: 0
+            };
+            paletteShardBuffers.set(
+              group,
+              shard
+            );
+          }
+          shard.rows.push(row);
+          shard.byteLength += bytes;
+          paletteResidentBytes += bytes;
+          paletteRowCount += 1;
+        };
+        const flushPaletteShards = () => {
+          for (const group of
+            [...paletteShardBuffers.keys()]
+              .sort((left, right) =>
+                left.localeCompare(right)
+              )) {
+            flushPaletteShard(group);
+          }
+        };
+        const queueProjection = projection => {
+          queueOwnerProjection(projection);
+          queuePaletteRow(projection);
+          operatorCount += 1;
+          diagnosticCounts.operatorCount =
+            operatorCount;
+          const group =
+            projection.definition.group;
+          groupCounts.set(
+            group,
+            (groupCounts.get(group) || 0) + 1
+          );
+          const flags =
+            catalogStreamPaletteFlags(
+              projection.definition
+            );
+          const visible =
+            visibilityGroupCounts.get(group) ||
+            [0, 0, 0];
+          if (catalogStreamPaletteMetadataVisible(
+            projection.definition,
+            { showAdvanced: false }
+          )) {
+            visible[0] += 1;
+          }
+          if (catalogStreamPaletteMetadataVisible(
+            projection.definition,
+            { showAdvanced: true }
+          )) {
+            visible[1] += 1;
+          }
+          if (catalogStreamPaletteMetadataVisible(
+            projection.definition,
+            {
+              showAdvanced: true,
+              context: "custom-csharp"
+            }
+          )) {
+            visible[2] += 1;
+          }
+          visibilityGroupCounts.set(
+            group,
+            visible
+          );
+          queueSearchRow(
+            projection.operatorId,
+            `${projection.definition.title} ${projection.definition.apiSearchText}`,
+            group,
+            flags
+          );
+        };
+        const requireIndex = (
+          index,
+          expected,
+          label
+        ) => {
+          if (Number(index) !== expected) {
+            throw new Error(
+              `The streamed ${label} index is not contiguous.`
+            );
+          }
+        };
+        const rootComplete = () => {
+          if (!headerCounts) return false;
+          return [
+            "assemblies",
+            "components",
+            "materials",
+            "commonMaterials",
+            "meshes",
+            "slotAttachOverloads"
+          ].every(name =>
+            actual[name] ===
+              headerCounts[name]
+          );
+        };
+        const finishType = () => {
+          if (!currentType) return;
+          for (const [name, expected] of
+            Object.entries(
+              currentType.counts
+            )) {
+            if (
+              currentType.seen[name] !==
+                expected
+            ) {
+              throw new Error(
+                `The streamed type '${currentType.owner}' ended before '${name}' was complete.`
+              );
+            }
+          }
+          flushOwnerChunk(true);
+          currentType = null;
+        };
+        const finishEnum = () => {
+          if (!currentEnum) return;
+          if (
+            currentEnum.seen.values !==
+              currentEnum.counts.values
+          ) {
+            throw new Error(
+              `The streamed enum '${currentEnum.owner}' ended before its values were complete.`
+            );
+          }
+          flushOwnerChunk(true);
+          currentEnum = null;
+        };
+
+        const processRecord = async (
+          record,
+          lineBytes
+        ) => {
+          recordCount += 1;
+          diagnosticCounts.recordCount =
+            recordCount;
+          if (
+            recordCount >
+              STREAM_DEMAND_MAX_RECORDS
+          ) {
+            throw new Error(
+              "The scanner demand stream exceeded its record bound."
+            );
+          }
+          const kind = String(
+            record?.record || ""
+          );
+          if (commitSeen) {
+            throw new Error(
+              "The scanner demand stream contains data after its commit record."
+            );
+          }
+          if (phase === "header") {
+            if (
+              recordCount !== 1 ||
+              kind !== "header" ||
+              record.protocol !==
+                STREAM_DEMAND_PROTOCOL ||
+              Number(record.protocolVersion) !==
+                STREAM_DEMAND_PROTOCOL_VERSION
+            ) {
+              throw new Error(
+                "The scanner demand stream has no valid first header record."
+              );
+            }
+            const contract =
+              scannerFingerprintContract(record);
+            const assemblyFingerprint = String(
+              record.assemblyFingerprint || ""
+            ).trim().toLowerCase();
+            if (
+              !contract ||
+              contract.readerCompatible !== true ||
+              contract.reloadSafetyCompatible !== true ||
+              !/^[a-f0-9]{64}$/.test(
+                assemblyFingerprint
+              ) ||
+              (
+                expectedFingerprint &&
+                contract.fingerprint !==
+                  String(expectedFingerprint)
+                    .trim().toLowerCase()
+              )
+            ) {
+              throw new Error(
+                "The scanner demand header fingerprint contract is incompatible."
+              );
+            }
+            header = record;
+            headerCounts =
+              catalogStreamDemandCounts(
+                record.counts
+              );
+            publishProgress(0, {
+              ownerCount: 0,
+              totalOwnerCount:
+                headerCounts.types +
+                headerCounts.enums
+            });
+            phase = "root";
+            return;
+          }
+
+          if (kind === "catalog-list-item") {
+            if (phase !== "root") {
+              throw new Error(
+                "A root catalog list item appeared after type streaming started."
+              );
+            }
+            const list = String(
+              record.list || ""
+            );
+            if (![
+              "components",
+              "materials",
+              "commonMaterials",
+              "meshes"
+            ].includes(list)) {
+              throw new Error(
+                `Unknown streamed root list '${list}'.`
+              );
+            }
+            requireIndex(
+              record.index,
+              actual[list],
+              list
+            );
+            actual[list] += 1;
+            queueRootRaw(record, lineBytes);
+          } else if (kind === "assembly") {
+            if (phase !== "root") {
+              throw new Error(
+                "An assembly appeared after type streaming started."
+              );
+            }
+            requireIndex(
+              record.index,
+              actual.assemblies,
+              "assembly"
+            );
+            actual.assemblies += 1;
+            queueRootRaw(record, lineBytes);
+            const assemblyName = String(
+              record.value?.name || ""
+            ).trim();
+            if (assemblyName) {
+              queue({
+                add: false,
+                value: {
+                  id: catalogStreamDemandRecordKey(
+                    generation,
+                    "assembly-name",
+                    assemblyName
+                  ),
+                  schemaVersion:
+                    STREAM_DEMAND_CACHE_SCHEMA_VERSION,
+                  format:
+                    STREAM_DEMAND_CACHE_FORMAT,
+                  generation,
+                  kind: "assembly-name",
+                  value: record.value
+                }
+              }, 256);
+            }
+          } else if (
+            kind === "slot-attach-overload"
+          ) {
+            if (phase !== "root") {
+              throw new Error(
+                "A slot overload appeared after type streaming started."
+              );
+            }
+            requireIndex(
+              record.index,
+              actual.slotAttachOverloads,
+              "slot overload"
+            );
+            actual.slotAttachOverloads += 1;
+            queueRootRaw(record, lineBytes);
+          } else if (kind === "type-header") {
+            if (!rootComplete()) {
+              throw new Error(
+                "Type streaming started before the root records were complete."
+              );
+            }
+            if (phase === "enum") {
+              throw new Error(
+                "A type appeared after enum streaming started."
+              );
+            }
+            finishType();
+            phase = "type";
+            requireIndex(
+              record.index,
+              actual.types,
+              "type"
+            );
+            const owner =
+              catalogStreamNormalizeCsType(
+                record.owner
+              );
+            if (
+              !owner ||
+              owner !==
+                catalogStreamNormalizeCsType(
+                  record.value?.fullName
+                )
+            ) {
+              throw new Error(
+                "A streamed type header has a mismatched owner."
+              );
+            }
+            const counts =
+              catalogStreamOwnerCounts(
+                record.counts
+              );
+            currentType = {
+              owner,
+              row: record.value,
+              counts,
+              seen: Object.fromEntries(
+                Object.keys(counts).map(
+                  name => [name, 0]
+                )
+              )
+            };
+            actual.types += 1;
+            publishProgress(
+              (
+                actual.types +
+                actual.enums
+              ) /
+                Math.max(
+                  1,
+                  headerCounts.types +
+                    headerCounts.enums
+                ),
+              {
+                ownerCount:
+                  actual.types +
+                  actual.enums,
+                totalOwnerCount:
+                  headerCounts.types +
+                  headerCounts.enums
+              }
+            );
+            if (!firstOwner) firstOwner = owner;
+            if (owner === "System.Object") {
+              bootstrapOwner = owner;
+            }
+            flushRootChunk(true);
+            queueOwnerRaw(
+              { ...record, owner },
+              lineBytes,
+              "type"
+            );
+            for (const projection of
+              catalogStreamProjectType(
+                { ...record, owner }
+              )) {
+              queueProjection(projection);
+            }
+          } else if (
+            kind === "type-list-item" ||
+            kind === "member"
+          ) {
+            if (
+              phase !== "type" ||
+              !currentType
+            ) {
+              throw new Error(
+                "A streamed type child has no active type header."
+              );
+            }
+            const owner =
+              catalogStreamNormalizeCsType(
+                record.owner
+              );
+            if (owner !== currentType.owner) {
+              throw new Error(
+                "A streamed type child changed owner without a new header."
+              );
+            }
+            const name = kind ===
+              "type-list-item"
+              ? String(record.list || "")
+              : ({
+                  constructor: "constructors",
+                  method: "methods",
+                  property: "properties",
+                  field: "fields",
+                  event: "events"
+                })[String(
+                  record.memberKind || ""
+                )];
+            if (
+              !name ||
+              !Object.hasOwn(
+                currentType.counts,
+                name
+              )
+            ) {
+              throw new Error(
+                "A streamed type child has an unknown list kind."
+              );
+            }
+            requireIndex(
+              record.index,
+              currentType.seen[name],
+              `type ${name}`
+            );
+            currentType.seen[name] += 1;
+            const normalized = {
+              ...record,
+              owner
+            };
+            queueOwnerRaw(
+              normalized,
+              lineBytes,
+              "type"
+            );
+            if (kind === "member") {
+              for (const projection of
+                catalogStreamProjectMember(
+                  normalized,
+                  currentType.row
+                )) {
+                queueProjection(projection);
+              }
+            }
+          } else if (kind === "enum-header") {
+            if (!rootComplete()) {
+              throw new Error(
+                "Enum streaming started before the root records were complete."
+              );
+            }
+            finishType();
+            finishEnum();
+            phase = "enum";
+            requireIndex(
+              record.index,
+              actual.enums,
+              "enum"
+            );
+            const owner =
+              catalogStreamNormalizeCsType(
+                record.owner
+              );
+            if (
+              !owner ||
+              owner !==
+                catalogStreamNormalizeCsType(
+                  record.value?.fullName
+                )
+            ) {
+              throw new Error(
+                "A streamed enum header has a mismatched owner."
+              );
+            }
+            const counts =
+              catalogStreamEnumCounts(
+                record.counts
+              );
+            currentEnum = {
+              owner,
+              counts,
+              seen: { values: 0 }
+            };
+            actual.enums += 1;
+            publishProgress(
+              (
+                actual.types +
+                actual.enums
+              ) /
+                Math.max(
+                  1,
+                  headerCounts.types +
+                    headerCounts.enums
+                ),
+              {
+                ownerCount:
+                  actual.types +
+                  actual.enums,
+                totalOwnerCount:
+                  headerCounts.types +
+                  headerCounts.enums
+              }
+            );
+            queueOwnerRaw(
+              { ...record, owner },
+              lineBytes,
+              "enum"
+            );
+            for (const projection of
+              catalogStreamProjectEnum(
+                { ...record, owner }
+              )) {
+              queueProjection(projection);
+            }
+          } else if (kind === "enum-value") {
+            if (
+              phase !== "enum" ||
+              !currentEnum
+            ) {
+              throw new Error(
+                "A streamed enum value has no active enum header."
+              );
+            }
+            const owner =
+              catalogStreamNormalizeCsType(
+                record.owner
+              );
+            if (owner !== currentEnum.owner) {
+              throw new Error(
+                "A streamed enum value changed owner without a new header."
+              );
+            }
+            requireIndex(
+              record.index,
+              currentEnum.seen.values,
+              "enum value"
+            );
+            currentEnum.seen.values += 1;
+            queueOwnerRaw(
+              { ...record, owner },
+              lineBytes,
+              "enum"
+            );
+            const enumOperatorId =
+              `api.enum.${stableCatalogHash(owner)}`;
+            queueSearchRow(
+              enumOperatorId,
+              `${owner} ${record.value?.name || ""}`,
+              owner === "HarmonyLib" ||
+              owner.startsWith("HarmonyLib.")
+                ? CATALOG_STREAM_GROUPS.advanced
+                : CATALOG_STREAM_GROUPS.types,
+              (
+                owner === "HarmonyLib" ||
+                owner.startsWith("HarmonyLib.")
+                  ? 1
+                  : 0
+              ) | 2
+            );
+          } else if (kind === "commit") {
+            finishType();
+            finishEnum();
+            if (
+              !rootComplete() ||
+              actual.types !==
+                headerCounts.types ||
+              actual.enums !==
+                headerCounts.enums ||
+              record.protocol !==
+                STREAM_DEMAND_PROTOCOL ||
+              Number(record.protocolVersion) !==
+                STREAM_DEMAND_PROTOCOL_VERSION ||
+              record.complete !== true ||
+              Number(record.recordCount) !==
+                recordCount ||
+              String(record.catalogFingerprint || "")
+                .trim().toLowerCase() !==
+                String(header.catalogFingerprint || "")
+                  .trim().toLowerCase() ||
+              String(record.assemblyFingerprint || "")
+                .trim().toLowerCase() !==
+                String(header.assemblyFingerprint || "")
+                  .trim().toLowerCase() ||
+              !catalogStreamDemandSameCounts(
+                record.counts,
+                headerCounts
+              )
+            ) {
+              throw new Error(
+                "The scanner demand commit does not match its streamed generation."
+              );
+            }
+            publishProgress(1, {
+              ownerCount:
+                actual.types + actual.enums,
+              totalOwnerCount:
+                headerCounts.types +
+                headerCounts.enums
+            });
+            flushRootChunk(true);
+            flushSearchShard();
+            const paletteFinalizeStarted =
+              catalogDemandDiagnosticTime();
+            flushPaletteShards();
+            diagnosticTimings.paletteFinalizeMs +=
+              catalogDemandDiagnosticTime() -
+              paletteFinalizeStarted;
+            await flush();
+            if (
+              paletteRowCount !==
+                operatorCount
+            ) {
+              throw new Error(
+                "The directly sharded streamed palette is incomplete."
+              );
+            }
+            const root = { ...header };
+            delete root.record;
+            delete root.protocol;
+            delete root.protocolVersion;
+            delete root.counts;
+            root.assemblies = [];
+            root.components = [];
+            root.materials = [];
+            root.commonMaterials = [];
+            root.meshes = [];
+            root.slotAttachOverloads = [];
+            root.types = [];
+            root.enums = [];
+            const manifest = {
+              id:
+                catalogStreamDemandManifestKey(
+                  generation
+                ),
+              schemaVersion:
+                STREAM_DEMAND_CACHE_SCHEMA_VERSION,
+              format:
+                STREAM_DEMAND_CACHE_FORMAT,
+              generation,
+              protocol:
+                STREAM_DEMAND_PROTOCOL,
+              protocolVersion:
+                STREAM_DEMAND_PROTOCOL_VERSION,
+              createdAtUtc:
+                new Date().toISOString(),
+              sourceUrl: String(
+                sourceUrl || url
+              ),
+              demandUrl: String(url),
+              catalogFingerprint: String(
+                header.catalogFingerprint
+              ).trim().toLowerCase(),
+              assemblyFingerprint: String(
+                header.assemblyFingerprint
+              ).trim().toLowerCase(),
+              recordCount,
+              totalBytes,
+              operatorCount,
+              ownerChunkCount,
+              rootChunkCount,
+              operatorShardCount: 0,
+              operatorShardCounts: [],
+              operatorIndexKind:
+                "owner-multientry-v1",
+              ownerPayloadEncoding,
+              paletteShardCount:
+                paletteShardCount,
+              paletteShardCounts:
+                [...paletteShardCounts.entries()],
+              searchShardCount:
+                searchShardIndex,
+              groupCounts:
+                [...groupCounts.entries()]
+                  .sort((left, right) =>
+                    left[0].localeCompare(
+                      right[0]
+                    )
+                  ),
+              visibilityGroupCounts:
+                [...visibilityGroupCounts]
+                  .map(([group, counts]) => [
+                    group,
+                    counts[0],
+                    counts[1],
+                    counts[2]
+                  ])
+                  .sort((left, right) =>
+                    left[0].localeCompare(
+                      right[0]
+                    )
+                  ),
+              counts: headerCounts,
+              bootstrapOwner:
+                bootstrapOwner || firstOwner,
+              root
+            };
+            if (
+              !validCatalogStreamDemandManifest(
+                manifest
+              )
+            ) {
+              throw new Error(
+                "The completed streamed catalog manifest is invalid."
+              );
+            }
+            pendingManifest = manifest;
+            commitSeen = true;
+            return;
+          } else {
+            throw new Error(
+              `Unknown scanner demand record '${kind}'.`
+            );
+          }
+
+          const residentBytes =
+            batchBytes +
+            rootChunkBytes +
+            (ownerChunk?.byteLength || 0) +
+            searchShardBytes +
+            paletteResidentBytes;
+          if (
+            residentBytes >=
+              STREAM_DEMAND_TRANSIENT_FLUSH_BYTES
+          ) {
+            if (rootChunkRows.length > 0) {
+              flushRootChunk(false);
+            }
+            if (ownerChunk?.rows?.length) {
+              flushOwnerChunk(false);
+            }
+            flushSearchShard();
+          }
+          if (
+            batch.length >=
+              STREAM_DEMAND_INGEST_BATCH_RECORDS ||
+            batchBytes >=
+              STREAM_DEMAND_BATCH_BYTES ||
+            residentBytes >=
+              STREAM_DEMAND_TRANSIENT_FLUSH_BYTES
+          ) {
+            await flush();
+            if (
+              flushedBatchCount % 8 === 0
+            ) {
+              await yieldCatalogCacheWork();
+            }
+          }
+        };
+
+        const processLine = async line => {
+          if (!line.trim()) return;
+          const encoded = encoder.encode(line);
+          if (
+            encoded.byteLength >
+              STREAM_DEMAND_MAX_LINE_BYTES
+          ) {
+            throw new Error(
+              "A scanner demand record exceeds the per-line memory bound."
+            );
+          }
+          let record;
+          try {
+            record = JSON.parse(line);
+          } catch {
+            throw new Error(
+              "A scanner demand record contains invalid JSON."
+            );
+          }
+          if (
+            !record ||
+            typeof record !== "object" ||
+            Array.isArray(record)
+          ) {
+            throw new Error(
+              "A scanner demand record is not a JSON object."
+            );
+          }
+          assertCatalogStreamJsonBounds(record);
+          await processRecord(
+            record,
+            encoded.byteLength
+          );
+          record = null;
+        };
+
+        const streamStarted =
+          catalogDemandDiagnosticTime();
+        while (true) {
+          const readStarted =
+            catalogDemandDiagnosticTime();
+          const next = await awaitCatalogSettlement(
+            reader.read(),
+            requestController.signal,
+            "The scanner demand-stream read"
+          );
+          diagnosticTimings.streamReadWaitMs +=
+            catalogDemandDiagnosticTime() -
+            readStarted;
+          if (next.done) break;
+          totalBytes += next.value.byteLength;
+          diagnosticCounts.totalBytes =
+            totalBytes;
+          if (
+            totalBytes >
+              STREAM_DEMAND_MAX_TOTAL_BYTES
+          ) {
+            throw new Error(
+              "The scanner demand stream exceeds the total transfer bound."
+            );
+          }
+          buffer += decoder.decode(
+            next.value,
+            { stream: true }
+          );
+          let lineEnd;
+          while (
+            (lineEnd = buffer.indexOf("\n")) >= 0
+          ) {
+            let line = buffer.slice(0, lineEnd);
+            buffer = buffer.slice(lineEnd + 1);
+            if (line.endsWith("\r")) {
+              line = line.slice(0, -1);
+            }
+            await processLine(line);
+          }
+          if (
+            buffer.length >
+              STREAM_DEMAND_MAX_LINE_BYTES
+          ) {
+            throw new Error(
+              "A scanner demand record exceeds the line buffer bound."
+            );
+          }
+        }
+        buffer += decoder.decode();
+        if (buffer.trim()) {
+          await processLine(buffer);
+        }
+        await flush();
+        diagnosticTimings.streamElapsedMs =
+          catalogDemandDiagnosticTime() -
+          streamStarted;
+        diagnosticTimings.parseProjectMs = Math.max(
+          0,
+          diagnosticTimings.streamElapsedMs -
+            diagnosticTimings.streamReadWaitMs -
+            (Number(
+              diagnosticCounts.batchPreparationMs
+            ) || 0) -
+            (Number(
+              diagnosticCounts.transactionMs
+            ) || 0)
+        );
+        diagnosticPhase = "finalize";
+        publishDiagnostics();
+        if (!commitSeen || !pendingManifest) {
+          throw new Error(
+            "The scanner demand stream ended without a verified commit."
+          );
+        }
+        const commitStarted =
+          catalogDemandDiagnosticTime();
+        const previousActive =
+          await readCatalogCacheValue(
+            database,
+            STREAM_DEMAND_ACTIVE_KEY
+          );
+        await commitCatalogStreamDemandManifest(
+          database,
+          pendingManifest,
+          previousActive
+        );
+        generationCommitted = true;
+        diagnosticTimings.commitMs =
+          catalogDemandDiagnosticTime() -
+          commitStarted;
+        const retiredCleanupStarted =
+          catalogDemandDiagnosticTime();
+        const retiredGeneration = String(
+          previousActive?.previousGeneration || ""
+        );
+        if (
+          retiredGeneration &&
+          retiredGeneration !== generation &&
+          retiredGeneration !== String(
+            previousActive?.generation || ""
+          )
+        ) {
+          try {
+            await deleteCatalogCachePrefixBatches(
+              database,
+              catalogStreamDemandGenerationPrefix(
+                retiredGeneration
+              )
+            );
+          } catch {}
+        }
+        diagnosticTimings.retiredCleanupMs =
+          catalogDemandDiagnosticTime() -
+          retiredCleanupStarted;
+        catalogStreamDemandManifest =
+          Object.freeze(pendingManifest);
+        diagnosticCounts.recordCount =
+          recordCount;
+        diagnosticCounts.totalBytes =
+          totalBytes;
+        diagnosticCounts.ownerCount =
+          actual.types + actual.enums;
+        diagnosticCounts.operatorCount =
+          operatorCount;
+        diagnosticCounts.ownerChunkCount =
+          ownerChunkCount;
+        diagnosticCounts.paletteShardCount =
+          paletteShardCount;
+        diagnosticStatus = "complete";
+        diagnosticPhase = "complete";
+        return catalogStreamDemandManifest;
+      } catch (error) {
+        diagnosticStatus = "failed";
+        diagnosticPhase = "failed";
+        diagnosticError = String(
+          error?.message || error || ""
+        );
+        throw error;
+      } finally {
+        if (!generationCommitted) {
+          requestController.abort();
+          try {
+            const cancellation =
+              reader?.cancel?.();
+            Promise.resolve(cancellation)
+              .catch(error => {
+                console.error(
+                  "[RML BUILDER INTERNAL FAILURE] The cancelled scanner stream reader failed to close.",
+                  error
+                );
+              });
+          } catch {}
+        }
+        if (database && !generationCommitted) {
+          try {
+            await deleteCatalogCachePrefixBatches(
+              database,
+              catalogStreamDemandGenerationPrefix(
+                generation
+              )
+            );
+          } catch {}
+        }
+        database?.close?.();
+        signal?.removeEventListener(
+          "abort",
+          abort
+        );
+        window.clearTimeout(timeout);
+        diagnosticTimings.elapsedMs =
+          catalogDemandDiagnosticTime() -
+          diagnosticStartedAt;
+        publishDiagnostics();
+      }
+    };
+    const pending = runCatalogStreamIngestWithWriteLock(
+      run,
+      expectedFingerprint,
+      signal
+    );
+    const tracked = pending.finally(() => {
+      if (
+        catalogStreamDemandIngestPromise ===
+        tracked
+      ) {
+        catalogStreamDemandIngestPromise = null;
+        catalogStreamDemandIngestKey = "";
+        catalogStreamDemandIngestController = null;
+      }
+    });
+    catalogStreamDemandIngestPromise = tracked;
+    return tracked;
   }
 
   function catalogCacheManifestIntegrity(
@@ -1822,6 +6607,7 @@
   ) {
     return new Promise(
       (resolve, reject) => {
+        let settled = false;
         const transaction =
           database.transaction(
             CACHE_STORE_NAME,
@@ -1836,18 +6622,44 @@
             index
           )
         );
-        chunkRequest.onsuccess = () => {
-          resolve(chunkRequest.result || null);
+        const finish = (callback, value) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeout);
+          callback(value);
         };
         const fail = request =>
-          reject(
-            request.error ||
+          finish(
+            reject,
+            request?.error ||
+            transaction.error ||
             new Error(
               window.RMLI18n.t("ui.literal.cbfab94cc829")
             )
           );
+        const timeout = window.setTimeout(() => {
+          try {
+            transaction.abort();
+          } catch {}
+          finish(
+            reject,
+            new Error(
+              "A local catalog cache chunk did not answer in time; the cache will be ignored instead of blocking the Builder."
+            )
+          );
+        }, CACHE_REQUEST_TIMEOUT_MS);
+        chunkRequest.onsuccess = () => {
+          finish(
+            resolve,
+            chunkRequest.result || null
+          );
+        };
         chunkRequest.onerror = () =>
           fail(chunkRequest);
+        transaction.onerror = () =>
+          fail(transaction);
+        transaction.onabort = () =>
+          fail(transaction);
       }
     );
   }
@@ -1974,8 +6786,6 @@
         Number(manifest?.fullByteLength)
       ) &&
       Number(manifest?.fullByteLength) > 0 &&
-      Number(manifest?.apiFactoryVersion) ===
-        REQUIRED_API_FACTORY_VERSION &&
       manifest?.root &&
       typeof manifest.root === "object" &&
       !Array.isArray(manifest.root) &&
@@ -2336,7 +7146,10 @@
       builderModuleId:
         CATALOG_LOADER_MODULE_ID,
       apiFactoryVersion:
-        REQUIRED_API_FACTORY_VERSION,
+        Number(
+          window.RMLApiNodeFactoryController
+            ?.factoryVersion
+        ) || 0,
       root:
         catalogDemandRootWithoutRows(raw),
       typeRouting,
@@ -2388,7 +7201,10 @@
     chunkCache
   ) {
     if (chunkCache.has(index)) {
-      return chunkCache.get(index);
+      const cached = chunkCache.get(index);
+      chunkCache.delete(index);
+      chunkCache.set(index, cached);
+      return cached;
     }
     const expected =
       manifest.chunks[index];
@@ -2432,6 +7248,14 @@
       );
     }
     chunkCache.set(index, record);
+    while (
+      chunkCache.size >
+      CATALOG_DEMAND_CHUNK_CACHE_LIMIT
+    ) {
+      const oldest = chunkCache.keys().next();
+      if (oldest.done) break;
+      chunkCache.delete(oldest.value);
+    }
     return record;
   }
 
@@ -3201,6 +8025,1427 @@
     });
   }
 
+  function createCatalogStreamDemandState(
+    manifest
+  ) {
+    return {
+      streamV1: true,
+      manifest,
+      fullManifest: manifest,
+      generation: manifest.generation,
+      seedOwners: new Set(),
+      pinnedOwners: new Set(),
+      ephemeralOwners: new Set(),
+      dependencyOwners: new Set(),
+      bootstrapOwners: new Set(
+        manifest.bootstrapOwner
+          ? [manifest.bootstrapOwner]
+          : []
+      ),
+      requiredOperatorIds: new Set(),
+      operatorRows: new Map(),
+      operatorShardCounts: new Map(
+        manifest.operatorShardCounts || []
+      ),
+      rows: new Map(),
+      assemblies: new Map(),
+      chunkCache: new Map(),
+      fullActive: false,
+      fallbackReason: "",
+      hydrationRevision: 0,
+      unresolvedOperatorIds: []
+    };
+  }
+
+  async function readCatalogStreamRecord(
+    database,
+    state,
+    ...parts
+  ) {
+    const record = await readCatalogCacheValue(
+      database,
+      catalogStreamDemandRecordKey(
+        state.generation,
+        ...parts
+      )
+    );
+    if (!record) return null;
+    if (
+      !catalogStreamRecordMatchesManifest(
+        record,
+        state.manifest
+      ) ||
+      String(record.generation || "") !==
+        state.generation
+    ) {
+      throw new Error(
+        "A streamed catalog cache record does not belong to the active generation."
+      );
+    }
+    return record;
+  }
+
+  function catalogStreamOperatorRowsFromOwnerChunk(
+    state,
+    chunk
+  ) {
+    const rows = chunk?.rows;
+    const operatorRows = chunk?.operatorRows;
+    const operatorStageKeys =
+      chunk?.operatorStageKeys;
+    if (
+      !catalogStreamRecordMatchesManifest(
+        chunk,
+        state.manifest
+      ) ||
+      String(chunk?.generation || "") !==
+        state.generation ||
+      chunk?.kind !== "owner-chunk" ||
+      !catalogStreamNormalizeCsType(chunk.owner) ||
+      !["type", "enum"].includes(
+        String(chunk.section || "")
+      ) ||
+      !Number.isInteger(Number(chunk.segment)) ||
+      Number(chunk.segment) < 0 ||
+      !Array.isArray(rows) ||
+      !Array.isArray(operatorRows) ||
+      operatorRows.length < 1 ||
+      rows.length + operatorRows.length >
+        STREAM_DEMAND_OWNER_CHUNK_RECORDS ||
+      !Array.isArray(operatorStageKeys) ||
+      operatorStageKeys.length !==
+        operatorRows.length ||
+      !catalogStreamBoundedShardBytes(
+        chunk.byteLength,
+        STREAM_DEMAND_OWNER_CHUNK_BYTES,
+        Math.max(
+          1,
+          rows.length + operatorRows.length
+        )
+      )
+    ) {
+      throw new Error(
+        "A streamed operator owner chunk is invalid."
+      );
+    }
+    const indexed = new Map();
+    for (
+      let rowIndex = 0;
+      rowIndex < operatorRows.length;
+      rowIndex += 1
+    ) {
+      const row = operatorRows[rowIndex];
+      if (!Array.isArray(row) || row.length !== 4) {
+        throw new Error(
+          "A streamed operator owner row is invalid."
+        );
+      }
+      const operatorId = String(row[0] || "");
+      if (
+        !operatorId.startsWith("api.") ||
+        indexed.has(operatorId) ||
+        String(operatorStageKeys[rowIndex] || "") !==
+          `${state.generation}:${operatorId}` ||
+        catalogStreamNormalizeCsType(row[1]) !==
+          catalogStreamNormalizeCsType(chunk.owner)
+      ) {
+        throw new Error(
+          "A streamed operator owner index is inconsistent."
+        );
+      }
+      indexed.set(operatorId, row);
+    }
+    return indexed;
+  }
+
+  async function readCatalogStreamOperators(
+    database,
+    state,
+    operatorIds,
+    signal = null
+  ) {
+    const requested = [...new Set(
+      (operatorIds || [])
+        .map(value => String(value || ""))
+        .filter(value =>
+          value.startsWith("api.")
+        )
+    )];
+    const found = new Map();
+    for (
+      let offset = 0;
+      offset < requested.length;
+      offset +=
+        STREAM_DEMAND_OPERATOR_READ_RECORDS
+    ) {
+      catalogStreamThrowIfAborted(signal);
+      const batch = requested.slice(
+        offset,
+        offset +
+          STREAM_DEMAND_OPERATOR_READ_RECORDS
+      );
+      const keys = batch.map(operatorId =>
+        `${state.generation}:${operatorId}`
+      );
+      const values =
+        await readCatalogCacheIndexValues(
+          database,
+          STREAM_DEMAND_OPERATOR_OWNER_INDEX,
+          keys
+        );
+      const grouped = new Map();
+      for (let index = 0; index < batch.length; index += 1) {
+        const chunk = values.get(keys[index]);
+        if (!chunk) continue;
+        const chunkId = String(chunk.id || "");
+        if (!chunkId) {
+          throw new Error(
+            "A streamed operator owner chunk has no stable cache identity."
+          );
+        }
+        if (!grouped.has(chunkId)) {
+          grouped.set(chunkId, {
+            chunk,
+            requests: []
+          });
+        }
+        grouped.get(chunkId).requests.push({
+          wantedId: batch[index],
+          key: keys[index]
+        });
+      }
+      for (const group of grouped.values()) {
+        catalogStreamThrowIfAborted(signal);
+        const chunk = await decodeCatalogStreamOwnerChunk(
+          group.chunk
+        );
+        const indexed =
+          catalogStreamOperatorRowsFromOwnerChunk(
+            state,
+            chunk
+          );
+        for (const request of group.requests) {
+          const selected = indexed.get(
+            request.wantedId
+          );
+          if (
+            !selected ||
+            !chunk.operatorStageKeys.includes(
+              request.key
+            )
+          ) {
+            throw new Error(
+              "A streamed operator index points to the wrong owner chunk."
+            );
+          }
+          found.set(request.wantedId, {
+            format: state.manifest.format,
+            schemaVersion:
+              state.manifest.schemaVersion,
+            generation: state.generation,
+            kind: "operator",
+            operatorId: request.wantedId,
+            owner:
+              catalogStreamNormalizeCsType(
+                selected[1]
+              ),
+            locator: selected[2],
+            definition: selected[3]
+          });
+        }
+      }
+      if (
+        offset > 0 &&
+        offset %
+          (STREAM_DEMAND_OPERATOR_READ_RECORDS * 4) ===
+            0
+      ) {
+        await yieldCatalogCacheWork();
+      }
+    }
+    return found;
+  }
+  async function readCatalogStreamAssembly(
+    database,
+    state,
+    assemblyName
+  ) {
+    const name = String(
+      assemblyName || ""
+    ).trim();
+    if (!name || state.assemblies.has(name)) {
+      return;
+    }
+    const record =
+      await readCatalogStreamRecord(
+        database,
+        state,
+        "assembly-name",
+        name
+      );
+    if (record?.value) {
+      state.assemblies.set(
+        name,
+        record.value
+      );
+    }
+  }
+
+  function createCatalogStreamOwnerHydration(
+    state,
+    owner,
+    locators,
+    dependencyOnly,
+    hydrateAllMembers = false
+  ) {
+    const normalizedOwner =
+      catalogStreamNormalizeCsType(owner);
+    const wantedMembers = new Set();
+    let wantsEnum = false;
+    for (const locator of locators || []) {
+      if (locator?.record === "enum-header") {
+        wantsEnum = true;
+      }
+      if (locator?.record !== "member") {
+        continue;
+      }
+      const memberKind = String(
+        locator.memberKind || ""
+      );
+      const index = Number(locator.index);
+      if (
+        memberKind &&
+        Number.isInteger(index) &&
+        index >= 0
+      ) {
+        wantedMembers.add(
+          `${memberKind}:${index}`
+        );
+      }
+    }
+    return {
+      state,
+      owner: normalizedOwner,
+      dependencyOnly: dependencyOnly === true,
+      hydrateAllMembers:
+        hydrateAllMembers === true,
+      wantsEnum,
+      wantedMembers,
+      foundMembers: new Set(),
+      trackers: new Map(),
+      typeHeader: null,
+      enumHeader: null,
+      typeRow: null,
+      enumValues: null,
+      seenEnumValues: 0
+    };
+  }
+
+  function catalogStreamOwnerHydrationTarget(
+    typeRow,
+    memberKind
+  ) {
+    return ({
+      constructor: typeRow?.constructors,
+      method: typeRow?.methods,
+      property: typeRow?.properties,
+      field: typeRow?.fields,
+      event: typeRow?.events
+    })[memberKind] || null;
+  }
+
+  function applyCatalogStreamOwnerChunk(
+    hydration,
+    chunk
+  ) {
+    if (
+      !catalogStreamRecordMatchesManifest(
+        chunk,
+        hydration.state.manifest
+      ) ||
+      String(chunk?.generation || "") !==
+        hydration.state.generation ||
+      chunk?.kind !== "owner-chunk" ||
+      catalogStreamNormalizeCsType(
+        chunk.owner
+      ) !== hydration.owner
+    ) {
+      throw new Error(
+        "A streamed owner chunk belongs to another cache generation."
+      );
+    }
+    const section = String(
+      chunk.section || ""
+    );
+    if (section !== "type" && section !== "enum") {
+      throw new Error(
+        "A streamed owner chunk has an invalid section."
+      );
+    }
+    const rows = chunk.rows;
+    const operatorRows =
+      chunk.operatorRows;
+    const operatorStageKeys =
+      chunk.operatorStageKeys;
+    if (
+      !Array.isArray(rows) ||
+      !Array.isArray(operatorRows) ||
+      !Array.isArray(operatorStageKeys) ||
+      operatorStageKeys.length !==
+        operatorRows.length ||
+      rows.length + operatorRows.length < 1 ||
+      rows.length + operatorRows.length >
+        STREAM_DEMAND_OWNER_CHUNK_RECORDS ||
+      !catalogStreamBoundedShardBytes(
+        chunk.byteLength,
+        STREAM_DEMAND_OWNER_CHUNK_BYTES,
+        rows.length + operatorRows.length
+      )
+    ) {
+      throw new Error(
+        "A streamed owner chunk exceeds its storage bound."
+      );
+    }
+    const indexedOperators = new Set();
+    for (
+      let index = 0;
+      index < operatorRows.length;
+      index += 1
+    ) {
+      const row = operatorRows[index];
+      const operatorId = String(
+        row?.[0] || ""
+      );
+      if (
+        !Array.isArray(row) ||
+        row.length !== 4 ||
+        !operatorId.startsWith("api.") ||
+        indexedOperators.has(operatorId) ||
+        String(operatorStageKeys[index] || "") !==
+          `${hydration.state.generation}:${operatorId}` ||
+        catalogStreamNormalizeCsType(
+          row[1]
+        ) !== hydration.owner
+      ) {
+        throw new Error(
+          "A streamed owner operator index is invalid."
+        );
+      }
+      indexedOperators.add(operatorId);
+    }
+    const tracker =
+      hydration.trackers.get(section) || {
+        segment: 0,
+        final: false
+      };
+    const segment = Number(chunk.segment);
+    if (
+      tracker.final ||
+      !Number.isInteger(segment) ||
+      segment !== tracker.segment
+    ) {
+      throw new Error(
+        "A streamed owner chunk has a corrupt segment suffix."
+      );
+    }
+
+    for (const row of rows) {
+      if (
+        !Array.isArray(row) ||
+        row.length !== 6
+      ) {
+        throw new Error(
+          "A streamed owner chunk row is invalid."
+        );
+      }
+      const kind = String(row[0] || "");
+      const list = String(row[1] || "");
+      const memberKind = String(row[2] || "");
+      const index = Number(row[3]);
+      const countsValue = row[4];
+      const value = row[5];
+
+      if (kind === "type-header") {
+        if (
+          section !== "type" ||
+          hydration.typeHeader ||
+          segment !== 0
+        ) {
+          throw new Error(
+            "A streamed type header is duplicated or misplaced."
+          );
+        }
+        const counts =
+          catalogStreamOwnerCounts(
+            countsValue
+          );
+        hydration.typeHeader = {
+          index,
+          counts,
+          value
+        };
+        hydration.typeRow = {
+          ...value,
+          interfaces: [],
+          categories: [],
+          attributes: [],
+          enumValues: [],
+          constructors:
+            hydration.dependencyOnly
+              ? []
+              : new Array(counts.constructors),
+          methods:
+            hydration.dependencyOnly
+              ? []
+              : new Array(counts.methods),
+          properties:
+            hydration.dependencyOnly
+              ? []
+              : new Array(counts.properties),
+          fields:
+            hydration.dependencyOnly
+              ? []
+              : new Array(counts.fields),
+          events:
+            hydration.dependencyOnly
+              ? []
+              : new Array(counts.events)
+        };
+        continue;
+      }
+      if (kind === "enum-header") {
+        if (
+          section !== "enum" ||
+          hydration.enumHeader ||
+          segment !== 0
+        ) {
+          throw new Error(
+            "A streamed enum header is duplicated or misplaced."
+          );
+        }
+        const counts =
+          catalogStreamEnumCounts(
+            countsValue
+          );
+        hydration.enumHeader = {
+          index,
+          counts,
+          value
+        };
+        if (
+          (
+            hydration.wantsEnum ||
+            hydration.hydrateAllMembers
+          ) &&
+          !hydration.dependencyOnly
+        ) {
+          hydration.enumValues =
+            new Array(counts.values);
+        }
+        continue;
+      }
+      if (
+        kind === "type-list-item" &&
+        section === "type"
+      ) {
+        const counts =
+          hydration.typeHeader?.counts;
+        if (
+          !counts ||
+          !Object.hasOwn(counts, list) ||
+          !Number.isInteger(index) ||
+          index < 0 ||
+          index >= counts[list]
+        ) {
+          throw new Error(
+            "A streamed type-list cache index is invalid."
+          );
+        }
+        if (list === "interfaces") {
+          hydration.typeRow.interfaces[index] =
+            value;
+        }
+        continue;
+      }
+      if (
+        kind === "member" &&
+        section === "type"
+      ) {
+        const countName = ({
+          constructor: "constructors",
+          method: "methods",
+          property: "properties",
+          field: "fields",
+          event: "events"
+        })[memberKind];
+        const declaredCount =
+          hydration.typeHeader?.counts?.[
+            countName
+          ];
+        const target =
+          catalogStreamOwnerHydrationTarget(
+            hydration.typeRow,
+            memberKind
+          );
+        if (
+          !countName ||
+          !Number.isInteger(declaredCount) ||
+          !Number.isInteger(index) ||
+          index < 0 ||
+          index >= declaredCount
+        ) {
+          throw new Error(
+            `The streamed ${memberKind} index for '${hydration.owner}' is outside its declared range.`
+          );
+        }
+        const token = `${memberKind}:${index}`;
+        if (
+          !hydration.dependencyOnly &&
+          (
+            hydration.hydrateAllMembers ||
+            hydration.wantedMembers.has(token)
+          )
+        ) {
+          if (!target) {
+            throw new Error(
+              "A streamed member target is unavailable."
+            );
+          }
+          target[index] = value;
+          hydration.foundMembers.add(token);
+        }
+        continue;
+      }
+      if (
+        kind === "enum-value" &&
+        section === "enum"
+      ) {
+        const count =
+          hydration.enumHeader?.counts?.values;
+        if (
+          !Number.isInteger(index) ||
+          index < 0 ||
+          !Number.isInteger(count) ||
+          index >= count
+        ) {
+          throw new Error(
+            "A streamed enum cache index is invalid."
+          );
+        }
+        if (hydration.enumValues) {
+          if (Object.hasOwn(
+            hydration.enumValues,
+            index
+          )) {
+            throw new Error(
+              "A streamed enum cache index is duplicated."
+            );
+          }
+          hydration.enumValues[index] = value;
+          hydration.seenEnumValues += 1;
+        }
+        continue;
+      }
+      throw new Error(
+        "A streamed owner chunk row is in the wrong section."
+      );
+    }
+    tracker.segment += 1;
+    tracker.final = chunk.final === true;
+    hydration.trackers.set(section, tracker);
+  }
+
+  function finishCatalogStreamOwnerHydration(
+    hydration
+  ) {
+    if (
+      !hydration.typeHeader &&
+      !hydration.enumHeader
+    ) {
+      return null;
+    }
+    for (const tracker of
+      hydration.trackers.values()) {
+      if (!tracker.final) {
+        throw new Error(
+          `The streamed owner '${hydration.owner}' has an incomplete chunk suffix.`
+        );
+      }
+    }
+    for (const token of
+      hydration.wantedMembers) {
+      if (!hydration.foundMembers.has(token)) {
+        throw new Error(
+          `The streamed member '${token}' for '${hydration.owner}' is missing.`
+        );
+      }
+    }
+    if (
+      hydration.hydrateAllMembers &&
+      !hydration.dependencyOnly &&
+      hydration.typeHeader
+    ) {
+      for (const [memberKind, countName] of
+        Object.entries({
+          constructor: "constructors",
+          method: "methods",
+          property: "properties",
+          field: "fields",
+          event: "events"
+        })) {
+        const target =
+          catalogStreamOwnerHydrationTarget(
+            hydration.typeRow,
+            memberKind
+          );
+        const declaredCount = Number(
+          hydration.typeHeader.counts?.[
+            countName
+          ] || 0
+        );
+        if (
+          !Array.isArray(target) ||
+          target.length !== declaredCount ||
+          Array.from(
+            { length: declaredCount },
+            (_, index) => index
+          ).some(index =>
+            !Object.hasOwn(target, index)
+          )
+        ) {
+          throw new Error(
+            `The complete streamed ${memberKind} set for '${hydration.owner}' is incomplete.`
+          );
+        }
+      }
+    }
+    let enumRow = null;
+    if (
+      hydration.enumValues &&
+      hydration.enumHeader
+    ) {
+      if (
+        hydration.seenEnumValues !==
+          hydration.enumValues.length
+      ) {
+        throw new Error(
+          `The streamed enum '${hydration.owner}' is incomplete.`
+        );
+      }
+      enumRow = {
+        ...hydration.enumHeader.value,
+        values: hydration.enumValues
+      };
+    }
+    return {
+      owner: hydration.owner,
+      typeIndex: Number(
+        hydration.typeHeader?.index ?? -1
+      ),
+      enumIndex: Number(
+        hydration.enumHeader?.index ?? -1
+      ),
+      typeRow: hydration.typeRow,
+      enumRow
+    };
+  }
+
+  async function readCatalogStreamOwner(
+    database,
+    state,
+    owner,
+    locators = [],
+    {
+      dependencyOnly = false,
+      hydrateAllMembers = false
+    } = {}
+  ) {
+    const normalizedOwner =
+      catalogStreamNormalizeCsType(owner);
+    if (!normalizedOwner) return null;
+    const hydration =
+      createCatalogStreamOwnerHydration(
+        state,
+        normalizedOwner,
+        locators,
+        dependencyOnly,
+        hydrateAllMembers
+      );
+    const prefix =
+      catalogStreamDemandRecordKey(
+        state.generation,
+        "owner-chunk",
+        normalizedOwner
+      ) + ":";
+    const maximumChunks = Math.max(
+      0,
+      Number(
+        state.manifest.ownerChunkCount || 0
+      )
+    );
+    let afterKey = "";
+    let chunkCount = 0;
+    while (true) {
+      const batch = await readCatalogCachePrefixBatch(
+        database,
+        prefix,
+        afterKey,
+        8
+      );
+      if (batch.records.length === 0) break;
+      if (
+        !batch.lastKey ||
+        batch.lastKey === afterKey
+      ) {
+        throw new Error(
+          "The streamed owner cache cursor stopped making progress."
+        );
+      }
+      afterKey = batch.lastKey;
+      for (let chunk of batch.records) {
+        chunkCount += 1;
+        if (chunkCount > maximumChunks) {
+          throw new Error(
+            "The streamed owner cache exceeded its manifest chunk bound."
+          );
+        }
+        chunk = await decodeCatalogStreamOwnerChunk(
+          chunk
+        );
+        applyCatalogStreamOwnerChunk(
+          hydration,
+          chunk
+        );
+      }
+      if (batch.records.length < 8) break;
+      await yieldCatalogCacheWork();
+    }
+    const entry =
+      finishCatalogStreamOwnerHydration(
+        hydration
+      );
+    if (!entry) return null;
+    if (entry.typeRow?.assembly) {
+      await readCatalogStreamAssembly(
+        database,
+        state,
+        entry.typeRow.assembly
+      );
+    }
+    state.rows.set(
+      normalizedOwner,
+      entry
+    );
+    return entry;
+  }
+
+  function collectCatalogStreamReferences(
+    value,
+    output = new Set(),
+    visited = new WeakSet()
+  ) {
+    if (typeof value === "string") {
+      const matches = value.match(
+        /[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_+]*)+/g
+      ) || [];
+      for (const match of matches) {
+        if (
+          output.size >=
+            STREAM_DEMAND_DEPENDENCY_OWNER_CAP
+        ) {
+          break;
+        }
+        output.add(
+          catalogStreamNormalizeCsType(match)
+        );
+      }
+      return output;
+    }
+    if (
+      !value ||
+      typeof value !== "object" ||
+      visited.has(value)
+    ) {
+      return output;
+    }
+    visited.add(value);
+    for (const child of
+      Array.isArray(value)
+        ? value
+        : Object.values(value)) {
+      collectCatalogStreamReferences(
+        child,
+        output,
+        visited
+      );
+      if (
+        output.size >=
+          STREAM_DEMAND_DEPENDENCY_OWNER_CAP
+      ) {
+        break;
+      }
+    }
+    return output;
+  }
+
+  function collectCatalogStreamDirectReferences(
+    entry
+  ) {
+    const references = new Set();
+    const remember = value => {
+      const text = String(value || "");
+      if (!text) return;
+      const exact =
+        catalogStreamNormalizeCsType(text);
+      if (exact.includes(".")) {
+        references.add(exact);
+      }
+      const matches = text.match(
+        /[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_+]*)+/g
+      ) || [];
+      for (const match of matches) {
+        references.add(
+          catalogStreamNormalizeCsType(match)
+        );
+      }
+    };
+    const type = entry?.typeRow;
+    remember(type?.baseType);
+    for (const value of
+      type?.interfaces || []) {
+      remember(value);
+    }
+    for (const constructor of
+      type?.constructors || []) {
+      for (const parameter of
+        constructor?.parameters || []) {
+        remember(
+          parameter?.elementType ||
+          parameter?.type
+        );
+      }
+    }
+    for (const method of
+      type?.methods || []) {
+      remember(method?.returnType);
+      for (const parameter of
+        method?.parameters || []) {
+        remember(
+          parameter?.elementType ||
+          parameter?.type
+        );
+      }
+    }
+    for (const property of
+      type?.properties || []) {
+      remember(property?.type);
+      for (const parameter of
+        property?.indexParameters || []) {
+        remember(
+          parameter?.elementType ||
+          parameter?.type
+        );
+      }
+    }
+    for (const field of
+      type?.fields || []) {
+      remember(field?.type);
+    }
+    for (const event of
+      type?.events || []) {
+      remember(event?.handlerType);
+    }
+    remember(entry?.enumRow?.underlyingType);
+    references.delete(entry?.owner);
+    return references;
+  }
+
+  async function hydrateCatalogStreamDemandSnapshot(
+    database,
+    state,
+    requestedOperatorIds = [],
+    portableOwners = new Map(),
+    {
+      requestedEphemeral = false,
+      hydratePortableOwners = false,
+      completePortableOwners = new Set(),
+      signal = null
+    } = {}
+  ) {
+    const requirements =
+      currentCatalogDemandRequirements();
+    const pinnedIds = [
+      ...requirements.operatorIds
+    ];
+    const requestedIds = [
+      ...new Set(
+        (Array.isArray(requestedOperatorIds)
+          ? requestedOperatorIds
+          : [])
+          .map(value =>
+            String(value || "").trim()
+          )
+          .filter(value =>
+            value.startsWith("api.")
+          )
+      )
+    ];
+    const allIds = [
+      ...new Set([
+        ...pinnedIds,
+        ...requestedIds
+      ])
+    ];
+    const pinnedSet = new Set([
+      ...pinnedIds,
+      ...(requestedEphemeral
+        ? []
+        : requestedIds)
+    ]);
+    const ownerLocators = new Map();
+    const unresolved = [];
+    const acceptedIds = new Set();
+    const pinnedOwners = new Set();
+    const ephemeralOwners = new Set();
+    const nextOperatorRows = new Map();
+    const completeOwners = new Set();
+
+    if (hydratePortableOwners === true) {
+      const requestedCompleteOwners =
+        completePortableOwners instanceof Set &&
+        completePortableOwners.size > 0
+          ? completePortableOwners
+          : new Set(portableOwners.values());
+      for (const rawOwner of
+        requestedCompleteOwners) {
+        const owner =
+          catalogStreamNormalizeCsType(
+            rawOwner
+          );
+        if (
+          !owner ||
+          completeOwners.has(owner) ||
+          completeOwners.size >=
+            STREAM_DEMAND_EPHEMERAL_OWNER_CAP
+        ) {
+          continue;
+        }
+        completeOwners.add(owner);
+        ephemeralOwners.add(owner);
+        ownerLocators.set(owner, []);
+      }
+    }
+
+    for (
+      let start = 0;
+      start < allIds.length;
+      start += STREAM_DEMAND_BATCH_RECORDS
+    ) {
+      const idBatch = allIds.slice(
+        start,
+        start + STREAM_DEMAND_BATCH_RECORDS
+      );
+      const operatorValues =
+        await readCatalogStreamOperators(
+          database,
+          state,
+          idBatch,
+          signal
+        );
+
+      for (const operatorId of idBatch) {
+        const record = operatorValues.get(
+          operatorId
+        ) || null;
+        if (
+          record &&
+          (
+            !catalogStreamRecordMatchesManifest(
+              record,
+              state.manifest
+            ) ||
+            record.generation !==
+              state.generation
+          )
+        ) {
+          throw new Error(
+            "A streamed operator route belongs to another cache generation."
+          );
+        }
+        const portableOwner =
+          requirements.portableOwners.get(
+            operatorId
+          ) ||
+          portableOwners.get(operatorId) ||
+          "";
+        const owner =
+          catalogStreamNormalizeCsType(
+            record?.owner || portableOwner
+          );
+        if (!owner) {
+          unresolved.push(operatorId);
+          continue;
+        }
+        if (!record) {
+          unresolved.push(operatorId);
+          if (!completeOwners.has(owner)) {
+            continue;
+          }
+        }
+        const pinned =
+          pinnedSet.has(operatorId);
+        if (
+          !retainCatalogStreamHydrationOwner(
+            owner,
+            pinned,
+            pinnedOwners,
+            ephemeralOwners
+          )
+        ) {
+          unresolved.push(operatorId);
+          continue;
+        }
+        if (pinned) {
+          ephemeralOwners.delete(owner);
+        }
+        if (record) {
+          acceptedIds.add(operatorId);
+          nextOperatorRows.set(
+            operatorId,
+            record
+          );
+        }
+        if (!ownerLocators.has(owner)) {
+          ownerLocators.set(owner, []);
+        }
+        if (
+          record &&
+          !completeOwners.has(owner)
+        ) {
+          ownerLocators.get(owner).push(
+            record.locator
+          );
+        }
+      }
+      if (
+        start + STREAM_DEMAND_BATCH_RECORDS <
+          allIds.length
+      ) {
+        await yieldCatalogCacheWork();
+      }
+    }
+
+    state.rows = new Map();
+    state.assemblies = new Map();
+    state.seedOwners = new Set([
+      ...pinnedOwners,
+      ...ephemeralOwners
+    ]);
+    state.pinnedOwners = new Set(
+      pinnedOwners
+    );
+    state.ephemeralOwners = new Set(
+      ephemeralOwners
+    );
+    state.dependencyOwners = new Set();
+    state.requiredOperatorIds =
+      acceptedIds;
+    state.operatorRows = nextOperatorRows;
+    state.unresolvedOperatorIds =
+      unresolved;
+
+    for (const [owner, locators] of
+      ownerLocators) {
+      const entry =
+        await readCatalogStreamOwner(
+          database,
+          state,
+          owner,
+          locators,
+          {
+            hydrateAllMembers:
+              completeOwners.has(owner)
+          }
+        );
+      if (!entry) {
+        unresolved.push(
+          ...[...nextOperatorRows]
+            .filter(([, row]) =>
+              row.owner === owner
+            )
+            .map(([operatorId]) =>
+              operatorId
+            )
+        );
+      }
+    }
+
+    const bootstrapOwner = String(
+      state.manifest.bootstrapOwner || ""
+    );
+    if (
+      bootstrapOwner &&
+      !state.rows.has(bootstrapOwner)
+    ) {
+      const bootstrap =
+        await readCatalogStreamOwner(
+          database,
+          state,
+          bootstrapOwner,
+          [],
+          { dependencyOnly: true }
+        );
+      if (bootstrap) {
+        state.dependencyOwners.add(
+          bootstrapOwner
+        );
+      }
+    }
+
+    const pinnedDirect = new Set();
+    for (const owner of pinnedOwners) {
+      const entry = state.rows.get(owner);
+      for (const reference of
+        collectCatalogStreamDirectReferences(
+          entry
+        )) {
+        if (
+          reference &&
+          !state.rows.has(reference)
+        ) {
+          pinnedDirect.add(reference);
+        }
+      }
+    }
+
+    const boundedPending = [];
+    const boundedQueued = new Set();
+    const queueBounded = owner => {
+      if (
+        !owner ||
+        state.rows.has(owner) ||
+        boundedQueued.has(owner) ||
+        boundedQueued.size >=
+          STREAM_DEMAND_DEPENDENCY_OWNER_CAP
+      ) {
+        return;
+      }
+      boundedQueued.add(owner);
+      boundedPending.push(owner);
+    };
+
+    let directLoaded = 0;
+    for (const owner of pinnedDirect) {
+      catalogStreamThrowIfAborted(signal);
+      if (state.rows.has(owner)) continue;
+      const entry =
+        await readCatalogStreamOwner(
+          database,
+          state,
+          owner,
+          [],
+          { dependencyOnly: true }
+        );
+      if (!entry) continue;
+      state.dependencyOwners.add(owner);
+      for (const reference of
+        collectCatalogStreamDirectReferences(
+          entry
+        )) {
+        queueBounded(reference);
+      }
+      directLoaded += 1;
+      if (directLoaded % 32 === 0) {
+        await yieldCatalogCacheWork();
+      }
+    }
+
+    for (const owner of ephemeralOwners) {
+      const entry = state.rows.get(owner);
+      for (const reference of
+        collectCatalogStreamDirectReferences(
+          entry
+        )) {
+        queueBounded(reference);
+      }
+    }
+    for (const owner of state.bootstrapOwners) {
+      const entry = state.rows.get(owner);
+      for (const reference of
+        collectCatalogStreamDirectReferences(
+          entry
+        )) {
+        queueBounded(reference);
+      }
+    }
+
+    let boundedLoaded = 0;
+    while (
+      boundedPending.length > 0 &&
+      boundedLoaded <
+        STREAM_DEMAND_DEPENDENCY_OWNER_CAP
+    ) {
+      catalogStreamThrowIfAborted(signal);
+      const owner = boundedPending.shift();
+      if (state.rows.has(owner)) continue;
+      const entry =
+        await readCatalogStreamOwner(
+          database,
+          state,
+          owner,
+          [],
+          { dependencyOnly: true }
+        );
+      if (!entry) continue;
+      state.dependencyOwners.add(owner);
+      boundedLoaded += 1;
+      for (const reference of
+        collectCatalogStreamDirectReferences(
+          entry
+        )) {
+        queueBounded(reference);
+      }
+      if (boundedLoaded % 32 === 0) {
+        await yieldCatalogCacheWork();
+      }
+    }
+    state.hydrationRevision += 1;
+    return Object.freeze({
+      requested: allIds.length,
+      loaded: acceptedIds.size,
+      unresolvedOperatorIds:
+        Object.freeze([...new Set(unresolved)])
+    });
+  }
+
+  function buildCatalogStreamDemandSnapshot(
+    state
+  ) {
+    const types = [];
+    const enums = [];
+    for (const entry of state.rows.values()) {
+      if (entry.typeRow) {
+        types.push({
+          index:
+            Number.isInteger(entry.typeIndex)
+              ? entry.typeIndex
+              : Number.MAX_SAFE_INTEGER,
+          row: entry.typeRow
+        });
+      }
+      if (entry.enumRow) {
+        enums.push({
+          index:
+            Number.isInteger(entry.enumIndex)
+              ? entry.enumIndex
+              : Number.MAX_SAFE_INTEGER,
+          row: entry.enumRow
+        });
+      }
+    }
+    types.sort((left, right) =>
+      left.index - right.index
+    );
+    enums.sort((left, right) =>
+      left.index - right.index
+    );
+    return {
+      ...state.manifest.root,
+      assemblies:
+        [...state.assemblies.values()],
+      components: [],
+      materials: [],
+      commonMaterials: [],
+      meshes: [],
+      slotAttachOverloads: [],
+      types: types.map(entry => entry.row),
+      enums: enums.map(entry => entry.row),
+      catalogDemandPartial: true,
+      catalogDemandStreamed: true,
+      catalogDemandRequiredOperatorIds:
+        [...state.requiredOperatorIds],
+      catalogDemandRevision:
+        `${state.manifest.catalogFingerprint}:${state.hydrationRevision}`,
+      catalogDemandLoadedOwnerCount:
+        state.seedOwners.size,
+      catalogDemandDependencyOwnerCount:
+        state.dependencyOwners.size,
+      catalogDemandTotalOwnerCount:
+        Number(state.manifest.counts?.types || 0) +
+        Number(state.manifest.counts?.enums || 0)
+    };
+  }
+
+  async function verifiedCatalogStreamDemandRecord(
+    database
+  ) {
+    const active = await readCatalogCacheValue(
+      database,
+      STREAM_DEMAND_ACTIVE_KEY
+    );
+    if (
+      !catalogStreamCacheVersionSupported(active) ||
+      !active?.manifestId
+    ) {
+      return null;
+    }
+    const manifest = await readCatalogCacheValue(
+      database,
+      active.manifestId
+    );
+    if (
+      !validCatalogStreamDemandManifest(
+        manifest
+      ) ||
+      !catalogStreamRecordMatchesManifest(
+        active,
+        manifest
+      ) ||
+      manifest.generation !==
+        active.generation ||
+      manifest.catalogFingerprint !==
+        active.catalogFingerprint ||
+      manifest.assemblyFingerprint !==
+        active.assemblyFingerprint
+    ) {
+      return null;
+    }
+    const state =
+      createCatalogStreamDemandState(
+        Object.freeze(manifest)
+      );
+    await hydrateCatalogStreamDemandSnapshot(
+      database,
+      state,
+      []
+    );
+    const raw =
+      buildCatalogStreamDemandSnapshot(
+        state
+      );
+    if (!strictCachedScannerContract(raw)) {
+      return null;
+    }
+    catalogStreamDemandManifest =
+      Object.freeze(manifest);
+    catalogDemandManifest =
+      catalogStreamDemandManifest;
+    catalogDemandState = state;
+    return Object.freeze({
+      id: manifest.id,
+      schemaVersion: manifest.schemaVersion,
+      format: manifest.format,
+      generation: manifest.generation,
+      fingerprint:
+        manifest.catalogFingerprint,
+      sourceUrl: manifest.sourceUrl,
+      demandPartial: true,
+      demandManifest: manifest,
+      catalog:
+        deepFreezeCatalogSnapshot(raw)
+    });
+  }
+
   function createCatalogDemandState(
     fullManifest,
     demandManifest
@@ -3621,60 +9866,142 @@
     if (!state || state.fullActive) {
       return statusCatalog();
     }
+    state.fallbackReason = String(
+      reason ||
+      state.fallbackReason ||
+      "Full catalog activation is disabled by the browser memory safety policy."
+    );
+    document.documentElement.dataset
+      .rmlCatalogFullFallbackBlocked =
+        "true";
+    return statusCatalog();
+  }
+
+  async function ensureCatalogStreamDemandOperators(
+    operatorIds,
+    options = {}
+  ) {
+    const state = catalogDemandState;
+    if (!state?.streamV1) {
+      return Object.freeze({
+        available: false,
+        full: false,
+        loaded: 0
+      });
+    }
     let database;
     try {
       database = await openCatalogCache();
-      const record =
-        await verifiedCurrentCacheRecord(
+      const hydration =
+        await hydrateCatalogStreamDemandSnapshot(
           database,
-          state.fullManifest
+          state,
+          operatorIds,
+          options?.portableOwners instanceof Map
+            ? options.portableOwners
+            : new Map(),
+          {
+            requestedEphemeral:
+              options?.ephemeral === true,
+            hydratePortableOwners:
+              options?.hydratePortableOwners ===
+                true,
+            completePortableOwners:
+              options?.completePortableOwners instanceof
+                Set
+                ? options.completePortableOwners
+                : new Set(),
+            signal: options?.signal || null
+          }
         );
-      if (!record) {
-        throw new Error(
-          window.RMLI18n.t("ui.literal.491908615e73")
+      const active =
+        await readCatalogCacheValue(
+          database,
+          STREAM_DEMAND_ACTIVE_KEY
         );
+      if (
+        String(active?.generation || "") !==
+          state.generation ||
+        String(
+          active?.catalogFingerprint || ""
+        ) !==
+          state.manifest.catalogFingerprint
+      ) {
+        const error = new Error(
+          "The active streamed catalog generation changed during hydration."
+        );
+        error.code =
+          "RML_CATALOG_CACHE_GENERATION_CHANGED";
+        throw error;
       }
+      const raw =
+        buildCatalogStreamDemandSnapshot(
+          state
+        );
       const catalog = normalizeCatalog(
-        record.catalog,
+        raw,
         "scanner-cache",
-        record.sourceUrl || ""
+        state.manifest.sourceUrl || ""
       );
-      let published = null;
       await queueCatalogActivationOperation(
-        async () => {
-          if (
-            catalogDemandState !== state ||
-            state.fullActive
-          ) {
-            return;
-          }
-          await activateCatalogAndFactoryNow(
-            catalog
-          );
-          if (catalogDemandState !== state) {
-            return;
-          }
-          state.fullActive = true;
-          state.fallbackReason = String(
-            reason ||
-            state.fallbackReason ||
-            ""
-          );
-          cachedCatalogRecord = record;
-          cachedCatalogReadPromise =
-            Promise.resolve(record);
-          cachedCatalogStatus = catalog;
-          published = catalog;
-        }
+        () => activateCatalogAndFactoryNow(
+          catalog
+        )
       );
-      return published || statusCatalog();
+      const stored = Object.freeze({
+        id: state.manifest.id,
+        schemaVersion:
+          state.manifest.schemaVersion,
+        format: state.manifest.format,
+        generation: state.generation,
+        fingerprint:
+          state.manifest.catalogFingerprint,
+        sourceUrl:
+          state.manifest.sourceUrl,
+        demandPartial: true,
+        demandManifest:
+          state.manifest,
+        catalog:
+          deepFreezeCatalogSnapshot(raw)
+      });
+      cachedCatalogRecord = stored;
+      cachedCatalogReadPromise =
+        Promise.resolve(stored);
+      cachedCatalogStatus = catalog;
+      catalogAvailabilityKnown = true;
+      catalogAvailable = true;
+      updateStatus();
+      return Object.freeze({
+        available: true,
+        full: false,
+        loaded: hydration.loaded,
+        unresolvedOperatorIds:
+          hydration.unresolvedOperatorIds
+      });
+    } catch (error) {
+      state.fallbackReason = String(
+        error?.message || error
+      );
+      return Object.freeze({
+        available: Boolean(statusCatalog()),
+        full: false,
+        loaded: 0,
+        unresolvedOperatorIds:
+          Object.freeze([
+            ...(Array.isArray(operatorIds)
+              ? operatorIds
+              : [])
+          ]),
+        error: state.fallbackReason
+      });
     } finally {
       database?.close?.();
     }
   }
 
   function ensureCatalogDemandOperators(
-    operatorIds = []
+    operatorIds = [],
+    options = {}
   ) {
     const ids = [...new Set(
       (Array.isArray(operatorIds)
@@ -3689,6 +10016,12 @@
     )];
     const run = async () => {
       const state = catalogDemandState;
+      if (state?.streamV1) {
+        return ensureCatalogStreamDemandOperators(
+          ids,
+          options
+        );
+      }
       if (
         ids.length === 0 ||
         !state ||
@@ -3711,17 +10044,42 @@
       try {
         owners = resolveCatalogDemandOwners(
           state,
-          ids
+          ids,
+          options?.portableOwners instanceof Map
+            ? options.portableOwners
+            : new Map()
         );
       } catch (error) {
-        await activateFullCatalogDemandFallback(
+        if (
+          options?.allowFullFallback === false ||
+          error?.code ===
+            "RML_CATALOG_DEMAND_UNROUTABLE"
+        ) {
+          return Object.freeze({
+            available: true,
+            full: false,
+            loaded: 0,
+            unresolvedOperatorIds:
+              Object.freeze([
+                ...(Array.isArray(
+                  error?.operatorIds
+                )
+                  ? error.operatorIds
+                  : ids)
+              ])
+          });
+        }
+        const fallbackCatalog =
+          await activateFullCatalogDemandFallback(
           error?.message ||
           window.RMLI18n.t("ui.literal.0cf737b11b39")
         );
         return Object.freeze({
-          available: true,
-          full: true,
-          loaded: ids.length
+          available: Boolean(fallbackCatalog),
+          full: false,
+          loaded: 0,
+          unresolvedOperatorIds:
+            Object.freeze([...ids])
         });
       }
       const newOwners = [...owners]
@@ -3746,14 +10104,17 @@
       } catch (error) {
         database?.close?.();
         database = null;
-        await activateFullCatalogDemandFallback(
+        const fallbackCatalog =
+          await activateFullCatalogDemandFallback(
           error?.message ||
           window.RMLI18n.t("ui.literal.f2dffa08ea7c")
         );
         return Object.freeze({
-          available: true,
-          full: true,
-          loaded: ids.length
+          available: Boolean(fallbackCatalog),
+          full: false,
+          loaded: 0,
+          unresolvedOperatorIds:
+            Object.freeze([...ids])
         });
       } finally {
         database?.close?.();
@@ -3796,14 +10157,17 @@
           }
         );
       } catch (error) {
-        await activateFullCatalogDemandFallback(
+        const fallbackCatalog =
+          await activateFullCatalogDemandFallback(
           error?.message ||
           window.RMLI18n.t("ui.literal.3b4c54a95a3b")
         );
         return Object.freeze({
-          available: true,
-          full: true,
-          loaded: ids.length
+          available: Boolean(fallbackCatalog),
+          full: false,
+          loaded: 0,
+          unresolvedOperatorIds:
+            Object.freeze([...ids])
         });
       }
       if (!published) {
@@ -3833,6 +10197,59 @@
 
   function catalogDemandPublicState() {
     const state = catalogDemandState;
+    if (state?.streamV1) {
+      return Object.freeze({
+        available: true,
+        ready: true,
+        busy: Boolean(
+          catalogStreamDemandIngestPromise
+        ),
+        mode: "streamed-partial",
+        partial: true,
+        full: false,
+        fullCatalogLoaded: false,
+        fingerprint: String(
+          state.manifest
+            ?.catalogFingerprint || ""
+        ),
+        contentHash: "",
+        requiredOperatorCount:
+          state.requiredOperatorIds.size,
+        requiredOwnerCount:
+          state.seedOwners.size,
+        bootstrapOwnerCount:
+          state.bootstrapOwners.size,
+        dependencyOwnerCount:
+          state.dependencyOwners.size,
+        cachedChunkCount: 0,
+        loadedOwnerCount:
+          state.rows.size,
+        loadedShardCount: 0,
+        totalShardCount: Number(
+          state.manifest
+            ?.searchShardCount || 0
+        ),
+        loadedBytes: 0,
+        totalBytes: Number(
+          state.manifest?.totalBytes || 0
+        ),
+        fallbackReason: String(
+          state.fallbackReason || ""
+        ),
+        totalOwnerCount:
+          Number(
+            state.manifest.counts?.types || 0
+          ) +
+          Number(
+            state.manifest.counts?.enums || 0
+          ),
+        operatorCount: Number(
+          state.manifest.operatorCount || 0
+        ),
+        unresolvedOperatorCount:
+          state.unresolvedOperatorIds.length
+      });
+    }
     const loadedBytes = state
       ? [...state.chunkCache.values()]
           .reduce(
@@ -3926,6 +10343,22 @@
   }
 
   function catalogDemandPaletteIndex() {
+    if (catalogDemandState?.streamV1) {
+      return Object.freeze({
+        compact: false,
+        entries: Object.freeze([]),
+        revision: String(
+          catalogDemandState.manifest
+            .catalogFingerprint || ""
+        ),
+        contentHash: "",
+        catalogFingerprint: String(
+          catalogDemandState.manifest
+            .catalogFingerprint || ""
+        ),
+        paged: true
+      });
+    }
     const manifest =
       statusCatalog()
         ?.catalogDemandPartial === true
@@ -3960,6 +10393,493 @@
         )
       });
     return catalogDemandPalettePublication;
+  }
+
+  function catalogStreamManifestVisibleGroups(
+    manifest,
+    {
+      showAdvanced = false,
+      context = ""
+    } = {}
+  ) {
+    const countIndex =
+      context === "custom-csharp"
+        ? (showAdvanced === true ? 3 : -1)
+        : (showAdvanced === true ? 2 : 1);
+    if (countIndex < 0) return [];
+    return (
+      Array.isArray(
+        manifest?.visibilityGroupCounts
+      )
+        ? manifest.visibilityGroupCounts
+        : []
+    ).map(entry => [
+      String(entry?.[0] || "Other"),
+      Math.max(
+        0,
+        Number(entry?.[countIndex]) || 0
+      )
+    ]);
+  }
+
+  async function catalogDemandPaletteSummary(
+    options = {}
+  ) {
+    const manifest =
+      catalogDemandState?.streamV1
+        ? catalogDemandState.manifest
+        : null;
+    if (!manifest) {
+      const legacy =
+        catalogDemandPaletteIndex();
+      const groups = new Map();
+      for (const entry of
+        legacy?.entries || []) {
+        const group = legacy.compact
+          ? String(
+              legacy.groups?.[
+                Number(entry?.[3])
+              ] || "Other"
+            )
+          : String(
+              entry?.definition?.group ||
+              entry?.group || "Other"
+            );
+        groups.set(
+          group,
+          (groups.get(group) || 0) + 1
+        );
+      }
+      return Object.freeze({
+        revision: String(
+          legacy?.revision || ""
+        ),
+        total:
+          legacy?.entries?.length || 0,
+        groups: Object.freeze(
+          [...groups]
+            .map(([name, count]) =>
+              Object.freeze({
+                name,
+                count
+              })
+            )
+            .sort((left, right) =>
+              left.name.localeCompare(
+                right.name
+              )
+            )
+        )
+      });
+    }
+    const filtersVisibility = Boolean(
+      options &&
+      (
+        Object.hasOwn(
+          options,
+          "showAdvanced"
+        ) ||
+        String(options.context || "")
+      )
+    );
+    const visibleGroups = filtersVisibility
+      ? catalogStreamManifestVisibleGroups(
+          manifest,
+          options
+        )
+      : (
+          Array.isArray(
+            manifest.groupCounts
+          )
+            ? manifest.groupCounts
+            : []
+        ).map(entry => [
+          String(entry?.[0] || "Other"),
+          Math.max(
+            0,
+            Number(entry?.[1]) || 0
+          )
+        ]);
+    return Object.freeze({
+      revision: String(
+        manifest.catalogFingerprint || ""
+      ),
+      total: visibleGroups.reduce(
+        (total, entry) =>
+          total + entry[1],
+        0
+      ),
+      groups: Object.freeze(
+        visibleGroups.map(
+          ([name, count]) =>
+            Object.freeze({
+              name,
+              count
+            })
+        )
+      )
+    });
+  }
+
+  function catalogStreamPaletteMetadataVisible(
+    definition,
+    {
+      showAdvanced = false,
+      context = ""
+    } = {}
+  ) {
+    if (
+      !definition ||
+      definition.hiddenFromPalette === true
+    ) {
+      return false;
+    }
+    const custom =
+      definition.customCSharpCatalogNode ===
+        true;
+    if (context === "custom-csharp") {
+      return custom && showAdvanced === true;
+    }
+    if (
+      showAdvanced !== true &&
+      (
+        custom ||
+        definition.expertOnly === true ||
+        definition.group ===
+          CATALOG_STREAM_GROUPS.advanced
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  async function catalogDemandQueryPalette(
+    options = {}
+  ) {
+    const state = catalogDemandState;
+    if (!state?.streamV1) {
+      return Object.freeze({
+        entries: Object.freeze([]),
+        total: 0,
+        offset: 0,
+        limit: 0,
+        revision: ""
+      });
+    }
+    const signal = options?.signal || null;
+    catalogStreamThrowIfAborted(signal);
+    const group = String(
+      options.group || ""
+    );
+    const query = String(
+      options.query || ""
+    ).trim().toLocaleLowerCase("en-US");
+    const tokens = query
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 16);
+    const rawOffset = Number(
+      options.offset
+    );
+    const maximumOffset = Math.max(
+      0,
+      Math.min(
+        Number.MAX_SAFE_INTEGER,
+        Math.trunc(
+          Number(
+            state.manifest
+              .operatorCount || 0
+          )
+        )
+      )
+    );
+    const offset = Math.max(
+      0,
+      Math.min(
+        maximumOffset,
+        Number.isFinite(rawOffset)
+          ? Math.trunc(rawOffset)
+          : 0
+      )
+    );
+    const rawLimit = Number(
+      options.limit
+    );
+    const limit = Math.max(
+      1,
+      Math.min(
+        STREAM_DEMAND_QUERY_LIMIT,
+        Number.isFinite(rawLimit) &&
+          rawLimit !== 0
+          ? Math.trunc(rawLimit)
+          : 32
+      )
+    );
+    const visibility = {
+      showAdvanced:
+        options.showAdvanced === true,
+      context: String(
+        options.context || ""
+      )
+    };
+    let database;
+    try {
+      database = await openCatalogCache();
+      const selectedIds = [];
+      let total = 0;
+      if (tokens.length > 0) {
+        const prefix =
+          catalogStreamDemandRecordKey(
+            state.generation,
+            "search-shard"
+          ) + ":";
+        let lastMatchedId = "";
+        await readCatalogCachePrefix(
+          database,
+          prefix,
+          record => {
+            catalogStreamThrowIfAborted(signal);
+            const rows = record?.rows;
+            if (
+              !catalogStreamRecordMatchesManifest(
+                record,
+                state.manifest
+              ) ||
+              record?.generation !==
+                state.generation ||
+              record?.kind !== "search-shard" ||
+              !Array.isArray(rows) ||
+              rows.length < 1 ||
+              rows.length > 128 ||
+              !catalogStreamBoundedShardBytes(
+                record.byteLength,
+                128 * 1024,
+                rows.length
+              )
+            ) {
+              throw new Error(
+                "A streamed catalog search shard is invalid."
+              );
+            }
+            for (const row of rows) {
+              if (
+                !Array.isArray(row) ||
+                row.length !== 4
+              ) {
+                throw new Error(
+                  "A streamed catalog search row is invalid."
+                );
+              }
+              const operatorId = String(
+                row[0] || ""
+              );
+              const searchText = String(
+                row[1] || ""
+              );
+              const rowGroup = String(
+                row[2] || ""
+              );
+              const flags = Number(row[3]) || 0;
+              if (
+                (group && rowGroup !== group) ||
+                !tokens.every(token =>
+                  searchText.includes(token)
+                ) ||
+                !catalogStreamPaletteMetadataVisible(
+                  {
+                    group: rowGroup,
+                    expertOnly:
+                      (flags & 1) !== 0,
+                    customCSharpCatalogNode:
+                      (flags & 2) !== 0,
+                    hiddenFromPalette:
+                      (flags & 4) !== 0
+                  },
+                  visibility
+                )
+              ) {
+                continue;
+              }
+              if (operatorId === lastMatchedId) {
+                continue;
+              }
+              lastMatchedId = operatorId;
+              if (
+                total >= offset &&
+                selectedIds.length < limit
+              ) {
+                selectedIds.push(operatorId);
+              }
+              total += 1;
+            }
+            return true;
+          },
+          Math.max(
+            0,
+            Number(
+              state.manifest
+                .searchShardCount || 0
+            )
+          )
+        );
+      } else {
+        const visibleGroups =
+          catalogStreamManifestVisibleGroups(
+            state.manifest,
+            visibility
+          );
+        const manifestTotal = group
+          ? Number(
+              visibleGroups.find(entry =>
+                entry?.[0] === group
+              )?.[1] || 0
+            )
+          : visibleGroups.reduce(
+              (sum, entry) =>
+                sum + Number(entry?.[1] || 0),
+              0
+            );
+        total = manifestTotal;
+        const prefix = group
+          ? catalogStreamDemandRecordKey(
+              state.generation,
+              "palette-shard",
+              group
+            ) + ":"
+          : catalogStreamDemandRecordKey(
+              state.generation,
+              "palette-shard"
+            ) + ":";
+        let visibleIndex = 0;
+        await readCatalogCachePrefix(
+          database,
+          prefix,
+          record => {
+            catalogStreamThrowIfAborted(signal);
+            const rows = record?.rows;
+            if (
+              !catalogStreamRecordMatchesManifest(
+                record,
+                state.manifest
+              ) ||
+              record?.generation !==
+                state.generation ||
+              record?.kind !== "palette-shard" ||
+              !Array.isArray(rows) ||
+              rows.length < 1 ||
+              rows.length >
+                STREAM_DEMAND_PALETTE_SHARD_RECORDS ||
+              !catalogStreamBoundedShardBytes(
+                record.byteLength,
+                STREAM_DEMAND_PALETTE_SHARD_BYTES,
+                rows.length
+              )
+            ) {
+              throw new Error(
+                "A streamed catalog palette shard is invalid."
+              );
+            }
+            const rowGroup = String(
+              record.group || "Other"
+            );
+            if (group && rowGroup !== group) {
+              throw new Error(
+                "A streamed palette shard escaped its group prefix."
+              );
+            }
+            for (const row of rows) {
+              if (
+                !Array.isArray(row) ||
+                row.length !== 2
+              ) {
+                throw new Error(
+                  "A streamed catalog palette row is invalid."
+                );
+              }
+              const flags = Number(row[1]) || 0;
+              if (!catalogStreamPaletteMetadataVisible(
+                {
+                  group: rowGroup,
+                  expertOnly:
+                    (flags & 1) !== 0,
+                  customCSharpCatalogNode:
+                    (flags & 2) !== 0,
+                  hiddenFromPalette:
+                    (flags & 4) !== 0
+                },
+                visibility
+              )) {
+                continue;
+              }
+              if (
+                visibleIndex >= offset &&
+                selectedIds.length < limit
+              ) {
+                selectedIds.push(
+                  String(row[0] || "")
+                );
+              }
+              visibleIndex += 1;
+            }
+            return selectedIds.length < limit;
+          },
+          group
+            ? Number(
+                state.manifest
+                  .paletteShardCounts
+                  .find(entry =>
+                    entry?.[0] === group
+                  )?.[1] || 0
+              ) + 1
+            : Number(
+                state.manifest
+                  .paletteShardCount || 0
+              ) + 1
+        );
+      }
+      catalogStreamThrowIfAborted(signal);
+      const operatorRecords =
+        await readCatalogStreamOperators(
+          database,
+          state,
+          selectedIds,
+          signal
+        );
+      const entries = [];
+      for (const operatorId of selectedIds) {
+        const record =
+          operatorRecords.get(operatorId);
+        if (!record?.definition) continue;
+        entries.push(Object.freeze({
+          operatorId,
+          definition:
+            Object.freeze({
+              ...record.definition,
+              apiSearchText:
+                query
+                  ? `${record.definition.apiSearchText || ""} ${query}`.trim()
+                  : String(
+                      record.definition.apiSearchText || ""
+                    ),
+              customCSharpSyntaxNode: false,
+              customCSharpSubgraphOnly: false
+            })
+        }));
+      }
+      return Object.freeze({
+        entries: Object.freeze(entries),
+        total,
+        offset,
+        limit,
+        revision: String(
+          state.manifest
+            .catalogFingerprint || ""
+        )
+      });
+    } finally {
+      database?.close?.();
+    }
   }
 
   async function verifiedLegacyV2CacheRecord(
@@ -4094,11 +11014,12 @@
     }
   }
 
-  async function writeChunkedCatalogRecord(
+  async function writeChunkedCatalogRecordUnlocked(
     database,
     raw,
     sourceUrl,
-    previousRecord = null
+    previousRecord = null,
+    exclusiveLockHeld = false
   ) {
     const generation =
       createCatalogCacheGeneration();
@@ -4142,8 +11063,11 @@
             staleGeneration
           );
         } else if (
-          Number.isFinite(staleAge) &&
-          staleAge > 10 * 60 * 1000
+          exclusiveLockHeld ||
+          (
+            Number.isFinite(staleAge) &&
+            staleAge > 10 * 60 * 1000
+          )
         ) {
           await removeCatalogCacheGeneration(
             database,
@@ -4257,6 +11181,79 @@
     }
   }
 
+  function writeChunkedCatalogRecord(
+    database,
+    raw,
+    sourceUrl,
+    previousRecord = null
+  ) {
+    const locks = navigator.locks;
+    if (
+      locks &&
+      typeof locks.request === "function"
+    ) {
+      let lockRequestStarted = false;
+      let lockRequestAccepted = true;
+      let timeout = 0;
+      try {
+        const request = locks.request(
+          CACHE_WRITE_LOCK_NAME,
+          {
+            mode: "exclusive",
+            ifAvailable: true
+          },
+          lock => {
+            lockRequestStarted = true;
+            window.clearTimeout(timeout);
+            if (!lockRequestAccepted) {
+              return false;
+            }
+            if (!lock) {
+              throw new Error(
+                "Another Builder tab is already committing the catalog cache; this tab will keep using its verified in-memory catalog without waiting."
+              );
+            }
+            return writeChunkedCatalogRecordUnlocked(
+              database,
+              raw,
+              sourceUrl,
+              previousRecord,
+              true
+            );
+          }
+        );
+        const boundedRequest = new Promise(
+          (resolve, reject) => {
+            timeout = window.setTimeout(() => {
+              if (lockRequestStarted) return;
+              lockRequestAccepted = false;
+              reject(new Error(
+                "The catalog cache write lock did not answer in time; the verified in-memory catalog remains active."
+              ));
+            }, CACHE_LOCK_ACQUIRE_TIMEOUT_MS);
+            Promise.resolve(request).then(
+              resolve,
+              reject
+            );
+          }
+        );
+        return boundedRequest.finally(() => {
+          window.clearTimeout(timeout);
+        });
+      } catch (error) {
+        window.clearTimeout(timeout);
+        throw error;
+      }
+    }
+    return writeChunkedCatalogRecordUnlocked(
+      database,
+      raw,
+      sourceUrl,
+      previousRecord,
+      false
+    );
+  }
+
   async function migrateLegacyCacheRecord(
     database,
     record
@@ -4301,11 +11298,39 @@
     try {
       database =
         await openCatalogCache();
+      const streamed =
+        await verifiedCatalogStreamDemandRecord(
+          database
+        );
+      if (streamed) {
+        cachedCatalogRecord = streamed;
+        return streamed;
+      }
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const stored =
           await readCatalogCacheRecord(
             database
           );
+        const legacyByteLength =
+          Array.isArray(stored?.chunks)
+            ? stored.chunks.reduce(
+                (total, chunk) =>
+                  total + Math.max(
+                    0,
+                    Number(
+                      chunk?.byteLength
+                    ) || 0
+                  ),
+                0
+              )
+            : Number.POSITIVE_INFINITY;
+        if (
+          legacyByteLength >
+            2 * 1024 * 1024 ||
+          Number(stored?.chunkCount) > 4
+        ) {
+          return null;
+        }
         try {
           let current = null;
           try {
@@ -4316,18 +11341,7 @@
               );
           } catch (error) {
           }
-          if (!current) {
-            current =
-              await verifiedCurrentCacheRecord(
-                database,
-                stored
-              );
-          }
-          const resolved = current ||
-            await migrateLegacyCacheRecord(
-              database,
-              stored
-            );
+          const resolved = current;
           if (resolved) {
             cachedCatalogRecord =
               resolved;
@@ -4582,104 +11596,49 @@
       "aria-label",
       element.textContent
     );
+    element.setAttribute(
+      "aria-busy",
+      "true"
+    );
   }
 
   async function activateCatalogFromUserClick() {
     if (manualCatalogActivationPromise) {
-      window.RMLRuntimeBridge?.disconnect?.(
-        window.RMLI18n.t("ui.literal.553b0f547640")
-      );
-      return false;
+      return manualCatalogActivationPromise;
     }
 
     manualCatalogActivationPromise =
       Promise.resolve()
         .then(async () => {
-          const scriptLoader =
-            window.RMLScriptLoader;
-
-          if (
-            !scriptLoader ||
-            typeof scriptLoader.ensure !== "function"
-          ) {
-            throw new Error(
-              "[RML API Catalog] The deferred JavaScript module loader is unavailable."
-            );
-          }
-
-          await scriptLoader.ensure(
-            "scanner-connection"
-          );
-
-          const bridge =
-            window.RMLRuntimeBridge;
-
-          if (
-            !bridge ||
-            typeof bridge.connect !== "function"
-          ) {
-            throw new Error(
-              "[RML API Catalog] runtime-core finished loading but RMLRuntimeBridge.connect() is still unavailable."
-            );
-          }
-
-          const before =
-            bridge.getConnectionState?.() ||
-            currentScannerConnection();
-
-          if (before?.mode === "live") {
-            bridge.disconnect?.();
-            catalogAvailabilityKnown = true;
-            catalogAvailable =
-              Boolean(statusCatalog());
-            updateStatus();
-            return false;
-          }
-
           renderManualCatalogChecking();
 
-          let connected = false;
+          const synchronized =
+            await synchronizeAvailableCatalog({
+              silent: true,
+              showWork: true,
+              forceRetry: true,
+              throwOnFailure: false
+            });
 
-          try {
-            connected =
-              await bridge.connect();
-          } catch (error) {
-            console.error(
-              "[RML API Catalog] Scanner discovery failed.",
-              error
+          if (
+            synchronized === true &&
+            statusCatalog()
+          ) {
+            catalogAvailabilityKnown = true;
+            catalogAvailable = true;
+            updateStatus();
+            document.dispatchEvent(
+              new CustomEvent(
+                "rml-scanner:manual-live-activated",
+                {
+                  detail: Object.freeze({
+                    transport:
+                      "builder-proxy"
+                  })
+                }
+              )
             );
-            connected = false;
-          }
-
-          if (connected) {
-            try {
-              const session =
-                bridge.getConnectionState?.() ||
-                currentScannerConnection();
-
-              const synchronized =
-                await synchronizeScannerStatus({
-                  manualSession: session,
-                  showChecking: true,
-                  throwOnFailure: false
-                });
-
-              if (
-                synchronized === true &&
-                statusCatalog()
-              ) {
-                catalogAvailabilityKnown = true;
-                catalogAvailable = true;
-                updateStatus();
-                document.dispatchEvent(new CustomEvent("rml-scanner:manual-live-activated", { detail: session }));
-                return true;
-              }
-            } catch (error) {
-              console.error(
-                "[RML API Catalog] Live scanner connected, but catalog synchronization failed.",
-                error
-              );
-            }
+            return true;
           }
 
           const existing =
@@ -4701,6 +11660,15 @@
         .finally(() => {
           manualCatalogActivationPromise =
             null;
+          const element =
+            document.getElementById(
+              "api-catalog-state"
+            );
+          element?.setAttribute(
+            "aria-busy",
+            "false"
+          );
+          updateStatus();
         });
 
     return manualCatalogActivationPromise;
@@ -4720,27 +11688,20 @@
       return;
     }
 
+    if (
+      Number(
+        window.RMLScannerStatusControl?.version
+      ) >= 2 &&
+      window.RMLScannerStatusControl?.moduleId ===
+        CATALOG_LOADER_MODULE_ID
+    ) {
+      manualCatalogActivationInstalled = true;
+      window.RMLScannerStatusControl
+        .refresh?.();
+      return;
+    }
+
     manualCatalogActivationInstalled = true;
-
-    const reassertUnavailable = () => {
-      if (manualCatalogActivationPromise) {
-        return;
-      }
-
-      if (
-        catalogAvailabilityKnown &&
-        catalogAvailable !== true
-      ) {
-        queueMicrotask(
-          updateUnavailableStatus
-        );
-      }
-    };
-
-    window.addEventListener(
-      "rml-scanner-connection",
-      reassertUnavailable
-    );
 
     element.addEventListener(
       "click",
@@ -4958,40 +11919,13 @@
     const controller =
       window.RMLApiNodeFactoryController;
     if (
-      controller?.moduleId !==
-        CATALOG_LOADER_MODULE_ID ||
-      Number(controller?.factoryVersion) !==
-        REQUIRED_API_FACTORY_VERSION
+      !controller ||
+      typeof controller.rebuild !== "function" ||
+      typeof controller.resolveRequiredOperators !==
+        "function"
     ) {
       throw new Error(
-        `Runtime module version mismatch: the API node factory is not the ${CATALOG_LOADER_MODULE_ID} factory required by this catalog loader. Reload the Builder without cached files. The JSON was not loaded.`
-      );
-    }
-
-    const report =
-      window.RMLApiNodeFactoryReport;
-    const activeFactoryVersion =
-      Number(
-        window.__RMLApiNodeFactoryVersion
-      ) || 0;
-    if (
-      (
-        activeFactoryVersion !== 0 &&
-        activeFactoryVersion !==
-          REQUIRED_API_FACTORY_VERSION
-      ) ||
-      (
-        report &&
-        (
-          Number(report.factoryVersion) !==
-            REQUIRED_API_FACTORY_VERSION ||
-          report.moduleId !==
-            CATALOG_LOADER_MODULE_ID
-        )
-      )
-    ) {
-      throw new Error(
-        `Runtime module version mismatch: catalog loader v${LOADER_VERSION} requires API factory v${REQUIRED_API_FACTORY_VERSION}, but the active factory is v${activeFactoryVersion || 0}. Reload the Builder without cached files. The JSON was not loaded.`
+        "The API node factory module is present but does not expose the catalog capabilities required to evaluate API nodes."
       );
     }
   }
@@ -5000,17 +11934,32 @@
     Promise.resolve();
 
   function queueCatalogActivationOperation(
-    operation
+    operation,
+    signal = null
   ) {
     const run = () =>
       Promise.resolve().then(
         operation
       );
-    const queued =
-      catalogActivationPromise.then(
-        run,
-        run
-      );
+    const gate = signal
+      ? awaitCatalogSettlement(
+          catalogActivationPromise,
+          signal,
+          "The preceding catalog factory activation"
+        )
+      : catalogActivationPromise;
+    const queued = gate.then(
+      run,
+      error => {
+        if (signal?.aborted) {
+          throw catalogAbortError(
+            signal,
+            "The catalog factory activation"
+          );
+        }
+        return run(error);
+      }
+    );
     catalogActivationPromise =
       queued.catch(() => null);
     return queued;
@@ -5076,7 +12025,8 @@
   }
 
   async function activateCatalogAndFactoryNow(
-    catalog
+    catalog,
+    { signal = null } = {}
   ) {
     const existingReport =
       window.RMLApiNodeFactoryReport;
@@ -5100,8 +12050,16 @@
       );
     }
 
-    await baseModNodesReady;
-    await ensureApiNodesModuleLoaded();
+    await awaitCatalogSettlement(
+      baseModNodesReady,
+      signal,
+      "The base node modules"
+    );
+    await awaitCatalogSettlement(
+      ensureApiNodesModuleLoaded(),
+      signal,
+      "The API node factory module"
+    );
 
     let report =
       window.RMLApiNodeFactoryReport;
@@ -5140,14 +12098,19 @@
     }
 
     const rebuildOptions = {
-      createCatalogPublication
+      createCatalogPublication,
+      signal
     };
     let rebuildError = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        await controller.rebuild(
-          catalog,
-          rebuildOptions
+        await awaitCatalogSettlement(
+          controller.rebuild(
+            catalog,
+            rebuildOptions
+          ),
+          signal,
+          "The API node factory rebuild"
         );
         rebuildError = null;
         break;
@@ -5166,8 +12129,12 @@
         if (!registryChanged || attempt >= 2) {
           throw error;
         }
-        await new Promise(resolve =>
-          window.RMLScheduleTask(resolve)
+        await awaitCatalogSettlement(
+          new Promise(resolve =>
+            window.RMLScheduleTask(resolve)
+          ),
+          signal,
+          "The API node factory registry retry yield"
         );
       }
     }
@@ -5183,14 +12150,405 @@
   }
 
   function activateCatalogAndFactory(
-    catalog
+    catalog,
+    options = {}
   ) {
     return queueCatalogActivationOperation(
       () =>
         activateCatalogAndFactoryNow(
-          catalog
-        )
+          catalog,
+          options
+        ),
+      options.signal || null
     );
+  }
+
+  function catalogSessionKey(session) {
+    return String(
+      session?.syncKey ??
+      session?.generation ??
+      ""
+    );
+  }
+
+  function builderScannerEndpoint(pathname) {
+    return new URL(
+      pathname,
+      window.location.origin
+    ).href;
+  }
+
+  function directScannerDemandEndpoint(
+    status,
+    health,
+    port
+  ) {
+    const expectedOrigin =
+      `http://127.0.0.1:${port}`;
+    for (const candidate of [
+      status?.catalogDemandUrl,
+      health?.catalogDemandUrl
+    ]) {
+      try {
+        const url = new URL(
+          String(candidate || "")
+        );
+        if (
+          url.origin === expectedOrigin &&
+          url.pathname ===
+            "/catalog/demand-v1" &&
+          !url.username &&
+          !url.password
+        ) {
+          return url.href;
+        }
+      } catch {}
+    }
+    return `${expectedOrigin}/catalog/demand-v1`;
+  }
+
+  Object.defineProperty(
+    window,
+    "RMLCatalogHealthSweepDiagnostics",
+    {
+      value: Object.freeze({
+        version: 1,
+        get latest() {
+          return latestCatalogHealthSweepDiagnostics;
+        }
+      }),
+      writable: false,
+      enumerable: true,
+      configurable: true
+    }
+  );
+
+  function catalogHealthSweepHealthSummary(
+    probes
+  ) {
+    const outcomes = Array.isArray(probes)
+      ? probes
+      : [];
+    return Object.freeze({
+      total: outcomes.length,
+      responded: outcomes.filter(probe =>
+        Boolean(probe?.health) ||
+        Number(probe?.http?.status) > 0
+      ).length,
+      healthy: outcomes.filter(probe =>
+        probe?.outcome === "healthy"
+      ).length,
+      unhealthy: outcomes.filter(probe =>
+        probe?.outcome === "unhealthy"
+      ).length,
+      errors: outcomes.filter(probe =>
+        probe?.outcome === "error"
+      ).length,
+      timeouts: outcomes.filter(probe =>
+        probe?.outcome === "timeout"
+      ).length,
+      aborted: outcomes.filter(probe =>
+        probe?.outcome === "aborted"
+      ).length
+    });
+  }
+
+  function catalogHealthSweepFailure(
+    error,
+    options = {}
+  ) {
+    const name = String(
+      error?.name || "Error"
+    );
+    const message = String(
+      error?.message ||
+      error ||
+      "The scanner health probe failed."
+    );
+    const aborted =
+      options.aborted === true;
+    const timedOut = Boolean(
+      !aborted &&
+      (
+        options.timedOut === true ||
+        name === "AbortError"
+      )
+    );
+    const httpMatch = message.match(
+      /^(?:HTTP\s+)?([1-5]\d{2})(?:\s+(.+))?$/i
+    );
+    const status = httpMatch
+      ? Number(httpMatch[1])
+      : 0;
+    const statusText = httpMatch
+      ? String(httpMatch[2] || "")
+      : "";
+
+    return Object.freeze({
+      outcome: aborted
+        ? "aborted"
+        : timedOut
+          ? "timeout"
+          : "error",
+      http: Object.freeze({
+        status,
+        statusText
+      }),
+      error: Object.freeze({
+        name,
+        message,
+        code: String(error?.code || ""),
+        aborted,
+        timedOut
+      })
+    });
+  }
+
+  function publishCatalogHealthSweepDiagnostics(
+    value
+  ) {
+    const probes = Object.freeze(
+      (Array.isArray(value?.probes)
+        ? value.probes
+        : []).map(probe =>
+        Object.freeze({
+          ...probe,
+          http: Object.freeze({
+            status: Math.max(
+              0,
+              Number(
+                probe?.http?.status
+              ) || 0
+            ),
+            statusText: String(
+              probe?.http?.statusText ||
+              ""
+            )
+          }),
+          ...(probe?.health
+            ? {
+              health: Object.freeze({
+                ...probe.health
+              })
+            }
+            : {}),
+          ...(probe?.error
+            ? {
+              error: Object.freeze({
+                ...probe.error
+              })
+            }
+            : {})
+        }))
+    );
+    const diagnostics = Object.freeze({
+      ...value,
+      sequence:
+        ++catalogHealthSweepSequence,
+      selectedPort: Math.max(
+        0,
+        Number(value?.selectedPort) || 0
+      ),
+      candidateCount: Math.max(
+        0,
+        Number(value?.candidateCount) || 0
+      ),
+      summary:
+        catalogHealthSweepHealthSummary(
+          probes
+        ),
+      probes
+    });
+
+    latestCatalogHealthSweepDiagnostics =
+      diagnostics;
+    document.documentElement.dataset
+      .rmlCatalogHealthSweepState =
+        diagnostics.outcome;
+    document.documentElement.dataset
+      .rmlCatalogHealthSweepSummary =
+        JSON.stringify(
+          diagnostics.summary
+        );
+    document.documentElement.dataset
+      .rmlCatalogHealthSweepDiagnostics =
+        JSON.stringify({
+          sequence: diagnostics.sequence,
+          outcome: diagnostics.outcome,
+          selectedPort:
+            diagnostics.selectedPort,
+          candidateCount:
+            diagnostics.candidateCount,
+          timeoutMs:
+            diagnostics.timeoutMs,
+          summary: diagnostics.summary,
+          probes: diagnostics.probes.map(
+            probe => ({
+              port: probe.port,
+              outcome: probe.outcome,
+              http: probe.http,
+              error: probe.error || null,
+              health: probe.health
+                ? {
+                    ok:
+                      probe.health.ok === true,
+                    catalogReady:
+                      probe.health.catalogReady === true,
+                    catalogAvailable:
+                      probe.health.catalogAvailable === true,
+                    runtimeBridgeReady:
+                      probe.health.runtimeBridgeReady === true,
+                    runtimeBridgeVersion:
+                      Number(
+                        probe.health.runtimeBridgeVersion
+                      ) || 0
+                  }
+                : null
+            })
+          )
+        });
+    console.info(
+      "[RML API Catalog] Completed a single seven-port sweep.",
+      diagnostics
+    );
+    return diagnostics;
+  }
+
+  async function discoverBuilderCatalogSession(
+    signal = null
+  ) {
+    const probes = [];
+    for (
+      let port = DEFAULT_PORT_FIRST;
+      port <= DEFAULT_PORT_LAST;
+      port += 1
+    ) {
+      probes.push(
+        fetchJson(
+          `http://127.0.0.1:${port}/health`,
+          SCANNER_HEALTH_SWEEP_TIMEOUT_MS,
+          signal
+        )
+          .then(health => Object.freeze({
+            port,
+            outcome:
+              health?.ok === true
+                ? "healthy"
+                : "unhealthy",
+            http: Object.freeze({
+              status: 200,
+              statusText: "OK"
+            }),
+            health: Object.freeze({
+              ...health
+            })
+          }))
+          .catch(error => Object.freeze({
+            port,
+            ...catalogHealthSweepFailure(
+              error,
+              {
+                aborted:
+                  signal?.aborted === true
+              }
+            )
+          }))
+      );
+    }
+    const outcomes =
+      await Promise.all(probes);
+    const candidates = outcomes
+      .filter(candidate =>
+        Boolean(candidate?.health)
+      )
+      .map(candidate => ({
+        ...candidate,
+        fingerprint: String(
+          scannerFingerprintContract(
+            candidate.health
+          )?.fingerprint ||
+          legacyScannerFingerprint(
+            candidate.health
+          ) ||
+            ""
+        ).trim().toLowerCase()
+      }))
+      .filter(candidate =>
+        candidate.health?.ok === true
+      );
+    const catalogIsReady = candidate =>
+      candidate.health?.catalogReady === true &&
+      candidate.health?.catalogAvailable === true;
+    const selected =
+      candidates.find(candidate =>
+        catalogIsReady(candidate) &&
+        candidate.health
+          ?.engineContextAvailable === true
+      ) ||
+      candidates.find(catalogIsReady) ||
+      candidates.find(candidate =>
+        candidate.health
+          ?.engineContextAvailable === true
+      ) ||
+       candidates[0] ||
+       null;
+    publishCatalogHealthSweepDiagnostics({
+      outcome:
+        signal?.aborted === true
+          ? "aborted"
+          : selected
+            ? "selected"
+            : "unavailable",
+      selectedPort:
+        signal?.aborted === true
+          ? 0
+          : selected?.port || 0,
+      candidateCount:
+        candidates.length,
+      timeoutMs:
+        SCANNER_HEALTH_SWEEP_TIMEOUT_MS,
+      probes: outcomes
+    });
+    if (signal?.aborted === true) {
+      return null;
+    }
+    if (!selected) {
+      return null;
+    }
+
+    const port = selected.port;
+    const health = selected.health;
+    const fingerprint = String(
+      selected.fingerprint
+    );
+
+    const scannerBaseUrl =
+      `http://127.0.0.1:${port}`;
+    const syncKey =
+      `builder-proxy:${port}:${fingerprint}`;
+    return Object.freeze({
+      mode: "live",
+      transport: "builder-proxy",
+      port,
+      generation: syncKey,
+      syncKey,
+      health,
+      scannerBaseUrl,
+      catalogFetchUrl:
+        `${builderScannerEndpoint(
+          BUILDER_SCANNER_CATALOG_PATH
+        )}?port=${encodeURIComponent(port)}`,
+      catalogDemandFetchUrl:
+        directScannerDemandEndpoint(
+          null,
+          health,
+          port
+        ),
+      catalogDemandProxyUrl:
+        `${builderScannerEndpoint(
+          BUILDER_SCANNER_DEMAND_PATH
+        )}?port=${encodeURIComponent(port)}`
+    });
   }
 
   function currentScannerConnection() {
@@ -5208,81 +12566,239 @@
     );
   }
 
+  function ensureScannerCheckWork(
+    options = {},
+    sessionKey = ""
+  ) {
+    if (
+      options.showWork !== true ||
+      !window.RMLBuilderWork
+    ) {
+      return scannerCheckWorkSession;
+    }
+    const presentationKey = String(
+      sessionKey || ""
+    );
+    if (
+      options.forceRetry !== true &&
+      presentationKey &&
+      scannerCheckPresentedSessionKey ===
+        presentationKey
+    ) {
+      return scannerCheckWorkSession;
+    }
+    if (!scannerCheckWorkSession) {
+      scannerCheckPresentedSessionKey =
+        presentationKey;
+      scannerCheckWorkSession =
+        window.RMLBuilderWork.begin?.({
+          kicker:
+            window.RMLI18n.t("ui.literal.924e20a624e5"),
+          title:
+            window.RMLI18n.t("ui.auto.4fbd685b87a4"),
+          message:
+            window.RMLI18n.t("ui.auto.ef5bac1920fc"),
+          detail:
+            window.RMLI18n.t("ui.auto.112240abb0c0"),
+          progress: 8,
+          timeout: 120000,
+          onTimeout:
+            typeof options.onTimeout ===
+              "function"
+              ? options.onTimeout
+              : undefined
+        }) || 0;
+    }
+    return scannerCheckWorkSession;
+  }
+
+  function updateScannerCheckWork(options = {}) {
+    if (!scannerCheckWorkSession) return;
+    window.RMLBuilderWork?.update?.(
+      scannerCheckWorkSession,
+      options
+    );
+  }
+
+  function finishScannerCheckWork() {
+    const session = scannerCheckWorkSession;
+    scannerCheckWorkSession = 0;
+    if (session) {
+      window.RMLBuilderWork?.finish?.(session);
+    }
+  }
+
   async function synchronizeScannerStatus(options = {}) {
-    const session = currentScannerConnection();
+    const session =
+      options.session ||
+      currentScannerConnection();
+    const sessionKey = catalogSessionKey(session);
+    const builderProxySession =
+      session.transport === "builder-proxy";
+    const sessionFingerprint = String(
+      scannerFingerprintContract(
+        session.health
+      )?.fingerprint ||
+      legacyScannerFingerprint(
+        session.health
+      ) ||
+      ""
+    ).trim().toLowerCase();
 
     if (session.mode !== "live") return false;
     if (
-      scannerCheckGeneration === session.generation &&
+      options.forceRetry !== true &&
+      scannerCheckRejectedSessionKey ===
+        sessionKey
+    ) {
+      updateStatus();
+      return false;
+    }
+    if (
+      options.forceRetry === true &&
+      scannerCheckRejectedSessionKey ===
+        sessionKey
+    ) {
+      scannerCheckRejectedSessionKey = "";
+    }
+    if (
+      scannerCheckGeneration === sessionKey &&
       scannerCheckPromise
     ) {
+      if (
+        scannerCheckMismatchSessionKey ===
+        sessionKey
+      ) {
+        ensureScannerCheckWork(
+          options,
+          sessionKey
+        );
+      }
       return scannerCheckPromise;
     }
     if (
-      scannerCheckGeneration === session.generation &&
+      scannerCheckGeneration === sessionKey &&
       lastScannerFingerprintSync.liveReached === true &&
-      window.RMLApiNodeFactoryReport?.liveCatalogVerified === true
+      window.RMLApiNodeFactoryReport?.liveCatalogVerified === true &&
+      sessionFingerprint &&
+      String(
+        lastScannerFingerprintSync.fingerprint || ""
+      ).trim().toLowerCase() === sessionFingerprint
     ) {
+      updateStatus();
       return true;
     }
-    if (!options.manualSession || options.manualSession.generation !== session.generation) {
+    if (
+      !options.session &&
+      (
+        !options.manualSession ||
+        options.manualSession.generation !==
+          session.generation
+      )
+    ) {
       return false;
     }
-    const signal = window.RMLRuntimeBridge.getSessionSignal();
-    const assertSession = () => {
+    scannerCheckAbortController?.abort();
+    const externalSignal =
+      options.signal ||
+      (
+        builderProxySession
+          ? null
+          : window.RMLRuntimeBridge
+              ?.getSessionSignal?.()
+      );
+    const checkController =
+      new AbortController();
+    const abortCheck = () =>
+      checkController.abort();
+    if (externalSignal?.aborted) {
+      abortCheck();
+    } else {
+      externalSignal?.addEventListener?.(
+        "abort",
+        abortCheck,
+        { once: true }
+      );
+    }
+    scannerCheckAbortController =
+      checkController;
+    const signal = checkController.signal;
+    const sessionIsCurrent = () => {
+      if (signal?.aborted) {
+        return false;
+      }
+      if (builderProxySession) {
+        return (
+          activeBuilderCatalogSessionKey ===
+          sessionKey
+        );
+      }
       const active = currentScannerConnection();
-      if (signal?.aborted || active.mode !== "live" || active.generation !== session.generation) {
+      return (
+        active.mode === "live" &&
+        active.generation ===
+          session.generation
+      );
+    };
+    const assertSession = () => {
+      if (!sessionIsCurrent()) {
         throw new Error("Scanner session was closed.");
       }
     };
-    scannerCheckGeneration = session.generation;
+    scannerCheckGeneration = sessionKey;
+    scannerCheckMismatchSessionKey = "";
     const pending = Promise.resolve().then(async () => {
       const builderWork =
-        window.RMLBuilderWork;
+        options.silent === true &&
+        options.showWork !== true
+          ? null
+          : window.RMLBuilderWork;
       let catalogUpdateWork = 0;
       let factoryActivated = false;
       let cacheWriteFailed = false;
       try {
         assertSession();
-        let scannerHealth = session.health;
-          if (
-            scannerHealth?.catalogReady !== true ||
-            scannerHealth?.catalogAvailable !== true
-          ) {
-            const ready = await fetchJson(
-              `${session.scannerBaseUrl}/catalog/ready`,
-              CATALOG_READY_TIMEOUT_MS,
-              signal
-            );
-          assertSession();
-          if (ready?.ready !== true) {
-            throw new Error(
-              window.RMLI18n.t("ui.literal.fce6a1d811a0")
-            );
-          }
-            scannerHealth = await fetchJson(
-              `${session.scannerBaseUrl}/health`,
-              CATALOG_READY_TIMEOUT_MS,
-              signal
-            );
-          assertSession();
-        }
+        const scannerHealth = session.health;
 
         const fingerprintContract = scannerFingerprintContract(scannerHealth);
         const legacyFingerprint = legacyScannerFingerprint(scannerHealth);
         if (
           scannerHealth?.catalogReady !== true ||
-          scannerHealth?.catalogAvailable !== true ||
-          (!fingerprintContract && !legacyFingerprint)
+          scannerHealth?.catalogAvailable !== true
         ) {
-          throw new Error(
-            window.RMLI18n.t("ui.literal.bbb2086c85ac")
-          );
+          const existing =
+            statusCatalog() ||
+            cachedCatalogStatus ||
+            cachedCatalogRecord?.catalog ||
+            null;
+          lastScannerFingerprintSync =
+            Object.freeze({
+              liveReached: false,
+              fingerprintMatchedCache: false,
+              cacheUpdatedFromLive: false,
+              cacheFallback: Boolean(existing),
+              fingerprint: String(
+                catalogIdentity(existing) || ""
+              ),
+              deferredDemandOnly: true,
+              error: ""
+            });
+          document.documentElement.dataset
+            .rmlCatalogSyncError = "";
+          catalogAvailabilityKnown = true;
+          catalogAvailable = Boolean(existing);
+          updateStatus();
+          return Boolean(existing);
         }
+        const catalogFetchUrl =
+          session.catalogFetchUrl ||
+          `${session.scannerBaseUrl}/resonite_api_catalog.json`;
         const live = { health: scannerHealth,
           fingerprint: fingerprintContract?.fingerprint || legacyFingerprint,
           legacy: !fingerprintContract,
-          url: `${session.scannerBaseUrl}/resonite_api_catalog.json`, signal };
+          url: catalogFetchUrl,
+          catalogFetchUrl,
+          signal };
         const activeBeforeSync = statusCatalog();
         let cached = cachedCatalogRecord;
         if (!cached) cached = await readCachedLiveCatalog();
@@ -5318,58 +12834,214 @@
               )
             )
           );
-        notifyCatalogGate(
-          fingerprintMatchedCache
-            ? options.onFingerprintMatch
-            : options.onCatalogRefresh,
-          {
-            phase:
-              fingerprintMatchedCache
-                ? "fingerprint-match-cache"
-                : "catalog-refresh",
+
+        if (!fingerprintMatchedCache) {
+          scannerCheckMismatchSessionKey =
+            sessionKey;
+          ensureScannerCheckWork(
+            {
+              ...options,
+              onTimeout: error =>
+                checkController.abort(
+                  error
+                )
+            },
+            sessionKey
+          );
+          updateScannerCheckWork({
+            title:
+              window.RMLI18n.t("ui.auto.864578600d79"),
             message:
-              fingerprintMatchedCache
-                ? window.RMLI18n.t("ui.literal.2e85f456b4d4")
-                : window.RMLI18n.t("ui.literal.5a3cc4a0f777")
+              window.RMLI18n.t("ui.auto.ef5bac1920fc"),
+            progress: 22
+          });
+          notifyCatalogGate(
+            options.onCatalogRefresh,
+            {
+              phase:
+                "catalog-demand-stream",
+              message:
+                "The API catalog is being updated in bounded demand records."
+            }
+          );
+          document.documentElement.dataset
+            .rmlCatalogDemandOnly = "true";
+          const demandUrl =
+            session.catalogDemandFetchUrl ||
+            session.catalogDemandProxyUrl ||
+            `${session.scannerBaseUrl}/catalog/demand-v1`;
+          await awaitCatalogSettlement(
+            ingestCatalogDemandStream(
+              demandUrl,
+              {
+                expectedFingerprint:
+                  live.fingerprint,
+                sourceUrl: live.url,
+                signal,
+                onProgress: progress => {
+                  const ownerCount = Math.max(
+                    0,
+                    Number(
+                      progress?.ownerCount
+                    ) || 0
+                  );
+                  const totalOwnerCount = Math.max(
+                    ownerCount,
+                    Number(
+                      progress?.totalOwnerCount
+                    ) || 0
+                  );
+                  updateScannerCheckWork({
+                    progress: 22 + Math.floor(
+                      Math.max(
+                        0,
+                        Math.min(
+                          1,
+                          Number(
+                            progress?.progress
+                          ) || 0
+                        )
+                      ) * 42
+                    ),
+                    detail: totalOwnerCount > 0
+                      ? `${ownerCount.toLocaleString()} / ${totalOwnerCount.toLocaleString()} catalog owners · ${Math.max(0, Number(progress?.recordCount) || 0).toLocaleString()} records processed`
+                      : undefined
+                  });
+                }
+              }
+            ),
+            signal,
+            "The scanner catalog demand-stream ingestion"
+          );
+          updateScannerCheckWork({
+            title:
+              window.RMLI18n.t("ui.auto.c6e763c4d979"),
+            progress: 66
+          });
+          assertSession();
+          let database;
+          let streamed;
+          try {
+            database = await awaitCatalogSettlement(
+              openCatalogCache(),
+              signal,
+              "The verified catalog cache reopen"
+            );
+            streamed =
+              await awaitCatalogSettlement(
+                verifiedCatalogStreamDemandRecord(
+                  database
+                ),
+                signal,
+                "The streamed catalog cache verification"
+              );
+          } finally {
+            database?.close?.();
+          }
+          const streamedFingerprint = String(
+            streamed?.fingerprint || ""
+          ).trim().toLowerCase();
+          if (
+            !streamed?.catalog ||
+            !streamedFingerprint ||
+            (
+              live.fingerprint &&
+              streamedFingerprint !==
+                String(live.fingerprint || "")
+                  .trim().toLowerCase()
+            )
+          ) {
+            throw new Error(
+              "The newly streamed catalog generation could not be reopened atomically."
+            );
+          }
+          if (!live.fingerprint) {
+            live.fingerprint =
+              streamedFingerprint;
+          }
+          const confirmedCatalog =
+            normalizeCatalog(
+              streamed.catalog,
+              "scanner-cache",
+              live.url
+            );
+          updateScannerCheckWork({
+            title:
+              window.RMLI18n.t("ui.auto.b3eedfd6c481"),
+            message:
+              window.RMLI18n.t("ui.auto.aeb3813489d0"),
+            progress: 82
+          });
+          await awaitCatalogSettlement(
+            activateCatalogAndFactory(
+              confirmedCatalog,
+              { signal }
+            ),
+            signal,
+            "The streamed catalog factory activation"
+          );
+          factoryActivated = true;
+          promoteFactoryReportForCatalog(
+            confirmedCatalog,
+            {
+              liveFingerprintVerified: true
+            }
+          );
+          cachedCatalogRecord = streamed;
+          cachedCatalogReadPromise =
+            Promise.resolve(streamed);
+          cachedCatalogStatus =
+            confirmedCatalog;
+          catalogAvailabilityKnown = true;
+          catalogAvailable = true;
+          lastScannerFingerprintSync =
+            Object.freeze({
+              liveReached: true,
+              fingerprintMatchedCache: true,
+              cacheUpdatedFromLive: true,
+              cacheFallback: false,
+              fingerprint: String(
+                live.fingerprint || ""
+              ),
+              deferredDemandOnly: false,
+              error: ""
+            });
+          document.documentElement.dataset
+            .rmlCatalogFingerprintMatchedCache =
+              "true";
+          document.documentElement.dataset
+            .rmlCatalogCacheUpdatedFromLive =
+              "true";
+          document.documentElement.dataset
+            .rmlCatalogDemandOnly = "false";
+          document.documentElement.dataset
+            .rmlCatalogSyncError = "";
+          updateStatus();
+          updateScannerCheckWork({
+            title:
+              window.RMLI18n.t("ui.auto.135b2e3c04b9"),
+            message:
+              window.RMLI18n.t("ui.literal.d34172e03925"),
+            progress: 100
+          });
+          rememberScannerCatalogUrl(
+            live.url
+          );
+          scannerCheckRejectedSessionKey = "";
+          return true;
+        }
+
+        document.documentElement.dataset
+          .rmlCatalogDemandOnly = "false";
+        notifyCatalogGate(
+          options.onFingerprintMatch,
+          {
+            phase: "fingerprint-match-cache",
+            message:
+              window.RMLI18n.t("ui.literal.2e85f456b4d4")
           }
         );
-        if (
-          !fingerprintMatchedCache &&
-          builderWork?.version >= 1
-        ) {
-          catalogUpdateWork =
-            builderWork.begin({
-              kicker: window.RMLI18n.t("ui.auto.9fc587f7a4db"),
-              title: window.RMLI18n.t("ui.auto.703179d36bf0"),
-              message:
-                window.RMLI18n.t("ui.auto.12e7a6f0b973"),
-              detail:
-                window.RMLI18n.t("ui.literal.2068df93dd69"),
-              progress: 20,
-              timeout: 120000
-            });
-          await builderWork.paint();
-        }
-        const liveRaw =
-          fingerprintMatchedCache
-            ? null
-            : await loadAndVerifyLiveCatalog(
-                live
-              );
         assertSession();
-        if (
-          !fingerprintMatchedCache &&
-          statusCatalog()
-            ?.catalogDemandPartial === true
-        ) {
-          await activateFullCatalogDemandFallback();
-          assertSession();
-        }
-        let cacheUpdatedFromLive = false;
-        const synchronizedRaw =
-          fingerprintMatchedCache
-            ? cached.catalog
-            : liveRaw;
         const activeCacheMatches =
           Boolean(
             activeBeforeSync &&
@@ -5386,10 +13058,8 @@
           activeCacheMatches
             ? activeBeforeSync
             : normalizeCatalog(
-                synchronizedRaw,
-                fingerprintMatchedCache
-                  ? "scanner-cache"
-                  : "scanner",
+                cached.catalog,
+                "scanner-cache",
                 live.url
               );
 
@@ -5398,9 +13068,7 @@
           {
             phase: "factory",
             message:
-              fingerprintMatchedCache
-                ? window.RMLI18n.t("ui.literal.254549ea6ed6")
-                : window.RMLI18n.t("ui.literal.40a71b43c30d")
+              window.RMLI18n.t("ui.literal.254549ea6ed6")
           }
         );
         builderWork?.update?.(
@@ -5413,21 +13081,14 @@
           }
         );
         await builderWork?.paint?.();
-        if (!fingerprintMatchedCache) {
-          await queueCatalogActivationOperation(
-            async () => {
-              catalogDemandState = null;
-              catalogDemandManifest = null;
-              await activateCatalogAndFactoryNow(
-                confirmedCatalog
-              );
-            }
-          );
-        } else {
-          await activateCatalogAndFactory(
-            confirmedCatalog
-          );
-        }
+        await awaitCatalogSettlement(
+          activateCatalogAndFactory(
+            confirmedCatalog,
+            { signal }
+          ),
+          signal,
+          "The cached catalog factory activation"
+        );
         factoryActivated = true;
         promoteFactoryReportForCatalog(
           confirmedCatalog,
@@ -5435,75 +13096,38 @@
             liveFingerprintVerified: true
           }
         );
-        if (!fingerprintMatchedCache) {
-          notifyCatalogGate(
-            options.onCatalogCacheWrite,
-            {
-              phase: "catalog-cache-write",
-              message:
-                window.RMLI18n.t("ui.auto.969f8798a2e1")
-            }
-          );
-          builderWork?.update?.(
-            catalogUpdateWork,
-            {
-              title: window.RMLI18n.t("ui.auto.703179d36bf0"),
-              message:
-                window.RMLI18n.t("ui.auto.4cc0f26064e3"),
-              progress: 85
-            }
-          );
-          await builderWork?.paint?.();
-          cacheUpdatedFromLive =
-            await writeCachedLiveCatalog(
-              liveRaw,
-              live.url
-            );
-          if (!cacheUpdatedFromLive) {
-            cacheWriteFailed = true;
-          }
-        }
         builderWork?.update?.(
           catalogUpdateWork,
           {
             title: window.RMLI18n.t("ui.auto.135b2e3c04b9"),
             message:
-              cacheUpdatedFromLive || fingerprintMatchedCache
-                ? window.RMLI18n.t("ui.literal.d34172e03925")
-                : window.RMLI18n.t("ui.literal.4cf0c78ba4c8"),
+              window.RMLI18n.t("ui.literal.d34172e03925"),
             progress: 100
           }
         );
         await builderWork?.paint?.();
-        if (cacheWriteFailed) {
-          window.setTimeout(() => {
-            void window.RMLBuilderDialog?.notice?.({
-              tone: "danger",
-              kicker: window.RMLI18n.t("ui.auto.9fc587f7a4db"),
-              title: window.RMLI18n.t("ui.auto.42784ff61fb7"),
-              message:
-                window.RMLI18n.t("ui.auto.4ec642bd800d"),
-              details:
-                window.RMLI18n.t("ui.literal.219b9621355b"),
-              confirmLabel: window.RMLI18n.t("ui.literal.9ce3bd4224c8")
-            });
-          }, 0);
-        }
 
         lastScannerFingerprintSync =
           Object.freeze({
             liveReached: true,
-            fingerprintMatchedCache,
-            cacheUpdatedFromLive,
+            fingerprintMatchedCache: true,
+            cacheUpdatedFromLive: false,
             cacheFallback: false,
             fingerprint:
               catalogIdentity(
                 confirmedCatalog
               ),
-            error: cacheWriteFailed
-              ? window.RMLI18n.t("ui.auto.4ec642bd800d")
-              : ""
+            deferredDemandOnly: false,
+            error: ""
           });
+        document.documentElement.dataset
+          .rmlCatalogFingerprintMatchedCache =
+            "true";
+        document.documentElement.dataset
+          .rmlCatalogCacheUpdatedFromLive =
+            "false";
+        document.documentElement.dataset
+          .rmlCatalogSyncError = "";
 
         catalogAvailabilityKnown = true;
         catalogAvailable = true;
@@ -5519,43 +13143,85 @@
         rememberScannerCatalogUrl(
           live.url
         );
+        scannerCheckRejectedSessionKey = "";
 
         return true;
       } catch (error) {
-        if (currentScannerConnection().generation === session.generation) {
+        const storageCapacityFailed =
+          catalogCacheCapacityFailure(
+            error
+          );
+        if (
+          !factoryActivated &&
+          scannerCheckGeneration === sessionKey
+        ) {
+          scannerCheckRejectedSessionKey =
+            sessionKey;
+        }
+        if (sessionIsCurrent()) {
           const message =
             error?.message || String(error);
+          const fallbackCatalog =
+            statusCatalog() ||
+            cachedCatalogStatus ||
+            cachedCatalogRecord?.catalog ||
+            null;
+          if (
+            !cachedCatalogStatus &&
+            fallbackCatalog
+          ) {
+            cachedCatalogStatus =
+              fallbackCatalog;
+          }
+          console.error(
+            storageCapacityFailed
+              ? "[RML BUILDER INTERNAL FAILURE] The browser catalog cache has no writable space. The previously verified cache was preserved and this operation was not retried."
+              : "[RML BUILDER INTERNAL FAILURE] The scanner selected by the health sweep could not complete catalog synchronization.",
+            error
+          );
           lastScannerFingerprintSync = Object.freeze({ liveReached: factoryActivated,
             fingerprintMatchedCache: false, cacheUpdatedFromLive: false,
-            cacheFallback: !factoryActivated, fingerprint: factoryActivated
+            cacheFallback: Boolean(fallbackCatalog), fingerprint: factoryActivated
               ? String(statusCatalog()?.catalogFingerprint || "")
-              : String(cachedCatalogRecord?.fingerprint || ""),
+              : String(
+                  catalogIdentity(
+                    fallbackCatalog
+                  ) ||
+                  cachedCatalogRecord?.fingerprint ||
+                  ""
+                ),
             error: message });
+          document.documentElement.dataset
+            .rmlCatalogSyncError = message;
           if (!factoryActivated) {
             demoteLiveFactoryReport();
-            window.RMLRuntimeBridge?.disconnect?.(
-              window.RMLI18n.t("ui.literal.6eb076a442fc")
-            );
+            if (!builderProxySession) {
+              window.RMLRuntimeBridge?.disconnect?.(
+                window.RMLI18n.t("ui.literal.6eb076a442fc")
+              );
+            }
           }
           catalogAvailabilityKnown = true;
           catalogAvailable =
-            Boolean(statusCatalog());
+            Boolean(fallbackCatalog);
           updateStatus();
-          window.setTimeout(() => {
-            void window.RMLBuilderDialog?.notice?.({
-              tone: "danger",
-              kicker: window.RMLI18n.t("ui.auto.9fc587f7a4db"),
-              title: factoryActivated
-                ? "Catalog finalization failed"
-                : "Catalog update rejected",
-              message,
-              details:
-                factoryActivated
-                  ? window.RMLI18n.t("ui.literal.df4fc16221ae")
-                  : window.RMLI18n.t("ui.literal.0a6c834f4d72"),
-              confirmLabel: window.RMLI18n.t("ui.literal.9ce3bd4224c8")
-            });
-          }, 0);
+          if (options.silent !== true) {
+            window.setTimeout(() => {
+              void window.RMLBuilderDialog?.notice?.({
+                tone: "danger",
+                kicker: window.RMLI18n.t("ui.auto.9fc587f7a4db"),
+                title: factoryActivated
+                  ? "Catalog finalization failed"
+                  : "Catalog update rejected",
+                message,
+                details:
+                  factoryActivated
+                    ? window.RMLI18n.t("ui.literal.df4fc16221ae")
+                    : window.RMLI18n.t("ui.literal.0a6c834f4d72"),
+                confirmLabel: window.RMLI18n.t("ui.literal.9ce3bd4224c8")
+              });
+            }, 0);
+          }
         }
         if (
           options.throwOnFailure === true &&
@@ -5570,7 +13236,22 @@
             catalogUpdateWork
           );
         }
-        if (scannerCheckGeneration === session.generation) scannerCheckPromise = null;
+        if (scannerCheckGeneration === sessionKey) {
+          scannerCheckPromise = null;
+          scannerCheckMismatchSessionKey = "";
+          if (
+            scannerCheckAbortController ===
+            checkController
+          ) {
+            scannerCheckAbortController = null;
+          }
+          finishScannerCheckWork();
+          updateStatus();
+        }
+        externalSignal?.removeEventListener?.(
+          "abort",
+          abortCheck
+        );
       }
     });
     scannerCheckPromise = pending;
@@ -6075,20 +13756,6 @@
       catalog &&
       report &&
       report.verificationPassed === true &&
-      report.moduleId ===
-        CATALOG_LOADER_MODULE_ID &&
-      Number(report.factoryVersion) ===
-        REQUIRED_API_FACTORY_VERSION &&
-      window.RMLApiNodeFactoryController
-        ?.moduleId ===
-        CATALOG_LOADER_MODULE_ID &&
-      Number(
-        window.RMLApiNodeFactoryController
-          ?.factoryVersion
-      ) === REQUIRED_API_FACTORY_VERSION &&
-      Number(
-        window.__RMLApiNodeFactoryVersion
-      ) === REQUIRED_API_FACTORY_VERSION &&
       Number(
         report.verificationSchemaVersion
       ) ===
@@ -6415,157 +14082,97 @@
         .filter(requirement =>
           requirement.catalogScope === "api"
         );
+    const replacementOwnerRequirements =
+      options?.hydrateReplacementOwners === true
+        ? normalizedRequiredApiNodes({
+            requiredNodes:
+              Array.isArray(
+                options?.replacementNodes
+              )
+                ? options.replacementNodes
+                : demandRequirements
+          }).filter(requirement =>
+            requirement.catalogScope === "api"
+          )
+        : [];
     await ensureCatalogDemandOperators(
       demandRequirements.map(
         requirement =>
           requirement.operatorId
-      )
-    );
-    const activeCatalog = statusCatalog();
-    const activeReport =
-      window.RMLApiNodeFactoryReport;
-    const activeLive = Boolean(
-      activeCatalog &&
-      factoryMatchesCatalog(
-        activeCatalog,
-        activeReport
-      ) &&
-      currentScannerConnection().mode ===
-        "live" &&
-      activeReport?.liveCatalogVerified ===
-        true
-    );
-    if (
-      activeCatalog &&
-      factoryMatchesCatalog(
-        activeCatalog,
-        activeReport
-      ) &&
-      (
-        options.forceLiveRefresh !== true ||
-        activeLive
-      )
-    ) {
-      return Object.freeze({
-        available: true,
-        live: activeLive,
-        cacheFallback: !activeLive,
-        catalogBackedByCache: true,
-        liveAttempted:
-          currentScannerConnection().mode ===
-            "live",
-        source: activeLive
-          ? "scanner-verified-cache"
-          : "scanner-cache",
-        catalogFingerprint: String(
-          activeCatalog.catalogFingerprint ||
-          ""
-        ),
-        engineVersion: String(
-          activeCatalog.engineVersion || ""
-        ),
-        fingerprintMatchedCache:
-          lastScannerFingerprintSync
-            .fingerprintMatchedCache === true,
-        cacheUpdatedFromLive:
-          lastScannerFingerprintSync
-            .cacheUpdatedFromLive === true
-      });
-    }
-
-    notifyCatalogGate(
-      options.onLiveLookup,
+      ),
       {
-        phase: "live",
-        message:
-          currentScannerConnection().mode === "live"
-            ? window.RMLI18n.t("ui.literal.313f18890446")
-            : window.RMLI18n.t("ui.literal.d549ec3a2638")
+        allowFullFallback: false,
+        ephemeral:
+          options?.hydrateReplacementOwners ===
+            true,
+        hydratePortableOwners:
+          options?.hydrateReplacementOwners ===
+            true,
+        completePortableOwners: new Set(
+          replacementOwnerRequirements
+            .map(requirement =>
+              String(
+                requirement.apiContract
+                  ?.ownerType || ""
+              )
+            )
+            .filter(Boolean)
+        ),
+        portableOwners: new Map(
+          demandRequirements
+            .map(requirement => [
+              String(
+                requirement.operatorId || ""
+              ),
+              String(
+                requirement.apiContract
+                  ?.ownerType || ""
+              )
+            ])
+            .filter(([, owner]) =>
+              Boolean(owner)
+            )
+        )
       }
     );
+    const catalog = statusCatalog();
+    const report =
+      window.RMLApiNodeFactoryReport;
+    const factoryReady = Boolean(
+      catalog &&
+      factoryMatchesCatalog(
+        catalog,
+        report
+      )
+    );
+    const live = Boolean(
+      factoryReady &&
+      report?.liveCatalogVerified === true &&
+      String(
+        report?.catalogFingerprint || ""
+      ) === String(
+        catalog?.catalogFingerprint || ""
+      )
+    );
 
-    const connected =
-      await synchronizeScannerStatus({
-        showChecking: true,
-        throwOnFailure: false,
-        onFingerprintMatch:
-          options.onFingerprintMatch,
-        onCatalogRefresh:
-          options.onCatalogRefresh,
-        onFactoryActivation:
-          options.onFactoryActivation
-      }) === true;
-
-    if (!connected) {
-      notifyCatalogGate(
-        options.onCacheFallback,
-        {
-          phase: "cache",
-          message:
-            currentScannerConnection().mode === "live"
-              ? window.RMLI18n.t("ui.literal.7d1161f56e73")
-              : window.RMLI18n.t("ui.literal.9ace8597394b")
-        }
-      );
-    }
-
-    const catalog = connected
-      ? statusCatalog()
-      : await activateCachedCatalogFallback();
-
-    if (!catalog) {
+    if (!factoryReady) {
       return Object.freeze({
         available: false,
         live: false,
         cacheFallback: true,
-        liveAttempted: currentScannerConnection().mode === "live",
+        liveAttempted: false,
         source: "unavailable",
         catalogFingerprint: "",
         engineVersion: ""
       });
     }
 
-    let report =
-      window.RMLApiNodeFactoryReport;
-
-    if (
-      !factoryMatchesCatalog(
-        catalog,
-        report
-      )
-    ) {
-      await activateCatalogAndFactory(
-        catalog
-      );
-      report =
-        window.RMLApiNodeFactoryReport;
-    }
-
-    const factoryReady =
-      factoryMatchesCatalog(
-        catalog,
-        report
-      );
-    const live = Boolean(
-      connected &&
-      factoryReady &&
-      window.RMLApiNodeFactoryReport
-        ?.liveCatalogVerified === true &&
-      String(
-        window.RMLApiNodeFactoryReport
-          ?.catalogFingerprint || ""
-      ) ===
-        String(
-          catalog.catalogFingerprint || ""
-        )
-    );
-
     return Object.freeze({
-      available: factoryReady,
+      available: true,
       live,
       cacheFallback: !live,
       catalogBackedByCache: true,
-      liveAttempted: currentScannerConnection().mode === "live",
+      liveAttempted: false,
       source: live
         ? "scanner-verified-cache"
         : "scanner-cache",
@@ -6577,15 +14184,14 @@
       ),
       fingerprintMatchedCache:
         lastScannerFingerprintSync
-          .fingerprintMatchedCache ===
-            true,
+          .fingerprintMatchedCache === true,
       cacheUpdatedFromLive:
         lastScannerFingerprintSync
           .cacheUpdatedFromLive === true
     });
   }
 
-  function ensureCatalogForExport(
+  function ensureCatalogForExportWithActivation(
     options = {}
   ) {
     const requiredNodes =
@@ -6599,7 +14205,24 @@
       requiredNodes.map(
         requirement =>
           requirement.operatorId
-      )
+      ),
+      {
+        portableOwners: new Map(
+          requiredNodes
+            .map(requirement => [
+              String(
+                requirement.operatorId || ""
+              ),
+              String(
+                requirement.apiContract
+                  ?.ownerType || ""
+              )
+            ])
+            .filter(([, owner]) =>
+              Boolean(owner)
+            )
+        )
+      }
     ).then(() =>
       queueCatalogActivationOperation(
         async () => {
@@ -6783,6 +14406,99 @@
         });
         }
       )
+    );
+  }
+
+  function ensureCatalogForExport(
+    options = {}
+  ) {
+    const requiredNodes =
+      normalizedRequiredApiNodes(options)
+        .filter(requirement =>
+          requirement.catalogScope ===
+            "api"
+        );
+    const catalog = statusCatalog();
+    const report =
+      window.RMLApiNodeFactoryReport;
+
+    if (!catalog) {
+      return Promise.resolve(
+        Object.freeze({
+          required:
+            requiredNodes.length > 0,
+          verified: false,
+          available: false,
+          rebuilt: false,
+          unresolved:
+            requiredNodes.length,
+          unresolvedRequirements:
+            Object.freeze([
+              ...requiredNodes
+            ]),
+          failureLabels:
+            Object.freeze([
+              window.RMLI18n.t("ui.literal.5b43201db8a6")
+            ]),
+          catalogFingerprint: "",
+          engineVersion: "",
+          catalogSnapshot: null,
+          factoryReport: null
+        })
+      );
+    }
+
+    const integrity =
+      factoryRegistryIntegrity(
+        catalog,
+        report,
+        requiredNodes
+      );
+    const factoryReady =
+      factoryMatchesCatalog(
+        catalog,
+        report
+      );
+    const missing = factoryReady
+      ? missingRequiredApiNodes(
+          requiredNodes,
+          catalog,
+          report
+        )
+      : unresolvedRequiredApiNodes(
+          requiredNodes,
+          "the frozen catalog factory publication is incomplete"
+        );
+    const verified = Boolean(
+      factoryReady &&
+      integrity.valid === true &&
+      missing.length === 0
+    );
+
+    return Promise.resolve(
+      Object.freeze({
+        required:
+          requiredNodes.length > 0,
+        verified,
+        available: verified,
+        rebuilt: false,
+        unresolved: missing.length,
+        unresolvedRequirements:
+          Object.freeze(missing),
+        failureLabels: Object.freeze(
+          missing.map(
+            requiredApiNodeFailureLabel
+          )
+        ),
+        catalogFingerprint: String(
+          catalog.catalogFingerprint || ""
+        ),
+        engineVersion: String(
+          catalog.engineVersion || ""
+        ),
+        catalogSnapshot: catalog,
+        factoryReport: report
+      })
     );
   }
 
@@ -7016,8 +14732,11 @@
           }),
         portMigrations:
           Object.freeze(structuredClone(portMigrations)),
-        liveFallbackAttempted: currentScannerConnection().mode === "live",
-        liveAttempted: currentScannerConnection().mode === "live",
+        liveFallbackAttempted:
+          lastScannerFingerprintSync.liveReached === true,
+        liveAttempted:
+          document.documentElement.dataset
+            .rmlCatalogProxyState === "available",
         cacheFallback:
           replacementCatalog.cacheFallback ===
             true,
@@ -7201,8 +14920,11 @@
             requiredApiNodeFailureLabel
           )
         ),
-      liveFallbackAttempted: currentScannerConnection().mode === "live",
-      liveAttempted: currentScannerConnection().mode === "live",
+      liveFallbackAttempted:
+        lastScannerFingerprintSync.liveReached === true,
+      liveAttempted:
+        document.documentElement.dataset
+          .rmlCatalogProxyState === "available",
       cacheFallback:
         replacementCatalog.cacheFallback ===
           true,
@@ -7216,65 +14938,114 @@
     });
   }
 
-  function synchronizeConnectedSession(
-    connection = currentScannerConnection()
+  async function synchronizeAvailableCatalog(
+    options = {}
   ) {
-    if (connection.mode === "live") {
-      void synchronizeScannerStatus({
-        manualSession: connection,
-        showChecking: true,
-        throwOnFailure: false
-      }).then(synchronized => {
-        if (synchronized === true && statusCatalog()) {
-          catalogAvailabilityKnown = true;
-          catalogAvailable = true;
-          updateStatus();
-          return;
-        }
+    const proxySession =
+      await discoverBuilderCatalogSession(
+        options.signal || null
+      );
 
-        if (!manualCatalogActivationPromise) {
-          const existing =
-            statusCatalog() ||
-            cachedCatalogRecord?.catalog ||
-            cachedCatalogStatus ||
-            null;
-          catalogAvailabilityKnown = true;
-          catalogAvailable = Boolean(existing);
-          if (existing) {
-            updateStatus();
-          } else {
-            updateUnavailableStatus();
+    if (proxySession) {
+      const selectedScannerSession =
+        Object.freeze({
+          port: proxySession.port,
+          scannerBaseUrl:
+            proxySession.scannerBaseUrl,
+          health: proxySession.health,
+          fingerprint: String(
+            scannerFingerprintContract(
+              proxySession.health
+            )?.fingerprint ||
+            legacyScannerFingerprint(
+              proxySession.health
+            ) ||
+            ""
+          ),
+          trigger:
+            options.trigger === "import"
+              ? "import"
+              : "button"
+        });
+      window.RMLScannerHealthSession =
+        selectedScannerSession;
+      document.dispatchEvent(
+        new CustomEvent(
+          "rml-scanner:selected",
+          {
+            detail:
+              selectedScannerSession
           }
-        }
+        )
+      );
+      activeBuilderCatalogSessionKey =
+        catalogSessionKey(proxySession);
+      document.documentElement.dataset
+        .rmlCatalogProxyState = "available";
+      document.documentElement.dataset
+        .rmlCatalogProxyFingerprint =
+          String(
+            scannerFingerprintContract(
+              proxySession.health
+            )?.fingerprint ||
+            legacyScannerFingerprint(
+              proxySession.health
+            ) ||
+            ""
+          );
+      return synchronizeScannerStatus({
+        ...options,
+        session: proxySession,
+        silent: true,
+        throwOnFailure: false
       });
-      return;
     }
 
-    demoteLiveFactoryReport();
-
-    if (manualCatalogActivationPromise) {
-      return;
-    }
+    activeBuilderCatalogSessionKey = "";
+    window.RMLScannerHealthSession = null;
+    document.dispatchEvent(
+      new CustomEvent(
+        "rml-scanner:unavailable",
+        {
+          detail: Object.freeze({
+            trigger:
+              options.trigger === "import"
+                ? "import"
+                : "button"
+          })
+        }
+      )
+    );
+    scannerCheckAbortController?.abort();
+    document.documentElement.dataset
+      .rmlCatalogProxyState = "unavailable";
+    document.documentElement.dataset
+      .rmlCatalogProxyFingerprint = "";
 
     const existing =
       statusCatalog() ||
       cachedCatalogRecord?.catalog ||
       cachedCatalogStatus ||
       null;
+    if (
+      !cachedCatalogStatus &&
+      existing
+    ) {
+      cachedCatalogStatus = existing;
+    }
     catalogAvailabilityKnown = true;
     catalogAvailable = Boolean(existing);
-
     if (existing) {
       updateStatus();
     } else {
       updateUnavailableStatus();
     }
+    return false;
   }
 
-  window.addEventListener("rml-scanner-connection", event => {
-    synchronizeConnectedSession(event.detail);
-  });
   window.addEventListener("rml-api-node-factory-ready", updateStatus);
+  window.addEventListener("rml-scanner-connection", updateStatus);
+  window.addEventListener("rml-runtime-readiness", updateStatus);
 
   Object.defineProperty(
     window,
@@ -7285,6 +15056,10 @@
         getPaletteIndex() {
           return catalogDemandPaletteIndex();
         },
+        getPaletteSummary:
+          catalogDemandPaletteSummary,
+        queryPalette:
+          catalogDemandQueryPalette,
         ensureOperators:
           ensureCatalogDemandOperators,
         ensureFull:
@@ -7415,12 +15190,7 @@
         updateUnavailableStatus();
       }
 
-      if (
-        currentScannerConnection().mode ===
-          "live"
-      ) {
-        synchronizeConnectedSession();
-      } else if (statusCatalog()) {
+      if (statusCatalog()) {
         updateStatus();
       }
 
@@ -7447,8 +15217,10 @@
       value: Object.freeze({
         first: DEFAULT_PORT_FIRST,
         last: DEFAULT_PORT_LAST,
-        healthPath: HEALTH_PATH,
-        catalogPath: CATALOG_PATH
+        catalogProxyPath:
+          BUILDER_SCANNER_CATALOG_PATH,
+        demandProxyPath:
+          BUILDER_SCANNER_DEMAND_PATH
       }),
       writable: false,
       enumerable: true,
@@ -7461,7 +15233,7 @@
     "RMLCatalogImportGate",
     {
       value: Object.freeze({
-        version: 12,
+        version: 14,
         moduleId:
           CATALOG_LOADER_MODULE_ID,
         loaderVersion:
@@ -7475,7 +15247,20 @@
         ensureForReplacement:
           ensureCatalogForReplacement,
         ensureForExport:
-          ensureCatalogForExport
+          ensureCatalogForExportWithActivation,
+        synchronizeLive(options = {}) {
+          return synchronizeAvailableCatalog(
+            options
+          );
+        },
+        refreshStatus() {
+          updateStatus();
+          return String(
+            document.getElementById(
+              "api-catalog-state"
+            )?.dataset?.source || ""
+          );
+        }
       }),
       writable: false,
       enumerable: true,

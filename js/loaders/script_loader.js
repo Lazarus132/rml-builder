@@ -2,23 +2,10 @@
   "use strict";
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
+    "1.21.76-custom-csharp-catalog-provenance";
 
   if (
-    Object.hasOwn(
-      window,
-      "RMLBuilderBuildId"
-    ) &&
-    window.RMLBuilderBuildId !==
-      SCRIPT_LOADER_MODULE_ID
-  ) {
-    throw new Error(
-      `Builder module version mismatch: index.html published '${String(window.RMLBuilderBuildId || "missing")}', but script_loader.js is '${SCRIPT_LOADER_MODULE_ID}'. Reload the Builder without cached files.`
-    );
-  }
-
-  if (
-    window.RMLScriptLoader?.version >= 41 &&
+    window.RMLScriptLoader?.version >= 47 &&
     window.RMLScriptLoader?.moduleId ===
       SCRIPT_LOADER_MODULE_ID
   ) {
@@ -36,6 +23,7 @@
   let runtimeViewOpenAfterLoadPromise = null;
   const GRAPH_SEARCH_SHORTCUT_CAPTURE_VERSION = 18;
   const provisionalGraphShortcutKeys = new Set();
+  let scannerStatusControlInstalled = false;
 
   function graphSearchShortcutDirection(event) {
     const key = String(event.key || "").toLowerCase();
@@ -138,8 +126,8 @@
     "scanner-connection": Object.freeze({
       dependencies: Object.freeze([]),
       files: Object.freeze([Object.freeze({
-        url: "../graph/runtime_bridge.js?v=1000-live-loss-status",
-        ready: () => window.RMLRuntimeBridge?.version >= 10 &&
+        url: "../graph/runtime_bridge.js?v=1.21.76-custom-csharp-catalog-provenance&status-runtime=4",
+        ready: () => window.RMLRuntimeBridge?.version >= 14 &&
           typeof window.RMLRuntimeBridge?.connect === "function"
       })])
     }),
@@ -182,14 +170,14 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.21.24-contextual-csharp-api",
+          url: "../catalog/catalog_loader.js?v=1.21.76-custom-csharp-catalog-provenance&status-catalog=4",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
             Number(
               window.RMLCatalogImportGate
                 ?.loaderVersion
-            ) === 85 &&
+            ) === 91 &&
             Number(
               window.RMLCatalogImportGate
                 ?.requiredApiFactoryVersion
@@ -200,7 +188,7 @@
             )
         }),
         Object.freeze({
-          url: "../graph/node_graph_registry.js?v=1-physical-modules-v751-canonical-port-types",
+          url: "../graph/node_graph_registry.js?v=1-physical-modules-v752-catalog-cache-equivalent",
           ready: () =>
             typeof window.RMLModNodeRegistry?.getNodeDefinitions ===
               "function"
@@ -234,7 +222,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+          url: "../graph/node_graph_codegen.js?v=1.21.76-custom-csharp-catalog-provenance",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -251,7 +239,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.76-custom-csharp-catalog-provenance",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -260,13 +248,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+          url: "../graph/node_graph_composites.js?v=1.21.76-custom-csharp-catalog-provenance",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.21.24-contextual-csharp-api",
+          url: "../graph/node_graph_custom_csharp.js?v=1.21.76-custom-csharp-catalog-provenance",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -275,13 +263,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.21.24-contextual-csharp-api",
+          url: "../graph/node_graph_view.js?v=1.21.76-custom-csharp-catalog-provenance&status-readiness=4",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+          url: "../graph/node_graph_bootstrap.js?v=1.21.76-custom-csharp-catalog-provenance",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -305,7 +293,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=807-webgpu-texture-limits",
+          url: "../graph/graph_gpu_renderer.js?v=1.21.76-custom-csharp-catalog-provenance",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })
@@ -315,6 +303,177 @@
       }
     })
   });
+
+  function publicContractDiagnostic(file) {
+    const path = String(file?.url || "").split("?")[0];
+    const typed = (exportName, expected, actual) => Object.freeze({
+      exportName,
+      expected: Object.freeze(expected),
+      actual: Object.freeze(actual)
+    });
+
+    if (path.endsWith("/graph/runtime_bridge.js")) {
+      return typed(
+        "RMLRuntimeBridge",
+        { minimumVersion: 14, connectType: "function" },
+        {
+          version: window.RMLRuntimeBridge?.version ?? null,
+          connectType: typeof window.RMLRuntimeBridge?.connect
+        }
+      );
+    }
+    if (path.endsWith("/core/code_templates.js")) {
+      return typed(
+        "RMLCodeTemplates",
+        { version: 797 },
+        { version: window.RMLCodeTemplates?.version ?? null }
+      );
+    }
+    if (path.endsWith("/core/guidance.js")) {
+      return typed(
+        "RMLGuidance",
+        { version: 793 },
+        { version: window.RMLGuidance?.version ?? null }
+      );
+    }
+    if (path.endsWith("/compiler/csharp14_roslyn.js")) {
+      return typed(
+        "RMLCSharp14Roslyn",
+        { validateType: "function" },
+        { validateType: typeof window.RMLCSharp14Roslyn?.validate }
+      );
+    }
+    if (path.endsWith("/compiler/compile.js")) {
+      return typed(
+        "RMLCompile",
+        { validateType: "function" },
+        { validateType: typeof window.RMLCompile?.validate }
+      );
+    }
+    if (path.endsWith("/compiler/compiler_reference_discovery.js")) {
+      return typed(
+        "RMLCompilerReferenceDiscovery",
+        { scanDirectoryType: "function" },
+        {
+          scanDirectoryType:
+            typeof window.RMLCompilerReferenceDiscovery?.scanDirectory
+        }
+      );
+    }
+    if (path.endsWith("/catalog/catalog_loader.js")) {
+      return typed(
+        "RMLCatalogImportGate",
+        {
+          loaderModuleId: SCRIPT_LOADER_MODULE_ID,
+          loaderVersion: 91,
+          requiredApiFactoryVersion: 38
+        },
+        {
+          loaderModuleId:
+            window.RMLCatalogImportGate?.moduleId ?? null,
+          loaderVersion:
+            window.RMLCatalogImportGate?.loaderVersion ?? null,
+          requiredApiFactoryVersion:
+            window.RMLCatalogImportGate?.requiredApiFactoryVersion ?? null
+        }
+      );
+    }
+    if (path.endsWith("/graph/node_graph_registry.js")) {
+      return typed(
+        "RMLModNodeRegistry",
+        { getNodeDefinitionsType: "function" },
+        {
+          getNodeDefinitionsType:
+            typeof window.RMLModNodeRegistry?.getNodeDefinitions
+        }
+      );
+    }
+    if (path.endsWith("/graph/node_graph_codegen.js")) {
+      return typed(
+        "RMLTypedNodeGraphGenerator",
+        {
+          loaderModuleId: SCRIPT_LOADER_MODULE_ID,
+          buildType: "function"
+        },
+        {
+          loaderModuleId:
+            window.RMLTypedNodeGraphGenerator?.moduleId ?? null,
+          buildType:
+            typeof window.RMLTypedNodeGraphGenerator?.build
+        }
+      );
+    }
+    if (path.endsWith("/workers/saved_api_composite_compare_worker.js")) {
+      return typed(
+        "RMLSavedApiCompositeCompareWorkerBootstrap",
+        {
+          loaderModuleId: SCRIPT_LOADER_MODULE_ID,
+          sourceType: "string"
+        },
+        {
+          loaderModuleId:
+            window.RMLSavedApiCompositeCompareWorkerBootstrap?.moduleId ?? null,
+          sourceType:
+            typeof window.RMLSavedApiCompositeCompareWorkerBootstrap?.source
+        }
+      );
+    }
+    if (path.endsWith("/graph/node_graph_composites.js")) {
+      return typed(
+        "RMLNodeGraphCompositesModuleId",
+        { loaderModuleId: SCRIPT_LOADER_MODULE_ID },
+        {
+          loaderModuleId:
+            window.RMLNodeGraphCompositesModuleId ?? null
+        }
+      );
+    }
+    if (path.endsWith("/graph/node_graph_custom_csharp.js")) {
+      return typed(
+        "RMLNodeGraphCustomCSharpModuleId",
+        { loaderModuleId: SCRIPT_LOADER_MODULE_ID },
+        {
+          loaderModuleId:
+            window.RMLNodeGraphCustomCSharpModuleId ?? null
+        }
+      );
+    }
+    if (path.endsWith("/graph/node_graph_view.js")) {
+      return typed(
+        "RMLNodeGraphViewModuleId",
+        { loaderModuleId: SCRIPT_LOADER_MODULE_ID },
+        {
+          loaderModuleId:
+            window.RMLNodeGraphViewModuleId ?? null
+        }
+      );
+    }
+    if (path.endsWith("/graph/node_graph_bootstrap.js")) {
+      return typed(
+        "RMLDynamicGraphHost",
+        {
+          loaderModuleId: SCRIPT_LOADER_MODULE_ID,
+          minimumVersion: 73,
+          isReadyType: "function"
+        },
+        {
+          loaderModuleId:
+            window.RMLDynamicGraphHost?.moduleId ?? null,
+          version: window.RMLDynamicGraphHost?.version ?? null,
+          isReadyType:
+            typeof window.RMLDynamicGraphHost?.isReady
+        }
+      );
+    }
+    if (path.endsWith("/graph/graph_gpu_renderer.js")) {
+      return typed(
+        "RMLGraphHybridRenderer",
+        { createType: "function" },
+        { createType: typeof window.RMLGraphHybridRenderer?.create }
+      );
+    }
+    return typed("unknown", {}, {});
+  }
 
   function waitFor(
     predicate,
@@ -381,11 +540,30 @@
         "load",
         () => {
           if (file.ready && file.ready() !== true) {
-            reject(
-              new Error(
-                `${file.url} loaded without exposing its public contract.`
-              )
+            const contract = publicContractDiagnostic(file);
+            const failure = new Error(
+              `${file.url} loaded without exposing its public contract. ` +
+              `Expected ${JSON.stringify(contract.expected)}, ` +
+              `received ${JSON.stringify(contract.actual)}.`
             );
+            Object.defineProperty(failure, "details", {
+              value: Object.freeze({
+                code: "RML_LAZY_PUBLIC_CONTRACT_MISMATCH",
+                url: state.url,
+                loaderModuleId: SCRIPT_LOADER_MODULE_ID,
+                exportName: contract.exportName,
+                expected: contract.expected,
+                actual: contract.actual
+              }),
+              enumerable: true,
+              configurable: false,
+              writable: false
+            });
+            console.error(
+              "[RML BUILDER INTERNAL FAILURE] A lazy module loaded but its public contract is incompatible.",
+              failure.details
+            );
+            reject(failure);
             return;
           }
           resolve(true);
@@ -834,7 +1012,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 41,
+      version: 47,
       moduleId: SCRIPT_LOADER_MODULE_ID,
       ensure,
       isLoaded(name) {
@@ -875,27 +1053,39 @@
     installRuntimeButton();
   }
   function installScannerStatusControl() {
-    const status = document.getElementById("api-catalog-state");
-    if (!status || status.dataset.manualScannerBound === "true") return;
-    status.dataset.manualScannerBound = "true";
-    status.tabIndex = 0;
-    status.setAttribute("role", "button");
+    const prepareStatus = status => {
+      if (!status) return null;
+      status.dataset.manualScannerBound =
+        "script-loader-v2";
+      status.tabIndex = 0;
+      status.setAttribute("role", "button");
+      return status;
+    };
+    const statusFromEvent = event => {
+      const current = document.getElementById(
+        "api-catalog-state"
+      );
+      const target = event?.target;
+      const matched = typeof target?.closest === "function"
+        ? target.closest("#api-catalog-state")
+        : target?.id === "api-catalog-state"
+          ? target
+          : null;
+      return matched === current
+        ? prepareStatus(current)
+        : null;
+    };
+
+    prepareStatus(
+      document.getElementById("api-catalog-state")
+    );
+    if (scannerStatusControlInstalled) return;
+    scannerStatusControlInstalled = true;
+
     let loadIntent = 0;
     let loading = false;
-    const run = async () => {
+    const run = async status => {
       if (loading) {
-        ++loadIntent;
-        loading = false;
-        window.RMLRuntimeBridge?.disconnect?.();
-        status.dataset.source = "cache";
-        status.textContent = window.RMLI18n.t("{{i18n:js.presentation.925dcc9e0d7e}}");
-        status.setAttribute("aria-busy", "false");
-        status.title = window.RMLI18n.t("{{i18n:js.presentation.74ffabbb71b1}}");
-        status.setAttribute("aria-label", `${status.textContent}. ${status.title}`);
-        return;
-      }
-      if (window.RMLRuntimeBridge?.version >= 10) {
-        await window.RMLRuntimeBridge.toggle();
         return;
       }
       const intent = ++loadIntent;
@@ -903,33 +1093,87 @@
       status.dataset.source = "updating";
       status.textContent = window.RMLI18n.t("{{i18n:js.presentation.be775996d3f7}}");
       status.setAttribute("aria-busy", "true");
-      status.title = window.RMLI18n.t("{{i18n:js.presentation.bca30505a2a6}}");
+      status.title = window.RMLI18n.t("ui.auto.ef5bac1920fc");
       status.setAttribute("aria-label", `${status.textContent}. ${status.title}`);
       try {
-        await window.RMLScriptLoader.ensure("scanner-connection");
+        await Promise.all([
+          window.RMLScriptLoader.ensure(
+            "scanner-connection"
+          ),
+          window.RMLScriptLoader.ensure(
+            "node-registry"
+          )
+        ]);
         if (!loading || intent !== loadIntent) return;
-        loading = false;
-        await window.RMLRuntimeBridge.connect();
+        await window.RMLCatalogImportGate
+          ?.synchronizeLive?.({
+            showWork: true,
+            forceRetry: true,
+            trigger: "button"
+          });
       } catch (error) {
+        console.error(
+          "[RML BUILDER INTERNAL FAILURE] The explicit scanner button operation failed.",
+          error
+        );
         if (intent !== loadIntent) return;
-        loading = false;
-        if (window.RMLRuntimeBridge) window.RMLRuntimeBridge.disconnect(error);
-        else {
-          status.dataset.source = "cache";
-          status.textContent = window.RMLI18n.t("{{i18n:js.presentation.925dcc9e0d7e}}");
-          status.setAttribute("aria-busy", "false");
-          status.title = `Connection module could not be loaded. Click to try again. ${error?.message || error}`;
-          status.setAttribute("aria-label", `${status.textContent}. ${status.title}`);
+        status.dataset.source = window.RMLResoniteApiCatalog ||
+          window.RMLFrooxComponentCatalog
+          ? "cache"
+          : "unavailable";
+        status.setAttribute("aria-busy", "false");
+      } finally {
+        if (intent === loadIntent) {
+          loading = false;
+          prepareStatus(
+            document.getElementById(
+              "api-catalog-state"
+            )
+          )?.setAttribute("aria-busy", "false");
+          window.RMLCatalogImportGate
+            ?.refreshStatus?.();
         }
       }
     };
-    status.addEventListener("click", () => { void run(); });
-    status.addEventListener("keydown", event => {
+
+    document.addEventListener("click", event => {
+      const status = statusFromEvent(event);
+      if (!status) return;
+      event.preventDefault();
+      void run(status);
+    }, true);
+    document.addEventListener("keydown", event => {
+      const status = statusFromEvent(event);
+      if (!status) return;
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        if (!event.repeat) void run();
+        if (!event.repeat) void run(status);
       }
-    });
+    }, true);
+
+    Object.defineProperty(
+      window,
+      "RMLScannerStatusControl",
+      {
+        value: Object.freeze({
+          version: 2,
+          moduleId: SCRIPT_LOADER_MODULE_ID,
+          owner: "script-loader",
+          refresh() {
+            return Boolean(
+              prepareStatus(
+                document.getElementById(
+                  "api-catalog-state"
+                )
+              )
+            );
+          }
+        }),
+        writable: false,
+        enumerable: true,
+        configurable: true
+      }
+    );
   }
   installScannerStatusControl();
 })();

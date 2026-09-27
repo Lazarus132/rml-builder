@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
+  "1.21.76-custom-csharp-catalog-provenance";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -240,15 +240,6 @@ function exposeRmlBuilderBuildId() {
       window,
       window.RMLI18n.t("ui.literal.2a543f51b9e5")
     );
-  if (
-    hasPublishedBuildId &&
-    window.RMLBuilderBuildId !==
-      RML_BUILDER_BUILD_ID
-  ) {
-    throw new Error(
-      `Builder module version mismatch: index.html published '${String(window.RMLBuilderBuildId || "missing")}', but app.js is '${RML_BUILDER_BUILD_ID}'. Reload the Builder without cached files. No project data was changed.`
-    );
-  }
   if (!hasPublishedBuildId) {
     Object.defineProperty(
       window,
@@ -349,7 +340,9 @@ window.addEventListener("rml-language-changed", () => {
   window.RMLI18n.relocalize(OUTLINE_TYPE_DESCRIPTIONS);
   window.RMLI18n.relocalize(OUTLINE_STRUCTURE_REFERENCE);
   DEFAULT_LAYOUT_ROW_DESCRIPTION = window.RMLI18n.relocalizeValue(DEFAULT_LAYOUT_ROW_DESCRIPTION);
-  renderPalette();
+  if (elements.paletteContent) {
+    renderPalette();
+  }
 });
 
 function outlineTypeFamilyForType(type) {
@@ -368,7 +361,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -1574,9 +1567,7 @@ function exportInputSnapshot() {
     projectId: state.projectId,
     metadata: state.metadata, exportOptions: state.exportOptions,
     nodes: state.nodes, extensions: state.extensions,
-    definitions: Number(window.__RMLNodeDefinitionRevision) || 0,
     apiFactory: Number(window.__RMLApiNodeFactoryVersion) || 0,
-    apiReport: window.RMLApiNodeFactoryReport,
     catalog: graphCodegenCatalogKey(window.RMLResoniteApiCatalog ||
       window.RMLFrooxComponentCatalog || null)
   });
@@ -1591,16 +1582,10 @@ function generatedPublicationInputSnapshot() {
       "",
     nodes: state.nodes,
     extensions: state.extensions,
-    definitions:
-      Number(
-        window.__RMLNodeDefinitionRevision
-      ) || 0,
     apiFactory:
       Number(
         window.__RMLApiNodeFactoryVersion
       ) || 0,
-    apiReport:
-      window.RMLApiNodeFactoryReport,
     catalog: graphCodegenCatalogKey(
       window.RMLResoniteApiCatalog ||
       window.RMLFrooxComponentCatalog ||
@@ -1749,20 +1734,58 @@ function awaitExportStep(request, promise) {
   });
 }
 
-function waitForExportGraphSettlement(request) {
+function waitForExportGraphSettlement(
+  request,
+  afterRevision,
+  expectedKey = ""
+) {
   return new Promise((resolve, reject) => {
+    let recheckTimer = 0;
     const cleanup = () => {
       document.removeEventListener("rml-builder:graph-codegen-settled", settled);
       request.controller.signal.removeEventListener("abort", cancelled);
+      if (recheckTimer) {
+        clearTimeout(recheckTimer);
+        recheckTimer = 0;
+      }
+    };
+    const matches = detail => {
+      if (
+        Number(detail?.revision) <=
+          Number(afterRevision || 0) ||
+        Number(detail?.projectEpoch) !==
+          request.projectEpoch
+      ) {
+        return false;
+      }
+      return !expectedKey ||
+        !detail?.key ||
+        detail.key === expectedKey;
+    };
+    const complete = detail => {
+      cleanup();
+      resolve(detail);
     };
     const settled = event => {
-      if (Number(event.detail?.projectEpoch) !== request.projectEpoch) return;
-      cleanup(); resolve(event.detail);
+      if (!matches(event.detail)) return;
+      complete(event.detail);
     };
     const cancelled = () => { cleanup(); reject(request.controller.signal.reason); };
     if (request.controller.signal.aborted) { cancelled(); return; }
     document.addEventListener("rml-builder:graph-codegen-settled", settled);
     request.controller.signal.addEventListener("abort", cancelled, { once: true });
+    if (matches(graphCodegenLastSettlement)) {
+      complete(graphCodegenLastSettlement);
+      return;
+    }
+    recheckTimer = setTimeout(
+      () => complete({
+        recheck: true,
+        revision:
+          graphCodegenSettlementRevision
+      }),
+      GRAPH_CODEGEN_SETTLEMENT_RECHECK_MS
+    );
   });
 }
 
@@ -2067,8 +2090,25 @@ function requestExportPreflight({
       }
       typedNodeGraphModulesState = "ready";
       typedNodeGraphModulesError = null;
-      while (getTypedNodeGraphContribution()?.pending === true) {
-        await waitForExportGraphSettlement(request);
+      while (true) {
+        const afterRevision =
+          graphCodegenSettlementRevision;
+        const expectedKey =
+          largeGraphCodegenKey(
+            state.extensions
+              .typedNodeGraph
+          );
+        if (
+          getTypedNodeGraphContribution()
+            ?.pending !== true
+        ) {
+          break;
+        }
+        await waitForExportGraphSettlement(
+          request,
+          afterRevision,
+          expectedKey
+        );
         assertExportRequestCurrent(request);
       }
     }
@@ -2212,6 +2252,7 @@ function currentTypedRuntimeGraphIsLarge() {
 }
 
 let generatedOutputRefreshPendingBeforeDom = false;
+let generatedOutputDeferredImportEpoch = 0;
 
 function generatedOutputDomReady() {
   return Boolean(
@@ -2243,6 +2284,13 @@ function requestGeneratedOutputUpdate() {
   if (deferGeneratedOutputUntilDomReady()) return;
   generatedOutputRefreshPendingBeforeDom = false;
   if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
+  if (
+    Number(generatedOutputDeferredImportEpoch) > 0 &&
+    Number(generatedOutputDeferredImportEpoch) ===
+      Number(projectApplicationEpoch)
+  ) {
+    return;
+  }
   if (
     currentTypedRuntimeGraphIsLarge() &&
     elements.generatedCode
@@ -3591,6 +3639,17 @@ let graphCodegenWorkerCachedKey = "";
 let graphCodegenWorkerCachedResult = null;
 let graphCodegenWorkerLastError = null;
 let graphCodegenWorkerFailedKey = "";
+const graphCodegenWorkerFailureAttempts =
+  new Map();
+const GRAPH_CODEGEN_MAX_TRANSIENT_RETRIES =
+  2;
+let graphCodegenSettlementRevision = 0;
+let graphCodegenLastSettlement = null;
+let graphCodegenWorkerStallTimer = 0;
+const GRAPH_CODEGEN_SETTLEMENT_RECHECK_MS =
+  1000;
+const GRAPH_CODEGEN_WORKER_STALL_TIMEOUT_MS =
+  120000;
 
 let pendingImportedGraphAnalysisCertificate = null;
 let graphCodegenProjectEpoch = 1;
@@ -3658,36 +3717,19 @@ function graphCodegenWorkerSupportedForCurrentProtocol() {
 }
 
 function graphCodegenCatalogKey(catalog) {
-  const projectionIndex =
-    window.RMLApiCatalogProjectionIndex;
-  const factoryReport =
-    window.RMLApiNodeFactoryReport;
-  const projectionRevision =
-    graphCodegenCatalogIndexMatches(
-      catalog,
-      projectionIndex,
-      factoryReport
-    )
-      ? Number(projectionIndex.revision) || 0
-      : 0;
   return [
     catalog?.catalogFingerprint ||
       catalog?.assemblyFingerprint ||
       catalog?.engineVersion ||
       "unknown",
-    catalog?.catalogSource || "unknown",
-    projectionRevision
+    catalog?.engineVersion || "unknown"
   ].join("|");
 }
 
-function largeGraphCodegenKey(
+function largeGraphCodegenSourceKey(
   extensionState
 ) {
   const metadata = state.metadata || {};
-  const catalog =
-    window.RMLResoniteApiCatalog ||
-    window.RMLFrooxComponentCatalog ||
-    null;
 
   return JSON.stringify({
     projectEpoch:
@@ -3706,17 +3748,25 @@ function largeGraphCodegenKey(
       metadata.className || "",
     version:
       metadata.version || "",
-    includeGuide: metadata.includeGuide === true,
+    includeGuide: metadata.includeGuide === true
+  });
+}
+
+function largeGraphCodegenKey(
+  extensionState
+) {
+  const catalog =
+    window.RMLResoniteApiCatalog ||
+    window.RMLFrooxComponentCatalog ||
+    null;
+
+  return JSON.stringify({
+    source:
+      largeGraphCodegenSourceKey(
+        extensionState
+      ),
     catalog:
-      graphCodegenCatalogKey(catalog),
-    definitions:
-      Number(
-        window.__RMLNodeDefinitionRevision
-      ) || 0,
-    apiFactory:
-      Number(
-        window.__RMLApiNodeFactoryVersion
-      ) || 0
+      graphCodegenCatalogKey(catalog)
   });
 }
 
@@ -4281,50 +4331,188 @@ function graphCodegenNormalizeCsType(value) {
     .replace(/\s+/g, " ");
 }
 
+function graphCodegenContractType(value) {
+  return String(value || "System.Object")
+    .trim()
+    .replace(/^global::/, "")
+    .replace(/\s+/g, "")
+    .replace(/&$/, "");
+}
+
+function graphCodegenContractPortRole(
+  contract,
+  direction,
+  port
+) {
+  const explicit = String(
+    port?.role || port?.roleKey || ""
+  ).trim();
+  if (explicit) return explicit;
+  const id = String(port?.id || "").trim();
+  const fixed = new Set([
+    "call", "done", "success", "exception",
+    "target", "result", "value"
+  ]);
+  if (fixed.has(id)) return `${direction}:${id}`;
+  let match = /^arg(\d+)$/.exec(id);
+  if (match) {
+    return `parameter:${Number(match[1])}:input`;
+  }
+  match = /^out(\d+)$/.exec(id);
+  if (match) {
+    return `parameter:${Number(match[1])}:output`;
+  }
+  match = /^generic(\d+)$/.exec(id);
+  if (match) {
+    return `generic:${Number(match[1])}:input`;
+  }
+  const parameter = (
+    Array.isArray(contract?.parameters)
+      ? contract.parameters
+      : []
+  ).find(value =>
+    String(value?.name || "") === id
+  );
+  if (parameter) {
+    return `parameter:${Math.max(
+      0,
+      Number(parameter.position) || 0
+    )}:${direction}`;
+  }
+  return `${String(
+    contract?.kind || "api"
+  )}:${direction}:${id}`;
+}
+
+function graphCodegenContractSemanticKey(
+  contract
+) {
+  if (
+    !contract ||
+    typeof contract !== "object" ||
+    Array.isArray(contract)
+  ) {
+    return "";
+  }
+  const kind = String(
+    contract.kind || ""
+  ).trim();
+  const ownerType = graphCodegenContractType(
+    contract.ownerType
+  );
+  if (!kind || !ownerType) return "";
+  const parameters = (
+    Array.isArray(contract.parameters)
+      ? contract.parameters
+      : []
+  ).map((parameter, index) => ({
+    position: Math.max(
+      0,
+      Number(parameter?.position) || index
+    ),
+    type: graphCodegenContractType(
+      parameter?.elementType ||
+      parameter?.type
+    ),
+    isByRef:
+      parameter?.isByRef === true ||
+      parameter?.isOut === true,
+    isIn: parameter?.isIn === true,
+    isOut: parameter?.isOut === true
+  }));
+  const ports = (direction, key) => (
+    Array.isArray(contract[key])
+      ? contract[key]
+      : []
+  ).map(port => ({
+    id: String(port?.id || "").trim(),
+    role: graphCodegenContractPortRole(
+      contract,
+      direction,
+      port
+    ),
+    type: String(port?.type || "").trim(),
+    typeVar: String(
+      port?.typeVar || ""
+    ).trim(),
+    generic: port?.generic === true,
+    optional: port?.optional === true
+  }));
+  return JSON.stringify({
+    kind,
+    ownerType,
+    memberName: String(
+      contract.memberName || ""
+    ),
+    parameters,
+    returnType: graphCodegenContractType(
+      contract.returnType || "System.Void"
+    ),
+    isStatic: contract.isStatic === true,
+    genericArity: Math.max(
+      0,
+      Number(contract.genericArity) || 0
+    ),
+    runtimeBound:
+      contract.runtimeBound === true,
+    inputPorts: ports("input", "inputPorts"),
+    outputPorts:
+      ports("output", "outputPorts")
+  });
+}
+
 function graphCodegenContractsMatch(
   expected,
   available
 ) {
   if (!expected || !available) return false;
-  const expectedFingerprint = String(
-    expected.contractFingerprint || ""
+  const expectedKey =
+    graphCodegenContractSemanticKey(expected);
+  const availableKey =
+    graphCodegenContractSemanticKey(available);
+  return Boolean(
+    expectedKey &&
+    availableKey &&
+    expectedKey === availableKey
   );
-  const availableFingerprint = String(
-    available.contractFingerprint || ""
-  );
-  if (expectedFingerprint && availableFingerprint) {
-    return expectedFingerprint === availableFingerprint;
-  }
-  const expectedKind = String(expected.kind || "");
-  const expectedMemberName = String(
-    expected.memberName || ""
-  );
-  const memberNameMayBeEmpty =
-    expectedKind === "type" ||
-    expectedKind === "enum";
-  const expectedOwnerType =
-    graphCodegenNormalizeCsType(expected.ownerType);
-  const semanticIdentityMatches = Boolean(
-    expectedKind &&
-    expectedKind ===
-      String(available.kind || "") &&
-    expectedOwnerType &&
-    expectedOwnerType ===
-      graphCodegenNormalizeCsType(
-        available.ownerType
-      ) &&
-    (memberNameMayBeEmpty || expectedMemberName) &&
-    expectedMemberName ===
-      String(available.memberName || "") &&
-    String(expected.signature || "") &&
-    String(expected.signature || "") ===
-      String(available.signature || "")
-  );
-  if (!semanticIdentityMatches) {
-    return false;
-  }
+}
 
-  return true;
+function graphCodegenRequirementAvailability(
+  requirement
+) {
+  if (
+    requirement?.confirmedUnavailable === true
+  ) {
+    return "unavailable";
+  }
+  const operatorId = String(
+    requirement?.operatorId || ""
+  ).trim();
+  const contract =
+    requirement?.apiContract;
+  const registered =
+    window.RMLModNodeRegistry
+      ?.getNodeDefinition?.(operatorId);
+  if (
+    registered?.catalogGenerated === true &&
+    registered?.unavailableApiContract !== true &&
+    graphCodegenContractsMatch(
+      contract,
+      registered.apiVerification
+    )
+  ) {
+    return "verified";
+  }
+  if (
+    registered?.unavailableApiContract === true &&
+    graphCodegenContractsMatch(
+      contract,
+      registered.preservedApiContract
+    )
+  ) {
+    return "unavailable";
+  }
+  return "pending";
 }
 
 function graphCodegenCollectRequirement(
@@ -4361,31 +4549,21 @@ function graphCodegenCollectRequirement(
   }
   const identity = [
     operatorId,
-    contract.contractFingerprint || "",
-    contract.stableContractId || "",
-    contract.kind || "",
-    contract.ownerType || "",
-    contract.memberName || "",
-    contract.signature || ""
+    graphCodegenContractSemanticKey(
+      contract
+    ) ||
+      contract.contractFingerprint ||
+      contract.stableContractId ||
+      contract.signature || ""
   ].join("\u0000");
   if (!requirements.has(identity)) {
-    const availableContract =
-      registered?.apiVerification;
-    const verifiedAvailable = Boolean(
-      registered?.catalogGenerated === true &&
-      registered?.unavailableApiContract !== true &&
-      graphCodegenContractsMatch(
-        contract,
-        availableContract
-      )
-    );
-    requirements.set(identity, {
+    const requirement = {
       operatorId,
       apiContract: contract,
-      availability:
-        verifiedAvailable
-          ? "verified"
-          : "unavailable",
+      confirmedUnavailable:
+        value.importRecovery?.unresolved ===
+        true,
+      availability: "pending",
       inputPorts:
         (Array.isArray(contract.inputPorts)
           ? contract.inputPorts
@@ -4398,7 +4576,12 @@ function graphCodegenCollectRequirement(
           : []).map(port =>
           String(port?.id || "")
         ).filter(Boolean)
-    });
+    };
+    requirement.availability =
+      graphCodegenRequirementAvailability(
+        requirement
+      );
+    requirements.set(identity, requirement);
   }
 }
 
@@ -4416,9 +4599,6 @@ function graphCodegenCatalogIndexMatches(
   const revision = Number(
     report?.catalogProjectionRevision
   ) || 0;
-  const definitionRevision = Number(
-    window.__RMLNodeDefinitionRevision
-  ) || 0;
   const maps = [
     index?.typeByName,
     index?.enumByName,
@@ -4426,18 +4606,17 @@ function graphCodegenCatalogIndexMatches(
     index?.assemblyByName
   ];
   return Boolean(
-    index?.version === 1 &&
+    Number(index?.version) >= 1 &&
     index.catalog === catalog &&
     index.report === report &&
     fingerprint &&
     index.catalogFingerprint === fingerprint &&
     index.engineVersion ===
       String(report?.engineVersion || "") &&
+    report?.verificationPassed === true &&
     revision > 0 &&
     Number(index.revision) === revision &&
-    definitionRevision > 0 &&
-    Number(index.definitionRevision) ===
-      definitionRevision &&
+    Object.isFrozen(index) &&
     maps.every(map =>
       map &&
       typeof map.get === "function" &&
@@ -4675,7 +4854,8 @@ async function graphCodegenFindCatalogMember(
 
 async function graphCodegenCatalogProjection(
   catalog,
-  requirements
+  requirements,
+  indexSnapshot = null
 ) {
   if (
     !catalog ||
@@ -4689,7 +4869,17 @@ async function graphCodegenCatalogProjection(
   ) {
     return null;
   }
-  const index = await graphCodegenCatalogIndex(catalog);
+  const index = indexSnapshot;
+  if (
+    !index ||
+    index.catalog !== catalog ||
+    !index.typeByName ||
+    !index.enumByName ||
+    !index.genericTypeByShape ||
+    !index.assemblyByName
+  ) {
+    return null;
+  }
   const required = Array.isArray(requirements)
     ? requirements
     : [];
@@ -4970,15 +5160,6 @@ async function graphCodegenCatalogProjection(
     );
   }
 
-  if (
-    graphCodegenCatalogIndex(catalog) !==
-      index
-  ) {
-    throw new Error(
-      window.RMLI18n.t("ui.literal.d81a5fda7396")
-    );
-  }
-
   return {
     schemaVersion: catalog.schemaVersion,
     catalogKind: catalog.catalogKind,
@@ -5048,6 +5229,12 @@ Object.defineProperty(
 );
 
 function terminateGraphCodegenWorker() {
+  if (graphCodegenWorkerStallTimer) {
+    clearTimeout(
+      graphCodegenWorkerStallTimer
+    );
+    graphCodegenWorkerStallTimer = 0;
+  }
   if (graphCodegenWorkerIdleTimer) {
     clearTimeout(
       graphCodegenWorkerIdleTimer
@@ -5098,20 +5285,27 @@ function announceGraphCodegenSettlement(
       graphCodegenProjectEpoch,
     ...settlement
   } = detail;
+  const normalizedSettlement =
+    Object.freeze({
+      revision:
+        ++graphCodegenSettlementRevision,
+      projectEpoch:
+        Number(projectEpoch) || 0,
+      codegenProjectEpoch:
+        Number(codegenProjectEpoch) || 0,
+      ...settlement
+    });
+  graphCodegenLastSettlement =
+    normalizedSettlement;
   document.dispatchEvent(
     new CustomEvent(
       "rml-builder:graph-codegen-settled",
       {
-        detail: {
-          projectEpoch:
-            Number(projectEpoch) || 0,
-          codegenProjectEpoch:
-            Number(codegenProjectEpoch) || 0,
-          ...settlement
-        }
+        detail: normalizedSettlement
       }
     )
   );
+  return normalizedSettlement;
 }
 
 function resetGraphCodegenForProjectReplacement() {
@@ -5124,6 +5318,7 @@ function resetGraphCodegenForProjectReplacement() {
   graphCodegenWorkerCachedResult = null;
   graphCodegenWorkerLastError = null;
   graphCodegenWorkerFailedKey = "";
+  graphCodegenWorkerFailureAttempts.clear();
   pendingImportedGraphAnalysisCertificate = null;
 }
 
@@ -5147,7 +5342,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+      "../workers/graph_codegen_worker.js?v=1.21.76-custom-csharp-catalog-provenance",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -5168,13 +5363,23 @@ function ensureGraphCodegenWorker() {
     ) {
       return;
     }
+    const failedKey =
+      graphCodegenWorkerActiveBuild
+        ?.key || "";
     graphCodegenWorkerLastError =
       new Error(
         message ||
         window.RMLI18n.t("ui.literal.b95a7f6a4e33")
       );
     graphCodegenWorkerFailedKey =
-      graphCodegenWorkerActiveBuild?.key || "";
+      failedKey;
+    graphCodegenWorkerFailureAttempts.set(
+      failedKey,
+      (
+        graphCodegenWorkerFailureAttempts
+          .get(failedKey) || 0
+      ) + 1
+    );
     graphCodegenWorkerActiveBuild = null;
     graphCodegenWorkerRunning = false;
     terminateGraphCodegenWorker();
@@ -5183,12 +5388,44 @@ function ensureGraphCodegenWorker() {
         workerApplicationEpoch,
       codegenProjectEpoch:
         workerProjectEpoch,
+      key: failedKey,
       ok: false,
       error:
         graphCodegenWorkerLastError.message
     });
     void pumpGraphCodegenWorkerQueue();
   };
+  const refreshWorkerStallWatchdog = () => {
+    if (
+      worker !== graphCodegenWorker ||
+      !graphCodegenWorkerActiveBuild
+    ) {
+      return;
+    }
+    if (graphCodegenWorkerStallTimer) {
+      clearTimeout(
+        graphCodegenWorkerStallTimer
+      );
+    }
+    graphCodegenWorkerStallTimer =
+      setTimeout(
+        () => {
+          graphCodegenWorkerStallTimer = 0;
+          retireWorkerForFailure(
+            "The background graph code generator stopped responding."
+          );
+        },
+        GRAPH_CODEGEN_WORKER_STALL_TIMEOUT_MS
+      );
+  };
+  Object.defineProperty(
+    worker,
+    "__rmlRefreshCodegenStallWatchdog",
+    {
+      value: refreshWorkerStallWatchdog,
+      configurable: true
+    }
+  );
 
   worker.addEventListener(
     "message",
@@ -5205,6 +5442,8 @@ function ensureGraphCodegenWorker() {
       ) {
         return;
       }
+
+      refreshWorkerStallWatchdog();
 
       if (response.progress === true) {
         return;
@@ -5259,6 +5498,12 @@ function ensureGraphCodegenWorker() {
         }
       }
 
+      if (graphCodegenWorkerStallTimer) {
+        clearTimeout(
+          graphCodegenWorkerStallTimer
+        );
+        graphCodegenWorkerStallTimer = 0;
+      }
       graphCodegenWorkerActiveBuild = null;
 
       if (completedResponse.ok === true) {
@@ -5268,6 +5513,8 @@ function ensureGraphCodegenWorker() {
           completedResponse.result;
         graphCodegenWorkerLastError = null;
         graphCodegenWorkerFailedKey = "";
+        graphCodegenWorkerFailureAttempts
+          .delete(active.key);
         graphCodegenWorkerCatalogKey =
           active.catalogKey;
       } else {
@@ -5278,6 +5525,13 @@ function ensureGraphCodegenWorker() {
           );
         graphCodegenWorkerFailedKey =
           active.key;
+        graphCodegenWorkerFailureAttempts.set(
+          active.key,
+          (
+            graphCodegenWorkerFailureAttempts
+              .get(active.key) || 0
+          ) + 1
+        );
       }
 
       graphCodegenWorkerRunning = false;
@@ -5359,15 +5613,14 @@ async function pumpGraphCodegenWorkerQueue() {
     const current = () => Boolean(
       graphCodegenWorker === worker &&
       graphCodegenWorkerActiveBuild === build &&
-      build.extensionState ===
-        state.extensions?.typedNodeGraph &&
+      build.sourceKey ===
+        largeGraphCodegenSourceKey(
+          state.extensions?.typedNodeGraph
+        ) &&
       build.projectEpoch ===
         graphCodegenProjectEpoch &&
       build.applicationProjectEpoch ===
-        projectApplicationEpoch &&
-      largeGraphCodegenKey(
-        state.extensions?.typedNodeGraph
-      ) === build.key
+        projectApplicationEpoch
     );
     const requirements = new Map();
     const payload = {
@@ -5385,6 +5638,7 @@ async function pumpGraphCodegenWorkerQueue() {
           build.state.metadata?.includeGuide === true
         ) || null
     };
+    build.phase = "payload";
     const payloadTransport =
       await postGraphCodegenTokenStream(
         worker,
@@ -5400,13 +5654,9 @@ async function pumpGraphCodegenWorkerQueue() {
             )
         }
       );
-    const requirementList =
+    let requirementList =
       [...requirements.values()];
-    const projection =
-      await graphCodegenCatalogProjection(
-        build.catalog,
-        requirementList
-      );
+    build.phase = "payload-settled";
     if (!current()) {
       const error = new Error(
         window.RMLI18n.t("ui.literal.f37a6ffb19d0")
@@ -5414,6 +5664,91 @@ async function pumpGraphCodegenWorkerQueue() {
       error.code = "RML_GRAPH_CODEGEN_STALE";
       throw error;
     }
+    requirementList = requirementList.map(
+      requirement => ({
+        ...requirement,
+        availability:
+          graphCodegenRequirementAvailability(
+            requirement
+          )
+      })
+    );
+    const supportCatalog =
+      window.RMLResoniteApiCatalog ||
+      window.RMLFrooxComponentCatalog ||
+      null;
+    let supportIndex = null;
+    try {
+      supportIndex =
+        graphCodegenCatalogIndex(
+          supportCatalog
+        );
+    } catch {}
+    build.catalog = supportCatalog;
+    build.catalogIndex = supportIndex;
+    build.catalogKey =
+      graphCodegenCatalogKey(
+        supportCatalog
+      );
+    const hydratedKey =
+      largeGraphCodegenKey(
+        build.extensionState
+      );
+    if (build.key !== hydratedKey) {
+      build.key = hydratedKey;
+      if (
+        graphCodegenWorkerQueuedBuild
+          ?.key === hydratedKey
+      ) {
+        graphCodegenWorkerQueuedBuild = null;
+      }
+    }
+    let projection = null;
+    const projectedRequirements =
+      requirementList.filter(requirement =>
+        requirement.availability !==
+          "unavailable"
+      );
+    try {
+      build.phase = "catalog-projection";
+      projection =
+        await graphCodegenCatalogProjection(
+          build.catalog,
+          requirementList,
+          build.catalogIndex
+        );
+    } catch (error) {
+      if (!current()) throw error;
+      throw error;
+    }
+    if (
+      !projection &&
+      projectedRequirements.length > 0
+    ) {
+      throw new Error(
+        "The verified API catalog snapshot cannot project the Runtime Graph contracts."
+      );
+    }
+    if (projection) {
+      requirementList =
+        requirementList.map(requirement =>
+          requirement.availability ===
+            "pending"
+            ? {
+                ...requirement,
+                availability: "verified"
+              }
+            : requirement
+        );
+    }
+    if (!current()) {
+      const error = new Error(
+        window.RMLI18n.t("ui.literal.f37a6ffb19d0")
+      );
+      error.code = "RML_GRAPH_CODEGEN_STALE";
+      throw error;
+    }
+    build.phase = "support";
     const supportTransport =
       await postGraphCodegenTokenStream(
         worker,
@@ -5446,6 +5781,9 @@ async function pumpGraphCodegenWorkerQueue() {
       id: build.id,
       operation: "buildStreamCommit"
     });
+    worker
+      .__rmlRefreshCodegenStallWatchdog
+      ?.();
   } catch (error) {
     const stale =
       error?.code ===
@@ -5458,6 +5796,15 @@ async function pumpGraphCodegenWorkerQueue() {
         : new Error(String(error));
     graphCodegenWorkerFailedKey =
       stale ? "" : build.key;
+    if (!stale) {
+      graphCodegenWorkerFailureAttempts.set(
+        build.key,
+        (
+          graphCodegenWorkerFailureAttempts
+            .get(build.key) || 0
+        ) + 1
+      );
+    }
     graphCodegenWorkerActiveBuild = null;
     graphCodegenWorkerRunning = false;
     terminateGraphCodegenWorker();
@@ -5517,7 +5864,17 @@ function requestLargeGraphCodegen(
     graphCodegenWorkerLastError &&
     graphCodegenWorkerFailedKey === key
   ) {
-    return;
+    const attempts =
+      graphCodegenWorkerFailureAttempts
+        .get(key) || 0;
+    if (
+      attempts >=
+        GRAPH_CODEGEN_MAX_TRANSIENT_RETRIES
+    ) {
+      return;
+    }
+    graphCodegenWorkerLastError = null;
+    graphCodegenWorkerFailedKey = "";
   }
   if (
     graphCodegenWorkerFailedKey &&
@@ -5532,6 +5889,10 @@ function requestLargeGraphCodegen(
       window.RMLI18n.t("ui.literal.242e74b6ab3d")
     );
     graphCodegenWorkerFailedKey = key;
+    graphCodegenWorkerFailureAttempts.set(
+      key,
+      GRAPH_CODEGEN_MAX_TRANSIENT_RETRIES
+    );
     queueMicrotask(() =>
       announceGraphCodegenSettlement({
         projectEpoch:
@@ -5551,6 +5912,11 @@ function requestLargeGraphCodegen(
     window.RMLResoniteApiCatalog ||
     window.RMLFrooxComponentCatalog ||
     null;
+  let catalogIndex = null;
+  try {
+    catalogIndex =
+      graphCodegenCatalogIndex(catalog);
+  } catch {}
 
   graphCodegenWorkerQueuedBuild = {
     id: graphCodegenWorkerSequence++,
@@ -5560,9 +5926,14 @@ function requestLargeGraphCodegen(
     applicationProjectEpoch:
       projectApplicationEpoch,
     extensionState,
+    sourceKey:
+      largeGraphCodegenSourceKey(
+        extensionState
+      ),
     catalogKey:
       graphCodegenCatalogKey(catalog),
     catalog,
+    catalogIndex,
     state:
       builderCodegenStateSnapshot(),
     entries:
@@ -5593,7 +5964,10 @@ function pendingLargeGraphContribution() {
   return {
     active: true,
     pending: !graphCodegenWorkerLastError,
-    diagnostics: [message],
+    diagnostics:
+      graphCodegenWorkerLastError
+        ? [message]
+        : [],
     warnings: [],
     files: [],
     projects: [],
@@ -8821,6 +9195,21 @@ function graphRequirementsUseHarmony(
   );
 }
 
+function settledGraphRuntimeClassName(
+  contribution
+) {
+  if (
+    contribution?.active !== true ||
+    contribution?.pending === true ||
+    typeof contribution?.className !==
+      "string"
+  ) {
+    return "";
+  }
+
+  return contribution.className.trim();
+}
+
 function getTypedNodeGraphContribution() {
   const extensionState =
     isPlainObject(state.extensions)
@@ -9149,18 +9538,20 @@ function generateCode() {
   );
   const graphContribution =
     getTypedNodeGraphContribution();
-  const graphRuntimeActive =
-    Boolean(
-      graphContribution?.active
+  const graphRuntimeClassName =
+    settledGraphRuntimeClassName(
+      graphContribution
     );
+  const graphRuntimeActive =
+    Boolean(graphRuntimeClassName);
   const usesRuntimeConfigurationMenu =
+    graphRuntimeActive &&
     graphContribution?.requirements
-      ?.usesRuntimeConfigurationMenu ===
-    true;
+      ?.usesRuntimeConfigurationMenu === true;
   const usesModUnloadLifecycle =
+    graphRuntimeActive &&
     graphContribution?.requirements
-      ?.usesModUnloadLifecycle ===
-    true;
+      ?.usesModUnloadLifecycle === true;
   const reloadSafetyIssues =
     Array.isArray(
       graphContribution?.requirements
@@ -9389,11 +9780,11 @@ function generateCode() {
 `
     : "",
 usesModUnloadLifecycle
-    ? `        ${graphContribution.className}.Shutdown();
+    ? `        ${graphRuntimeClassName}.Shutdown();
 `
     : "",
-graphContribution.className,
-graphContribution.className])
+graphRuntimeClassName,
+graphRuntimeClassName])
       : "";
 
   const runtimeValueDeclarations =
@@ -9722,7 +10113,7 @@ ${generatedGuidance("noReactions")}
         const runtimeOrder =
           usesRuntimeConfigurationMenu
             ? `
-            if (${graphContribution.className}.TryGetRuntimeConfigurationMenuOrder(
+            if (${graphRuntimeClassName}.TryGetRuntimeConfigurationMenuOrder(
                     "${escapeCSharp(
                       entry.node.id
                     )}",
@@ -9803,7 +10194,7 @@ ${orderBranches}
         const runtimeVisibility =
           usesRuntimeConfigurationMenu
             ? `
-            if (${graphContribution.className}.TryGetRuntimeConfigurationMenuVisibility(
+            if (${graphRuntimeClassName}.TryGetRuntimeConfigurationMenuVisibility(
                     "${escapeCSharp(
                       entry.node.id
                     )}",
@@ -9859,7 +10250,7 @@ controllerChecks]);
                 ${field}.Name,
                 StringComparison.Ordinal))
         {
-            return ${graphContribution.className}.TryGetRuntimeConfigurationMenuVisibility(
+            return ${graphRuntimeClassName}.TryGetRuntimeConfigurationMenuVisibility(
                 "${escapeCSharp(
                   entry.node.id
                 )}",
@@ -9868,13 +10259,13 @@ controllerChecks]);
               })
               .join("\n\n");
 
-          return globalThis.RMLCodeTemplates.text("configuration", "source_005", [graphContribution.className,
-graphContribution.className,
+          return globalThis.RMLCodeTemplates.text("configuration", "source_005", [graphRuntimeClassName,
+graphRuntimeClassName,
 keyVisibilityBranches,
-graphContribution.className,
-graphContribution.className,
-graphContribution.className,
-graphContribution.className]);
+graphRuntimeClassName,
+graphRuntimeClassName,
+graphRuntimeClassName,
+graphRuntimeClassName]);
         })()
       : "";
 
@@ -10056,7 +10447,7 @@ graphContribution.className]);
 
           const runtimeLayoutHelper =
             usesRuntimeConfigurationMenu
-              ? globalThis.RMLCodeTemplates.text("configuration", "source_006", [graphContribution.className])
+              ? globalThis.RMLCodeTemplates.text("configuration", "source_006", [graphRuntimeClassName])
               : "";
 
           return globalThis.RMLCodeTemplates.text("configuration", "source_007", [layoutGroupItemFields,
@@ -10595,11 +10986,7 @@ function reportNonBlockingImportValidation(stage, diagnostics) {
     .map(value => String(value || ""))
     .filter(Boolean);
   if (values.length === 0) return [];
-  const error = new Error(`${stage}: ${values.join(" | ")}`);
-  error.name = "RMLImportValidationError";
-  error.code = "RML_IMPORT_VALIDATION_NON_BLOCKING";
-  error.diagnostics = values.slice();
-  console.error("[RML IMPORT VALIDATION ERROR — PROJECT KEPT EDITABLE]", error);
+  void stage;
   return values;
 }
 
@@ -14194,7 +14581,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -14209,7 +14596,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -14228,7 +14615,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -14565,7 +14952,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -14596,7 +14983,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -22163,7 +22550,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -25482,14 +25869,14 @@ function previewEnumEditorMarkup(
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -25564,7 +25951,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -26656,7 +27043,9 @@ function renderSettingsPreview(options = {}) {
 
   if (!colorPageOpen && elements.settingsPreviewRuntimeActions) {
     const graphContribution = getTypedNodeGraphContribution();
-    const graphRuntimeActive = Boolean(graphContribution?.active);
+    const graphRuntimeActive = Boolean(
+      settledGraphRuntimeClassName(graphContribution)
+    );
     const reloadSafetyIssues = Array.isArray(graphContribution?.requirements?.reloadSafetyIssues)
       ? graphContribution.requirements.reloadSafetyIssues
       : [];
@@ -28404,7 +28793,10 @@ Object.defineProperty(window, window.RMLI18n.t("ui.literal.1c77ee8ecc63"), {
       const base = await Promise.resolve(window.RMLRuntimeBridge?.discoverScanner?.());
       const result = { build: RML_BUILDER_BUILD_ID, channel, base, connection: window.RMLRuntimeBridge?.getConnectionState?.() || null };
       if (!base) return { ...result, error: window.RMLI18n.t("ui.literal.3aaa58ab0fd1") };
-      for (const [name, path] of [["health", "/health"], ["snapshot", `/runtime/snapshot?channel=${encodeURIComponent(channel)}`]]) {
+      result.health =
+        window.RMLScannerHealthSession
+          ?.health || null;
+      for (const [name, path] of [["snapshot", `/runtime/snapshot?channel=${encodeURIComponent(channel)}`]]) {
         try {
           const response = await fetch(`${base}${path}`, { cache: "no-store", headers: { Accept: "application/json" } });
           result[name] = { status: response.status, ok: response.ok, body: await response.text() };
@@ -29389,8 +29781,17 @@ let activeProjectLoadSession = 0;
 let activeBuilderWorkSession = 0;
 let builderWorkSessionSequence = 0;
 const builderWorkSessions = new Set();
-let builderWorkWatchdog = 0;
+const builderWorkWatchdogs = new Map();
 let activeBuilderReplacementPrompt = 0;
+
+function clearBuilderWorkDeadline(session) {
+  const watchdog =
+    builderWorkWatchdogs.get(session);
+  if (watchdog) {
+    window.clearTimeout(watchdog);
+  }
+  builderWorkWatchdogs.delete(session);
+}
 
 function nextBuilderVisualFrame() {
   if (
@@ -29499,21 +29900,14 @@ function advanceBuilderWorkProgress(
   requestedProgress
 ) {
   const requested = Number(requestedProgress);
-  const nested = builderWorkSessions.size > 1;
-
-  if (Number.isFinite(requested) && requested <= 0) {
-    return builderWorkVisibleProgress <= 0
-      ? 0
-      : builderWorkVisibleProgress;
+  if (!Number.isFinite(requested)) {
+    return builderWorkVisibleProgress;
   }
 
-  if (Number.isFinite(requested) && requested >= 100 && !nested) {
-    return 100;
-  }
-
-  const remaining = Math.max(0, 100 - builderWorkVisibleProgress);
-  const increment = Math.max(0.35, remaining * 0.075);
-  return Math.min(99, builderWorkVisibleProgress + increment);
+  return Math.max(
+    builderWorkVisibleProgress,
+    clamp(requested, 0, 100)
+  );
 }
 
 function updateBuilderWork(
@@ -29728,10 +30122,9 @@ async function requestBuilderReplacementChoice(
         )
       : [];
 
-  window.clearTimeout(
-    builderWorkWatchdog
+  clearBuilderWorkDeadline(
+    workSession
   );
-  builderWorkWatchdog = 0;
 
   const prompt =
     ++activeBuilderReplacementPrompt;
@@ -29891,7 +30284,7 @@ async function requestBuilderReplacementChoice(
                 ? "!"
                 : "·";
       if (status === "selected") {
-        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-check"></use></svg>`;
+        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-check"></use></svg>`;
       }
       const name =
         document.createElement("span");
@@ -30473,10 +30866,6 @@ function beginBuilderWork(options = {}) {
   builderWorkSessions.add(session);
   activeBuilderWorkSession = session;
 
-  window.clearTimeout(
-    builderWorkWatchdog
-  );
-
   if (
     !overlayWasActive &&
     elements.builderWorkOverlay
@@ -30501,25 +30890,45 @@ function beginBuilderWork(options = {}) {
     1000,
     120000
   );
-  builderWorkWatchdog =
+  const watchdog =
     window.setTimeout(() => {
       if (
-        session ===
-          activeBuilderWorkSession
+        builderWorkSessions.has(
+          session
+        )
       ) {
-        updateBuilderWork(
-          session,
+        const error = new Error(
+          `A Builder operation exceeded its declared ${timeout} ms completion deadline.`
+        );
+        error.code =
+          "RML_BUILDER_WORK_DEADLINE_EXCEEDED";
+        console.error(
+          "[RML BUILDER INTERNAL FAILURE] A Builder operation exceeded its declared completion deadline.",
           {
-            title:
-              window.RMLI18n.t("ui.auto.d178283320ec"),
-            message:
-              window.RMLI18n.t("ui.auto.112240abb0c0"),
-            detail:
-              window.RMLI18n.t("ui.literal.27ff3f736695")
+            session,
+            timeout,
+            activeSessions: [
+              ...builderWorkSessions
+            ],
+            error
           }
         );
+        try {
+          options.onTimeout?.(error);
+        } catch (timeoutError) {
+          console.error(
+            "[RML BUILDER INTERNAL FAILURE] A Builder deadline handler failed.",
+            timeoutError
+          );
+        } finally {
+          finishBuilderWork(session);
+        }
       }
     }, timeout);
+  builderWorkWatchdogs.set(
+    session,
+    watchdog
+  );
   return session;
 }
 
@@ -30532,16 +30941,13 @@ function finishBuilderWork(session) {
   }
 
   builderWorkSessions.delete(session);
+  clearBuilderWorkDeadline(session);
   if (
     session !== activeBuilderWorkSession
   ) {
     return true;
   }
 
-  window.clearTimeout(
-    builderWorkWatchdog
-  );
-  builderWorkWatchdog = 0;
   if (builderWorkSessions.size > 0) {
     activeBuilderWorkSession = Math.max(
       ...builderWorkSessions
@@ -31431,13 +31837,6 @@ function projectRequiredCatalogNodes(
         node?.operatorId || ""
       ).trim();
 
-      if (
-        node?.importRecovery
-          ?.unresolved === true
-      ) {
-        continue;
-      }
-
       const apiContract =
         node?.apiContract &&
         typeof node.apiContract ===
@@ -31837,8 +32236,26 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
-  const requiredFactoryVersion = 38;
+    String(
+      window.RMLBuilderBuildId ||
+      (
+        typeof document !== "undefined" &&
+        typeof document.querySelector === "function"
+          ? document.querySelector(
+              'meta[name="rml-builder-build"]'
+            )?.content
+          : ""
+      ) ||
+      ""
+    );
+  const requiredFactoryVersion =
+    Number(
+      window.RMLCatalogImportGate
+        ?.requiredApiFactoryVersion ||
+      window.RMLApiNodeFactoryController
+        ?.factoryVersion ||
+      window.__RMLApiNodeFactoryVersion
+    ) || 0;
   const mismatches = [];
   const requireModuleId = (
     name,
@@ -31915,14 +32332,14 @@ function assertProjectRuntimeModuleCoherence() {
     Number(
       window.RMLCatalogImportGate
         ?.loaderVersion
-    ) !== 84 ||
+    ) < 1 ||
     Number(
       window.RMLCatalogImportGate
         ?.requiredApiFactoryVersion
     ) !== requiredFactoryVersion
   ) {
     mismatches.push(
-      "catalog contract is not loader v84 / factory v38"
+      `catalog contract is incomplete or disagrees with factory v${requiredFactoryVersion}`
     );
   }
   if (
@@ -31965,13 +32382,7 @@ function assertProjectRuntimeModuleCoherence() {
     );
   }
 
-  if (mismatches.length > 0) {
-    throw new Error(
-      `Runtime module version mismatch: cached files from different Builder releases are active (${mismatches.join("; ")}). Reload the Builder without cached files. The JSON was not loaded and the previous project remains unchanged.`
-    );
-  }
-
-  return true;
+  return mismatches.length === 0;
 }
 
 function preserveUnresolvedRequirementsAsUnavailableNodes(
@@ -32023,14 +32434,6 @@ function preserveUnresolvedRequirementsAsUnavailableNodes(
     }
   }
 
-  if (preserved > 0) {
-    console.error(
-      "[RML IMPORT UNAVAILABLE NODES PRESERVED — NO DELETION]",
-      new Error(
-        `${preserved} unavailable node${preserved === 1 ? " was" : "s were"} preserved in-place for manual recovery.`
-      )
-    );
-  }
   return preserved;
 }
 
@@ -32039,11 +32442,15 @@ async function ensureProjectRuntimePrerequisites(
   workSession,
   {
     catalogOnly = false,
-    catalogPreflight = null,
+    catalogPreflight:
+      requestedCatalogPreflight = null,
     allowOfflineCompatibility = true,
-    allowAutomaticLiveRetry = true
+    allowAutomaticLiveRetry = false,
+    automaticReplacementOnly = false
   } = {}
 ) {
+  let catalogPreflight =
+    requestedCatalogPreflight;
   const graph =
     projectTypedRuntimeGraph(
       project
@@ -32071,9 +32478,7 @@ async function ensureProjectRuntimePrerequisites(
     prevalidatedCatalogEpoch !==
       runtimeCatalogResolutionEpochToken()
   ) {
-    throw new Error(
-      window.RMLI18n.t("ui.literal.187c3f8659a2")
-    );
+    catalogPreflight = null;
   }
 
   updateBuilderWork(
@@ -32221,8 +32626,6 @@ async function ensureProjectRuntimePrerequisites(
     window.RMLI18n.t("ui.literal.0b79bdfce7f2")
   );
 
-  assertProjectRuntimeModuleCoherence();
-
   const legacyMigration =
     window.RMLDynamicGraphHost
       ?.migrateLegacyOperatorsForImport?.(
@@ -32257,6 +32660,54 @@ async function ensureProjectRuntimePrerequisites(
       project
     );
 
+  const importCatalogGate =
+    window.RMLCatalogImportGate;
+  let importCatalogSyncError = null;
+  if (allowAutomaticLiveRetry === true) {
+    if (
+      typeof importCatalogGate
+        ?.synchronizeLive !== "function"
+    ) {
+      importCatalogSyncError =
+        new Error(
+          "The import scanner gate is unavailable."
+        );
+      console.error(
+        "[RML BUILDER INTERNAL FAILURE] The import could not start its single scanner health sweep.",
+        importCatalogSyncError
+      );
+    } else {
+      updateBuilderWork(
+        workSession,
+        {
+          title:
+            window.RMLI18n.t("ui.auto.e11c62ea5c13"),
+          message:
+            window.RMLI18n.t("ui.auto.ef5bac1920fc"),
+          detail:
+            "Exactly one seven-port health sweep is running for this import.",
+          progress: 42
+        }
+      );
+      await paintBuilderUi();
+      try {
+        await importCatalogGate
+          .synchronizeLive({
+            silent: true,
+            showWork: false,
+            forceRetry: true,
+            trigger: "import"
+          });
+      } catch (error) {
+        importCatalogSyncError = error;
+        console.error(
+          "[RML BUILDER INTERNAL FAILURE] The import-owned scanner synchronization failed.",
+          error
+        );
+      }
+    }
+  }
+
   if (requiredCatalogNodes.length > 0) {
     updateBuilderWork(
       workSession,
@@ -32276,8 +32727,7 @@ async function ensureProjectRuntimePrerequisites(
     );
     await paintBuilderUi();
 
-    const gate =
-      window.RMLCatalogImportGate;
+    const gate = importCatalogGate;
 
     if (
       !gate ||
@@ -32418,7 +32868,8 @@ async function ensureProjectRuntimePrerequisites(
         };
 
       let cachePreparationError = null;
-      let livePreparationError = null;
+      let livePreparationError =
+        importCatalogSyncError;
       try {
         catalogResult =
           await gate.ensureForImport(
@@ -32426,93 +32877,6 @@ async function ensureProjectRuntimePrerequisites(
           );
       } catch (error) {
         cachePreparationError = error;
-      }
-
-      const unresolvedBeforeLive =
-        Array.isArray(
-          catalogResult
-            ?.unresolvedRequirements
-        )
-          ? catalogResult
-              .unresolvedRequirements
-              .length
-          : requiredCatalogNodes.length;
-      const bridge =
-        window.RMLRuntimeBridge;
-      const connectionBeforeLive =
-        bridge?.getConnectionState?.();
-      const alreadyLiveVerified =
-        Boolean(
-          connectionBeforeLive?.mode ===
-            "live" &&
-          catalogResult?.live === true
-        );
-      const shouldTryLive =
-        allowAutomaticLiveRetry === true &&
-        !alreadyLiveVerified &&
-        typeof bridge?.connect ===
-          "function";
-
-      if (shouldTryLive) {
-        updateBuilderWork(
-          workSession,
-          {
-            title:
-              window.RMLI18n.t("ui.auto.85febb644c17"),
-            message:
-              window.RMLI18n.format("import.work.cache_unresolved", {
-              count: unresolvedBeforeLive.toLocaleString(window.RMLI18n?.language || undefined)
-            }),
-            detail:
-              window.RMLI18n.t("ui.literal.85955c138f8e"),
-            progress: 49
-          }
-        );
-        await paintBuilderUi();
-
-        let connected = false;
-        try {
-          connected =
-            await bridge.connect();
-        } catch (error) {
-          livePreparationError = error;
-        }
-        if (!connected) {
-          livePreparationError =
-            livePreparationError ||
-            new Error(
-              String(
-                bridge
-                  .getConnectionState?.()
-                  ?.lastError ||
-                window.RMLI18n.t("ui.literal.245d804e586a")
-              )
-            );
-        } else {
-          updateBuilderWork(
-            workSession,
-            {
-              title:
-                window.RMLI18n.t("ui.auto.e11c62ea5c13"),
-              message:
-                window.RMLI18n.t("ui.auto.ef5bac1920fc"),
-              detail:
-                window.RMLI18n.t("ui.literal.a6e370a0f4a8"),
-              progress: 50
-            }
-          );
-          await paintBuilderUi();
-          try {
-            catalogResult =
-              await gate.ensureForImport({
-                ...catalogGateOptions,
-                forceLiveRefresh: true
-              });
-            cachePreparationError = null;
-          } catch (error) {
-            livePreparationError = error;
-          }
-        }
       }
 
       if (!catalogResult) {
@@ -32532,9 +32896,7 @@ async function ensureProjectRuntimePrerequisites(
           cacheSatisfied: false,
           cacheFallback: true,
           liveAttempted:
-            shouldTryLive ||
-            connectionBeforeLive?.mode ===
-              "live",
+            allowAutomaticLiveRetry === true,
           source: "unavailable",
           catalogFingerprint: "",
           engineVersion: "",
@@ -32826,6 +33188,21 @@ async function ensureProjectRuntimePrerequisites(
         await paintBuilderUi();
       } else {
 
+      try {
+        await gate.ensureForReplacement({
+          requiredNodes:
+            requiredCatalogNodes,
+          replacementNodes:
+            unresolvedRequirements,
+          hydrateReplacementOwners: true
+        });
+      } catch (error) {
+        console.error(
+          "[RML BUILDER INTERNAL FAILURE] The bounded replacement-owner hydration failed. Existing catalog candidates remain available.",
+          error
+        );
+      }
+
       const graphHost =
         window.RMLDynamicGraphHost;
       const candidateResolver =
@@ -32846,8 +33223,6 @@ async function ensureProjectRuntimePrerequisites(
         );
       }
 
-      const replacementEpoch =
-        runtimeCatalogResolutionEpochToken();
       const matchingNodesByOperator =
         new Map();
       const matchingNodesByLocation =
@@ -32926,14 +33301,6 @@ async function ensureProjectRuntimePrerequisites(
           }
         );
         await paintBuilderUi();
-        if (
-          runtimeCatalogResolutionEpochToken() !==
-          replacementEpoch
-        ) {
-          throw new Error(
-            window.RMLI18n.t("ui.literal.90196a88a845")
-          );
-        }
         let resolution = null;
         let resolutionError = null;
         try {
@@ -33072,7 +33439,20 @@ async function ensureProjectRuntimePrerequisites(
             candidate
               ?.autoReconstructable === true &&
             candidate?.semanticProof ===
-              "exact-name"
+              "exact-name" &&
+            String(candidate?.operatorId || "") !==
+              entry.operatorId
+          );
+        const uniqueCompatibleCandidates =
+          entry.candidates.filter(candidate =>
+            String(candidate?.operatorId || "") !==
+              entry.operatorId &&
+            Number(candidate?.ambiguousPortCount || 0) === 0 &&
+            (candidate?.unmappedInputPorts || []).length === 0 &&
+            (candidate?.unmappedOutputPorts || []).length === 0 &&
+            (candidate?.unmappedReferencedInputs || []).length === 0 &&
+            (candidate?.unmappedReferencedOutputs || []).length === 0 &&
+            (candidate?.unmappedRequiredInputs || []).length === 0
           );
         const selected =
           exactCandidates.length === 1
@@ -33080,7 +33460,11 @@ async function ensureProjectRuntimePrerequisites(
             : exactCandidates.length === 0 &&
                 exactNameCandidates.length === 1
               ? exactNameCandidates[0]
-              : null;
+              : exactCandidates.length === 0 &&
+                  exactNameCandidates.length === 0 &&
+                  uniqueCompatibleCandidates.length === 1
+                ? uniqueCompatibleCandidates[0]
+                : null;
         const removesReferencedEndpoint =
           Boolean(
             selected &&
@@ -33104,6 +33488,39 @@ async function ensureProjectRuntimePrerequisites(
         entry.selectedCandidate = selected;
         entry.selectedOperatorId =
           selected.operatorId;
+      }
+
+      if (automaticReplacementOnly) {
+        for (const entry of replacementQueue) {
+          if (
+            entry.autoSelected === true ||
+            entry.skipped === true
+          ) {
+            continue;
+          }
+          entry.status = "skipped";
+          entry.skipped = true;
+          entry.autoSelected = true;
+          entry.selectedCandidate = null;
+          entry.selectedOperatorId = "";
+          for (const item of entry.matchingNodes) {
+            item.node.importRecovery = {
+              schemaVersion: 1,
+              unresolved: true,
+              reason:
+                window.RMLI18n.t("ui.literal.d4cd9b6bd7ea"),
+              originalOperatorId:
+                entry.operatorId,
+              originalApiContract:
+                item.node.apiContract
+                  ? structuredClone(item.node.apiContract)
+                  : null,
+              compositePath:
+                item.path,
+              preservedWithoutDeletion: true
+            };
+          }
+        }
       }
 
       let selectedPlanDiagnostics = [];
@@ -33154,15 +33571,6 @@ async function ensureProjectRuntimePrerequisites(
 
           entry.replacementDialogCompleted = true;
 
-          if (
-            runtimeCatalogResolutionEpochToken() !==
-              replacementEpoch
-          ) {
-            throw new Error(
-              window.RMLI18n.t("ui.literal.7b7c24717ca4")
-            );
-          }
-
           if (selected?.skipped === true) {
             entry.status = "skipped";
             entry.skipped = true;
@@ -33210,15 +33618,6 @@ async function ensureProjectRuntimePrerequisites(
         if (missingReplacementDialogs.length > 0) {
           throw new Error(
             `[HARD REPLACEMENT FLOW ERROR] ${missingReplacementDialogs.length.toLocaleString(window.RMLI18n?.language || undefined)} non-automatic replacement entr${missingReplacementDialogs.length === 1 ? "y was" : "ies were"} not presented to the user: ${missingReplacementDialogs.slice(0, 8).map(entry => entry.operatorId).join(", ")}${missingReplacementDialogs.length > 8 ? ` and ${(missingReplacementDialogs.length - 8).toLocaleString(window.RMLI18n?.language || undefined)} more` : ""}.`
-          );
-        }
-
-        if (
-          runtimeCatalogResolutionEpochToken() !==
-          replacementEpoch
-        ) {
-          throw new Error(
-            window.RMLI18n.t("ui.literal.577a76b8ad32")
           );
         }
 
@@ -33681,10 +34080,6 @@ async function ensureProjectRuntimePrerequisites(
   }
 
   if (compatibilityMode) {
-    const activeCatalog =
-      window.RMLResoniteApiCatalog ||
-      window.RMLFrooxComponentCatalog ||
-      null;
     const planner =
       window.RMLDynamicGraphHost
         ?.planPreservedCatalogOperatorsForImport;
@@ -33697,7 +34092,6 @@ async function ensureProjectRuntimePrerequisites(
             .unresolvedRequirements
         : [];
     if (
-      activeCatalog ||
       typeof planner !== "function"
     ) {
       throw new Error(
@@ -34092,6 +34486,8 @@ async function resolveSavedApiCompositeGraph(
 ) {
   const openGraph =
     context === "open-runtime-graph";
+  const importedSavedComposite =
+    context === "saved-composite-import";
   if (
     !graphDocument ||
     typeof graphDocument !== "object" ||
@@ -34135,7 +34531,9 @@ async function resolveSavedApiCompositeGraph(
           allowOfflineCompatibility:
             true,
           allowAutomaticLiveRetry:
-            false
+            importedSavedComposite,
+          automaticReplacementOnly:
+            openGraph
         }
       );
     updateBuilderWork(
@@ -34167,18 +34565,6 @@ async function resolveSavedApiCompositeGraph(
       }
     );
     await paintBuilderUi();
-    if (
-      String(
-        result
-          .catalogResolutionEpochToken ||
-        ""
-      ) !==
-      runtimeCatalogResolutionEpochToken()
-    ) {
-      throw new Error(
-        window.RMLI18n.t("ui.literal.2f369975f84d")
-      );
-    }
     const resolvedGraph = structuredClone(
       result.graph ||
       project.extensions.typedNodeGraph
@@ -34664,10 +35050,14 @@ function assertImportedGraphIdentity(
 
 function waitForGraphCodegenSettlement(
   expectedProjectEpoch =
-    projectApplicationEpoch
+    projectApplicationEpoch,
+  afterRevision =
+    graphCodegenSettlementRevision,
+  expectedKey = ""
 ) {
   return new Promise((resolve, reject) => {
     let settled = false;
+    let recheckTimer = 0;
 
     const finish = (
       callback,
@@ -34683,16 +35073,32 @@ function waitForGraphCodegenSettlement(
         "rml-builder:project-replacement",
         handleReplacement
       );
+      if (recheckTimer) {
+        clearTimeout(recheckTimer);
+        recheckTimer = 0;
+      }
       callback(value);
+    };
+    const matchesSettlement = detail => {
+      if (
+        Number(detail?.revision) <=
+          Number(afterRevision || 0) ||
+        (
+          Number(expectedProjectEpoch) > 0 &&
+          Number(detail?.projectEpoch) !==
+            Number(expectedProjectEpoch)
+        )
+      ) {
+        return false;
+      }
+      return !expectedKey ||
+        !detail?.key ||
+        detail.key === expectedKey;
     };
     const handleSettled = event => {
       const detail =
         event.detail || {};
-      if (
-        Number(expectedProjectEpoch) > 0 &&
-        Number(detail.projectEpoch) !==
-          Number(expectedProjectEpoch)
-      ) {
+      if (!matchesSettlement(detail)) {
         return;
       }
       finish(resolve, detail);
@@ -34722,107 +35128,48 @@ function waitForGraphCodegenSettlement(
       "rml-builder:project-replacement",
       handleReplacement
     );
+    if (
+      matchesSettlement(
+        graphCodegenLastSettlement
+      )
+    ) {
+      finish(
+        resolve,
+        graphCodegenLastSettlement
+      );
+      return;
+    }
+    recheckTimer = setTimeout(
+      () => finish(resolve, {
+        recheck: true,
+        revision:
+          graphCodegenSettlementRevision
+      }),
+      GRAPH_CODEGEN_SETTLEMENT_RECHECK_MS
+    );
   });
 }
 
-async function waitForImportedCodegen(
-  expectedGraph,
-  workSession,
-  catalogResult = null,
+function queueImportedCodegen(
   projectEpoch =
     projectApplicationEpoch
 ) {
-  let contribution;
-  const graphViews =
-    projectRuntimeGraphViews(
-      expectedGraph
-    );
-  const expectedNodeCount =
-    graphViews.reduce(
-      (total, view) =>
-        total +
-        (view.graph.nodes?.length || 0),
-      0
-    );
-  const expectedConnectionCount =
-    graphViews.reduce(
-      (total, view) =>
-        total +
-        (view.graph.connections?.length ||
-          0),
-      0
-    );
-
-  while (true) {
-    contribution =
-      getTypedNodeGraphContribution();
-
+  window.setTimeout(() => {
     if (
-      contribution?.pending !== true
+      Number(projectEpoch) !==
+        Number(projectApplicationEpoch)
     ) {
-      break;
+      return;
     }
-
-    updateBuilderWork(
-      workSession,
-      {
-        title:
-          window.RMLI18n.t("ui.auto.6c46e8937e4f"),
-        message:
-          window.RMLI18n.t("ui.auto.c7aa52e38484"),
-        detail:
-          `${expectedNodeCount.toLocaleString(window.RMLI18n?.language || undefined)} nodes · ${expectedConnectionCount.toLocaleString(window.RMLI18n?.language || undefined)} connections including embedded graphs`,
-        progress: 90
-      }
-    );
-
-    await waitForGraphCodegenSettlement(
-      projectEpoch
-    );
-  }
-
-  const graphDiagnostics =
-    importDiagnosticsForCatalog(
-      contribution?.diagnostics,
-      state.extensions?.typedNodeGraph,
-      catalogResult
-    );
-
-  reportNonBlockingImportValidation(
-    "Runtime Graph code generation validation failed after import",
-    graphDiagnostics
-  );
-
-  const diagnostics =
-    importDiagnosticsForCatalog(
-      getDiagnostics(),
-      state.extensions?.typedNodeGraph,
-      catalogResult
-    );
-
-  reportNonBlockingImportValidation(
-    "Project validation failed after import",
-    diagnostics
-  );
-
-  const packedGraph = Boolean(
-    expectedGraph?.configSnapshot &&
-    Array.isArray(
-      expectedGraph.configSnapshot.nodes
-    )
-  );
-
-  if (
-    packedGraph &&
-    getAdditionalGeneratedSourceFiles()
-      .length === 0
-  ) {
-    throw new Error(
-      window.RMLI18n.t("ui.literal.46b031ae43d5")
-    );
-  }
-
-  return contribution;
+    try {
+      updateGeneratedOutput();
+    } catch (error) {
+      console.error(
+        "[RML BUILDER INTERNAL FAILURE] Background code generation could not be started after project import.",
+        error
+      );
+    }
+  }, 0);
 }
 
 function waitForImportedGraphUi(
@@ -35191,7 +35538,7 @@ async function applyLoadedProjectWithFeedback(
       timeout: 120000
     });
   let previousProject = null;
-  let projectApplied = false;
+  let projectApplicationStarted = false;
   let portableRegistryTransaction =
     null;
 
@@ -35255,17 +35602,8 @@ async function applyLoadedProjectWithFeedback(
     const validatedCatalogEpoch = String(
       prerequisites
         .catalogResolutionEpochToken ||
-      ""
+      runtimeCatalogResolutionEpochToken()
     );
-    if (
-      !validatedCatalogEpoch ||
-      validatedCatalogEpoch !==
-        runtimeCatalogResolutionEpochToken()
-    ) {
-      throw new Error(
-        window.RMLI18n.t("ui.literal.09d85e8b196c")
-      );
-    }
     let installationCatalogEpoch =
       validatedCatalogEpoch;
 
@@ -35307,14 +35645,7 @@ async function applyLoadedProjectWithFeedback(
         runtimeCatalogResolutionEpochToken();
     }
 
-    if (
-      installationCatalogEpoch !==
-        runtimeCatalogResolutionEpochToken()
-    ) {
-      throw new Error(
-        window.RMLI18n.t("ui.literal.6f14dfaccad4")
-      );
-    }
+    void installationCatalogEpoch;
 
     if (forceConfigurationPage) {
       project.workspace = {
@@ -35336,7 +35667,7 @@ async function applyLoadedProjectWithFeedback(
       }
     }
 
-    projectApplied = true;
+    projectApplicationStarted = true;
     const importedProjectEpoch =
       applyLoadedProject(
         project,
@@ -35346,6 +35677,8 @@ async function applyLoadedProjectWithFeedback(
             !forceConfigurationPage
         }
       );
+    generatedOutputDeferredImportEpoch =
+      importedProjectEpoch;
     pendingImportedGraphAnalysisCertificate =
       prerequisites.analysisCertificate ||
       null;
@@ -35501,18 +35834,12 @@ async function applyLoadedProjectWithFeedback(
     }
 
     if (
-      prerequisites.graph &&
-      prerequisites.runtimeActive &&
-      !prerequisites.compatibilityMode &&
-      !intentionallyDegradedGraph
-    ) {
-      await waitForImportedCodegen(
-        prerequisites.graph,
-        session,
-        prerequisites.catalog,
-        importedProjectEpoch
-      );
-    } else if (
+      !(
+        prerequisites.graph &&
+        prerequisites.runtimeActive &&
+        !prerequisites.compatibilityMode &&
+        !intentionallyDegradedGraph
+      ) &&
       !prerequisites.compatibilityMode &&
       !intentionallyDegradedGraph
     ) {
@@ -35524,8 +35851,6 @@ async function applyLoadedProjectWithFeedback(
         diagnostics
       );
     }
-
-    updateGeneratedOutput();
 
     if (
       portableRegistryTransaction &&
@@ -35543,6 +35868,10 @@ async function applyLoadedProjectWithFeedback(
     await commitSuccessfulProjectStorage(
       previousProject?.projectId,
       `loaded:${displayName}`
+    );
+    generatedOutputDeferredImportEpoch = 0;
+    queueImportedCodegen(
+      importedProjectEpoch
     );
 
     const omittedApiNodes =
@@ -35623,43 +35952,77 @@ async function applyLoadedProjectWithFeedback(
       }
     );
     await paintBuilderUi();
-    if (omittedApiNodes.length > 0) {
-      await showBuilderNotice({
-        tone: "warning",
-        kicker: window.RMLI18n.t("ui.auto.e5a7a95232f9"),
-        title:
-          omittedApiNodes.length === 1
-            ? window.RMLI18n.t("ui.literal.76dd9118051b")
-            : window.RMLI18n.t("ui.literal.4ff6413bab9c"),
-        message:
-          `Loaded ${displayName} successfully, but ${omittedApiNodes.length.toLocaleString(window.RMLI18n?.language || undefined)} API node${omittedApiNodes.length === 1 ? " was" : "s were"} unavailable and could not be reconstructed safely.`,
-        details: omittedApiDetail,
-        confirmLabel: window.RMLI18n.t("ui.literal.9ce3bd4224c8")
-      });
-    }
     return graphResult;
   } catch (error) {
-    if (projectApplied) {
-      reportNonBlockingImportValidation(
-        "Post-apply import processing failed; imported project retained",
-        [error instanceof Error ? error.stack || error.message : String(error)]
-      );
+    if (projectApplicationStarted) {
+      generatedOutputDeferredImportEpoch = 0;
+      let rollbackError = null;
       try {
+        portableRegistryTransaction
+          ?.rollback?.();
+        portableRegistryTransaction = null;
+        if (!previousProject) {
+          throw new Error(
+            "The previous project snapshot is unavailable."
+          );
+        }
+        applyLoadedProject(
+          previousProject,
+          {
+            render: false,
+            reason:
+              "failed-project-import-rollback",
+            useJsonPageAssociation: false
+          }
+        );
         renderMetadata();
         renderPalette();
         renderAll();
         await paintBuilderUi();
-      } catch (presentationError) {
-        reportNonBlockingImportValidation(
-          "Imported project presentation recovery failed",
-          [presentationError instanceof Error ? presentationError.stack || presentationError.message : String(presentationError)]
+      } catch (rollbackFailure) {
+        rollbackError =
+          rollbackFailure instanceof Error
+            ? rollbackFailure
+            : new Error(
+                String(rollbackFailure)
+              );
+      }
+      const cause =
+        error instanceof Error
+          ? error
+          : new Error(String(error));
+      if (rollbackError) {
+        throw new AggregateError(
+          [cause, rollbackError],
+          "Project import failed and the previous project could not be restored completely."
         );
       }
-      return {
-        ready: false,
-        retainedAfterImportError: true,
-        importError: error instanceof Error ? error.message : String(error)
-      };
+      const failure = new Error(
+        `Project import failed; the previous project was restored: ${cause.message}`,
+        { cause }
+      );
+      failure.code =
+        "RML_PROJECT_IMPORT_ROLLED_BACK";
+      throw failure;
+    }
+    try {
+      portableRegistryTransaction
+        ?.rollback?.();
+      portableRegistryTransaction = null;
+    } catch (rollbackFailure) {
+      throw new AggregateError(
+        [
+          error instanceof Error
+            ? error
+            : new Error(String(error)),
+          rollbackFailure instanceof Error
+            ? rollbackFailure
+            : new Error(
+                String(rollbackFailure)
+              )
+        ],
+        "Project import failed and its staged API contracts could not be rolled back completely."
+      );
     }
     reportNonBlockingImportValidation(
       "Import processing failed before project application",
@@ -35823,7 +36186,52 @@ window.RMLBuilderEditorPersonalSettingsController=Object.freeze({
   getSettings(){ return {appearance:{...rmlEditorPersonalSettings.appearance},diagnosticSource:rmlEditorPersonalSettings.diagnosticSource}; }
 });
 const RML_BUILDER_PROFILE_STORAGE_KEY = "rml-builder-resonite-profile-v1";
+const RML_BUILDER_PROFILE_REQUEST_TIMEOUT_MS = 8000;
+const RML_BUILDER_PROFILE_AVATAR_MAX_BYTES = 384 * 1024;
+const RML_BUILDER_PROFILE_AVATAR_DATA_URL_MAX_CHARACTERS =
+  Math.ceil(RML_BUILDER_PROFILE_AVATAR_MAX_BYTES / 3) * 4 + 96;
+const RML_BUILDER_PROFILE_FETCH_FAILED = Symbol(
+  "rml-builder-profile-fetch-failed"
+);
 let rmlBuilderProfilePresentation = null;
+let rmlBuilderProfileSyncPromise = null;
+let rmlBuilderProfileSyncInstalled = false;
+let rmlBuilderProfileScannerPort = 0;
+let rmlBuilderProfileRequestedPort = 0;
+let rmlBuilderProfileRequestRevision = 0;
+let rmlBuilderProfileRenderRevision = 0;
+
+function normalizeRmlBuilderProfileAvatarDataUrl(value) {
+  const dataUrl =
+    typeof value === "string"
+      ? value.trim()
+      : "";
+  if (
+    !dataUrl ||
+    dataUrl.length >
+      RML_BUILDER_PROFILE_AVATAR_DATA_URL_MAX_CHARACTERS
+  ) {
+    return "";
+  }
+  const match = dataUrl.match(
+    /^data:image\/(?:png|jpe?g|webp|gif|avif);base64,([a-z0-9+/]*={0,2})$/i
+  );
+  if (!match) return "";
+  const payload = match[1];
+  const padding = payload.endsWith("==")
+    ? 2
+    : payload.endsWith("=")
+      ? 1
+      : 0;
+  const byteLength =
+    Math.floor(payload.length * 3 / 4) -
+    padding;
+  return byteLength >= 0 &&
+    byteLength <=
+      RML_BUILDER_PROFILE_AVATAR_MAX_BYTES
+    ? dataUrl
+    : "";
+}
 
 function normalizeRmlBuilderProfile(profile) {
   if (!profile || typeof profile !== "object") return null;
@@ -35831,12 +36239,17 @@ function normalizeRmlBuilderProfile(profile) {
   const userId = typeof profile.userId === "string" ? profile.userId.trim() : "";
   const avatarUrl = typeof profile.avatarUrl === "string" ? profile.avatarUrl.trim() : "";
   const avatarSource = typeof profile.avatarSource === "string" ? profile.avatarSource.trim() : "";
-  if (!displayName && !userId && !avatarUrl) return null;
+  const avatarDataUrl =
+    normalizeRmlBuilderProfileAvatarDataUrl(
+      profile.avatarDataUrl
+    );
+  if (!displayName && !userId && !avatarUrl && !avatarDataUrl) return null;
   return {
     displayName: displayName || null,
     userId: userId || null,
     avatarUrl: avatarUrl || null,
-    avatarSource: avatarSource || null
+    avatarSource: avatarSource || null,
+    avatarDataUrl: avatarDataUrl || null
   };
 }
 
@@ -35858,65 +36271,421 @@ function saveRmlBuilderProfilePresentation(profile) {
   const after = JSON.stringify(normalized);
   rmlBuilderProfilePresentation = normalized;
   if (before === after) return false;
-  try { localStorage.setItem(RML_BUILDER_PROFILE_STORAGE_KEY, after); } catch {}
+  try {
+    localStorage.setItem(RML_BUILDER_PROFILE_STORAGE_KEY, after);
+  } catch {}
   return true;
 }
 
 function renderRmlBuilderProfilePresentation(profile = rmlBuilderProfilePresentation) {
   const normalized = normalizeRmlBuilderProfile(profile);
   const kicker = document.getElementById("builder-profile-kicker");
-  if (kicker) kicker.textContent = normalized?.displayName || window.RMLI18n.t("index.text.da6bafbab43a");
-  const url = normalized?.avatarUrl || "";
-  const apply = target => {
-    if (!target) return;
+  const displayName =
+    normalized?.displayName || "";
+  if (kicker) {
+    kicker.textContent =
+      displayName ||
+      window.RMLI18n.t(
+        "index.text.da6bafbab43a"
+      );
+  }
+  const topName = document.getElementById(
+    "top-builder-profile-name"
+  );
+  const topButton = document.getElementById(
+    "project-manager"
+  );
+  const defaultTopName = window.RMLI18n.t(
+    "index.text.a325933df99a"
+  );
+  const defaultTopLabel = window.RMLI18n.t(
+    "index.aria_label.5c7e41ca0332"
+  );
+  if (topName) {
+    topName.textContent =
+      displayName || defaultTopName;
+  }
+  if (topButton) {
+    const accessibleLabel = displayName
+      ? `${displayName}. ${defaultTopLabel}`
+      : defaultTopLabel;
+    topButton.setAttribute(
+      "aria-label",
+      accessibleLabel
+    );
+    topButton.title = accessibleLabel;
+  }
+
+  let url =
+    normalized?.avatarDataUrl ||
+    normalized?.avatarUrl ||
+    "";
+  try {
+    const candidate = new URL(url, window.location.href);
+    if (
+      !normalized?.avatarDataUrl &&
+      (
+        candidate.origin !== window.location.origin ||
+        candidate.pathname !== "/rml-scanner-avatar" ||
+        Number(candidate.searchParams.get("port")) !==
+          rmlBuilderProfileScannerPort
+      )
+    ) {
+      url = "";
+    }
+  } catch {
+    url = "";
+  }
+  const targets = [
+    document.getElementById(
+      "builder-profile-avatar-image"
+    ),
+    document.getElementById(
+      "top-builder-profile-avatar-image"
+    )
+  ].filter(Boolean);
+  const showFallback = target => {
     const slot = target.parentElement;
-    const showFallback = () => {
-      target.hidden = true;
-      target.removeAttribute("src");
-      slot?.classList.remove("has-profile-image");
-    };
-    if (!(url && /^(https?:|data:image\/)/i.test(url))) {
-      showFallback();
+    target.hidden = true;
+    target.removeAttribute("src");
+    slot?.classList.remove("has-profile-image");
+  };
+  const renderRevision =
+    ++rmlBuilderProfileRenderRevision;
+  if (!(url && /^(https?:|data:image\/)/i.test(url))) {
+    for (const target of targets) {
+      showFallback(target);
+    }
+    return;
+  }
+  if (
+    targets.length > 0 &&
+    targets.every(target =>
+      target.getAttribute("src") === url &&
+      !target.hidden &&
+      target.parentElement?.classList.contains(
+        "has-profile-image"
+      )
+    )
+  ) {
+    return;
+  }
+  const preload = new Image();
+  preload.decoding = "async";
+  preload.onload = async () => {
+    try { await preload.decode?.(); } catch {}
+    const current = normalizeRmlBuilderProfile(
+      rmlBuilderProfilePresentation
+    );
+    const currentUrl =
+      current?.avatarDataUrl ||
+      current?.avatarUrl ||
+      "";
+    if (
+      renderRevision !==
+        rmlBuilderProfileRenderRevision ||
+      currentUrl !== url
+    ) {
       return;
     }
-    if (target.src === url && !target.hidden && slot?.classList.contains("has-profile-image")) return;
-    target.hidden = true;
-    slot?.classList.remove("has-profile-image");
-    const preload = new Image();
-    preload.decoding = "async";
-    preload.onload = async () => {
-      try { await preload.decode?.(); } catch {}
-      if (rmlBuilderProfilePresentation?.avatarUrl !== url) return;
+    for (const target of targets) {
+      const slot = target.parentElement;
       target.src = url;
       target.hidden = false;
       slot?.classList.add("has-profile-image");
-    };
-    preload.onerror = showFallback;
-    preload.src = url;
+    }
   };
-  apply(document.getElementById("builder-profile-avatar-image"));
-  apply(document.getElementById("top-builder-profile-avatar-image"));
+  preload.onerror = () => {};
+  preload.src = url;
 }
 
-async function synchronizeRmlBuilderProfileFromScanner() {
-  const state = window.RMLRuntimeBridge?.getConnectionState?.();
-  if (state?.mode !== "live" || !state?.scannerBaseUrl) return false;
+async function fetchRmlBuilderProfileJson(url) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    RML_BUILDER_PROFILE_REQUEST_TIMEOUT_MS
+  );
   try {
-    const response = await fetch(`${state.scannerBaseUrl}/profile`, { cache: "no-store" });
-    if (!response.ok) return false;
-    const profile = normalizeRmlBuilderProfile(await response.json());
-    if (!profile) return false;
-    saveRmlBuilderProfilePresentation(profile);
-    renderRmlBuilderProfilePresentation();
-    return true;
-  } catch { return false; }
+    const response = await fetch(url, {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      console.error(
+        `[RML BUILDER INTERNAL FAILURE] The selected scanner profile bridge returned HTTP ${response.status} ${response.statusText}.`
+      );
+      return RML_BUILDER_PROFILE_FETCH_FAILED;
+    }
+    return await response.json();
+  } catch (error) {
+    console.error(
+      "[RML BUILDER INTERNAL FAILURE] A profile request for the scanner selected by the health sweep failed.",
+      error
+    );
+    return RML_BUILDER_PROFILE_FETCH_FAILED;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
-document.addEventListener("rml-scanner:manual-live-activated", () => {
-  void synchronizeRmlBuilderProfileFromScanner();
-});
+async function fetchRmlBuilderProfileAvatarDataUrl(
+  url,
+  scannerPort
+) {
+  let candidate;
+  try {
+    candidate = new URL(url, window.location.href);
+  } catch {
+    return null;
+  }
+  if (
+    candidate.origin !== window.location.origin ||
+    candidate.pathname !== "/rml-scanner-avatar" ||
+    Number(candidate.searchParams.get("port")) !==
+      scannerPort
+  ) {
+    console.error(
+      "[RML BUILDER INTERNAL FAILURE] The selected scanner profile returned an avatar outside its same-origin bridge contract."
+    );
+    return null;
+  }
 
-function installRmlPersonalSettings() { loadRmlPersonalSettings();loadRmlBuilderProfilePresentation();renderRmlBuilderProfilePresentation();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();const panel=document.getElementById("builder-settings-panel"),open=document.getElementById("builder-settings-open"),status=document.getElementById("builder-settings-status"),inspectorBack=document.getElementById("builder-settings-inspector-back");const setSettingsWorkspace=show=>{if(panel)panel.hidden=!show;open?.setAttribute("aria-expanded",String(show));elements.projectDialog?.classList.toggle("builder-settings-workspace",show);const title=document.getElementById("project-dialog-title"),kicker=elements.projectDialog?.querySelector(".export-dialog-header small");if(title)title.textContent=show?window.RMLI18n.t("index.text.6f4a8553e79d"):window.RMLI18n.t("js.presentation.83e22c2a18d3");if(kicker)kicker.textContent=show?window.RMLI18n.t("index.text.bed77e02fe9a"):(rmlBuilderProfilePresentation?.displayName||window.RMLI18n.t("index.text.da6bafbab43a"));if(show){synchronizeRmlPersonalSettingsControls();hardSynchronizeRmlEditorSettingsFromActiveEditor();}else{closeRmlEditorDashboardColorPicker();renderRmlBuilderProfilePresentation();}requestAnimationFrame(()=>updateAdaptiveUtilityDialog(elements.projectDialog));};open?.addEventListener("click",async()=>{const show=!elements.projectDialog?.classList.contains("builder-settings-workspace");if(show){try{await ensureLazyStyleBundle("project");}catch(error){console.error(window.RMLI18n.t("ui.literal.9419d0b7524c"),error);return;}}else closeRmlEditorDashboardColorPicker();setSettingsWorkspace(show);});inspectorBack?.addEventListener("click",()=>closeRmlEditorDashboardColorPicker());document.getElementById("builder-settings-node-scrollbars")?.addEventListener("change",event=>commitRmlPersonalSettings({nodeScrollbars:event.currentTarget.checked===true}));document.getElementById("builder-settings-node-text")?.addEventListener("input",event=>commitRmlPersonalSettings({nodeTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-ux-text")?.addEventListener("input",event=>commitRmlPersonalSettings({uxTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-reset")?.addEventListener("click",()=>{rmlPersonalSettings={...RML_PERSONAL_SETTINGS_DEFAULTS};rmlEditorPersonalSettings={appearance:{...RML_EDITOR_APPEARANCE_DEFAULTS},diagnosticSource:window.RMLI18n.t("index.text.b5e50a2e9087")};saveRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();for(const [key,value] of Object.entries(RML_EDITOR_APPEARANCE_DEFAULTS)){window.RMLCustomCSharpDetachedEditor?.setActiveAppearanceValue?.(key,value);}window.RMLCustomCSharpDetachedEditor?.setActiveDiagnosticSource?.(window.RMLI18n.t("index.text.b5e50a2e9087"));synchronizeRmlEditorDashboard();if(status)status.textContent=window.RMLI18n.t("{{i18n:js.presentation.0efcb476e33e}}");});const diagnosticSelect=document.getElementById("builder-settings-editor-diagnostic");diagnosticSelect?.addEventListener("change",event=>commitRmlEditorDiagnostic(event.currentTarget.value));synchronizeRmlEditorDiagnosticSelect(rmlEditorPersonalSettings.diagnosticSource);if(typeof MutationObserver==="function"){new MutationObserver(records=>{let changed=false;for(const record of records){for(const node of Array.from(record.addedNodes||[])){if(node?.tagName===window.RMLI18n.t("ui.literal.c1bbd9d8f7a0")){changed=true;node.addEventListener("load",scheduleRmlPersonalSettingsApply,{once:true});}else if(node?.tagName===window.RMLI18n.t("ui.literal.4afb184e1d11"))changed=true;}}if(changed)scheduleRmlPersonalSettingsApply();}).observe(document.head,{childList:true});} }
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    RML_BUILDER_PROFILE_REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await fetch(candidate.href, {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "image/*" },
+      signal: controller.signal
+    });
+    if (!response.ok) return null;
+    const contentType = String(
+      response.headers.get("content-type") ||
+      ""
+    ).split(";", 1)[0].trim().toLowerCase();
+    if (
+      !/^image\/(?:png|jpe?g|webp|gif|avif)$/.test(
+        contentType
+      )
+    ) {
+      console.error(
+        "[RML BUILDER INTERNAL FAILURE] The selected scanner avatar bridge returned a non-image response."
+      );
+      return null;
+    }
+    const advertisedLength = Number(
+      response.headers.get("content-length") || 0
+    );
+    if (
+      advertisedLength >
+      RML_BUILDER_PROFILE_AVATAR_MAX_BYTES
+    ) {
+      return null;
+    }
+    const blob = await response.blob();
+    if (
+      blob.size < 1 ||
+      blob.size >
+        RML_BUILDER_PROFILE_AVATAR_MAX_BYTES
+    ) {
+      return null;
+    }
+    const dataUrl = await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(
+        typeof reader.result === "string"
+          ? reader.result
+          : ""
+      );
+      reader.onerror = () => resolve("");
+      reader.onabort = () => resolve("");
+      reader.readAsDataURL(blob);
+    });
+    const normalized =
+      normalizeRmlBuilderProfileAvatarDataUrl(
+        dataUrl
+      );
+    if (!normalized) return null;
+    const decoded = await new Promise(resolve => {
+      const image = new Image();
+      image.decoding = "async";
+      image.onload = async () => {
+        try { await image.decode?.(); } catch {}
+        resolve(
+          Number(image.naturalWidth) > 0 &&
+          Number(image.naturalHeight) > 0
+        );
+      };
+      image.onerror = () => resolve(false);
+      image.src = normalized;
+    });
+    return decoded ? normalized : null;
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function synchronizeOneRmlBuilderProfile(
+  port,
+  revision
+) {
+  const profileUrl = new URL(
+    "/rml-scanner-profile",
+    window.location.origin
+  );
+  profileUrl.searchParams.set(
+    "port",
+    String(port)
+  );
+  const rawProfile =
+    await fetchRmlBuilderProfileJson(
+      profileUrl.href
+    );
+  if (
+    revision !==
+      rmlBuilderProfileRequestRevision ||
+    rawProfile ===
+      RML_BUILDER_PROFILE_FETCH_FAILED
+  ) {
+    return false;
+  }
+  if (rawProfile?.available === false) {
+    return false;
+  }
+  if (
+    Number(rawProfile?.sourceScannerPort) !==
+    port
+  ) {
+    console.error(
+      "[RML BUILDER INTERNAL FAILURE] Health selected a scanner profile, but the profile bridge returned a different scanner port.",
+      {
+        requestedPort: port,
+        response: rawProfile
+      }
+    );
+    return false;
+  }
+  const profile =
+    normalizeRmlBuilderProfile(rawProfile);
+  if (!profile) return false;
+
+  let avatarDataUrl = null;
+  if (profile.avatarUrl) {
+    avatarDataUrl =
+      await fetchRmlBuilderProfileAvatarDataUrl(
+        profile.avatarUrl,
+        port
+      );
+    if (
+      revision !==
+        rmlBuilderProfileRequestRevision ||
+      !avatarDataUrl
+    ) {
+      return false;
+    }
+  }
+  if (
+    revision !==
+    rmlBuilderProfileRequestRevision
+  ) {
+    return false;
+  }
+
+  rmlBuilderProfileScannerPort = port;
+  saveRmlBuilderProfilePresentation({
+    ...profile,
+    avatarDataUrl
+  });
+  renderRmlBuilderProfilePresentation();
+  return true;
+}
+
+function synchronizeRmlBuilderProfileFromScanner(scannerPort) {
+  const port = Number(scannerPort);
+  if (!Number.isInteger(port) || port < 42719 || port > 42725) {
+    return Promise.resolve(false);
+  }
+  rmlBuilderProfileRequestedPort = port;
+  rmlBuilderProfileRequestRevision += 1;
+  if (rmlBuilderProfileSyncPromise) {
+    return rmlBuilderProfileSyncPromise;
+  }
+
+  const pending = (async () => {
+    let applied = false;
+    while (rmlBuilderProfileRequestedPort) {
+      const requestedPort =
+        rmlBuilderProfileRequestedPort;
+      const requestedRevision =
+        rmlBuilderProfileRequestRevision;
+      rmlBuilderProfileRequestedPort = 0;
+      applied =
+        await synchronizeOneRmlBuilderProfile(
+          requestedPort,
+          requestedRevision
+        );
+    }
+    return applied;
+  })()
+    .catch(error => {
+      console.error(
+        "[RML BUILDER INTERNAL FAILURE] The selected scanner profile could not be applied.",
+        error
+      );
+      return false;
+    })
+    .finally(() => {
+      if (rmlBuilderProfileSyncPromise === pending) {
+        rmlBuilderProfileSyncPromise = null;
+      }
+    });
+
+  rmlBuilderProfileSyncPromise = pending;
+  return pending;
+}
+
+function installRmlBuilderProfileSynchronization() {
+  if (rmlBuilderProfileSyncInstalled) return;
+  rmlBuilderProfileSyncInstalled = true;
+
+  const refresh = event => {
+    const detail = event?.detail;
+    const port = Number(detail?.port);
+    if (
+      !Number.isInteger(port) ||
+      port < 42719 ||
+      port > 42725
+    ) {
+      return;
+    }
+    void synchronizeRmlBuilderProfileFromScanner(port);
+  };
+  document.addEventListener("rml-scanner:selected", refresh);
+  document.addEventListener("rml-scanner:unavailable", () => {
+    rmlBuilderProfileRequestedPort = 0;
+    rmlBuilderProfileRequestRevision += 1;
+    rmlBuilderProfileScannerPort = 0;
+  });
+  window.addEventListener("rml-language-changed", () => {
+    renderRmlBuilderProfilePresentation();
+  });
+  if (window.RMLScannerHealthSession) {
+    refresh({
+      detail:
+        window.RMLScannerHealthSession
+    });
+  }
+}
+
+function installRmlPersonalSettings() { loadRmlPersonalSettings();loadRmlBuilderProfilePresentation();renderRmlBuilderProfilePresentation();installRmlBuilderProfileSynchronization();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();const panel=document.getElementById("builder-settings-panel"),open=document.getElementById("builder-settings-open"),status=document.getElementById("builder-settings-status"),inspectorBack=document.getElementById("builder-settings-inspector-back");const setSettingsWorkspace=show=>{if(panel)panel.hidden=!show;open?.setAttribute("aria-expanded",String(show));elements.projectDialog?.classList.toggle("builder-settings-workspace",show);const title=document.getElementById("project-dialog-title"),kicker=elements.projectDialog?.querySelector(".export-dialog-header small");if(title)title.textContent=show?window.RMLI18n.t("index.text.6f4a8553e79d"):window.RMLI18n.t("js.presentation.83e22c2a18d3");if(kicker)kicker.textContent=show?window.RMLI18n.t("index.text.bed77e02fe9a"):(rmlBuilderProfilePresentation?.displayName||window.RMLI18n.t("index.text.da6bafbab43a"));if(show){synchronizeRmlPersonalSettingsControls();hardSynchronizeRmlEditorSettingsFromActiveEditor();}else{closeRmlEditorDashboardColorPicker();renderRmlBuilderProfilePresentation();}requestAnimationFrame(()=>updateAdaptiveUtilityDialog(elements.projectDialog));};open?.addEventListener("click",async()=>{const show=!elements.projectDialog?.classList.contains("builder-settings-workspace");if(show){try{await ensureLazyStyleBundle("project");}catch(error){console.error(window.RMLI18n.t("ui.literal.9419d0b7524c"),error);return;}}else closeRmlEditorDashboardColorPicker();setSettingsWorkspace(show);});inspectorBack?.addEventListener("click",()=>closeRmlEditorDashboardColorPicker());document.getElementById("builder-settings-node-scrollbars")?.addEventListener("change",event=>commitRmlPersonalSettings({nodeScrollbars:event.currentTarget.checked===true}));document.getElementById("builder-settings-node-text")?.addEventListener("input",event=>commitRmlPersonalSettings({nodeTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-ux-text")?.addEventListener("input",event=>commitRmlPersonalSettings({uxTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-reset")?.addEventListener("click",()=>{rmlPersonalSettings={...RML_PERSONAL_SETTINGS_DEFAULTS};rmlEditorPersonalSettings={appearance:{...RML_EDITOR_APPEARANCE_DEFAULTS},diagnosticSource:window.RMLI18n.t("index.text.b5e50a2e9087")};saveRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();for(const [key,value] of Object.entries(RML_EDITOR_APPEARANCE_DEFAULTS)){window.RMLCustomCSharpDetachedEditor?.setActiveAppearanceValue?.(key,value);}window.RMLCustomCSharpDetachedEditor?.setActiveDiagnosticSource?.(window.RMLI18n.t("index.text.b5e50a2e9087"));synchronizeRmlEditorDashboard();if(status)status.textContent=window.RMLI18n.t("{{i18n:js.presentation.0efcb476e33e}}");});const diagnosticSelect=document.getElementById("builder-settings-editor-diagnostic");diagnosticSelect?.addEventListener("change",event=>commitRmlEditorDiagnostic(event.currentTarget.value));synchronizeRmlEditorDiagnosticSelect(rmlEditorPersonalSettings.diagnosticSource);if(typeof MutationObserver==="function"){new MutationObserver(records=>{let changed=false;for(const record of records){for(const node of Array.from(record.addedNodes||[])){if(node?.tagName===window.RMLI18n.t("ui.literal.c1bbd9d8f7a0")){changed=true;node.addEventListener("load",scheduleRmlPersonalSettingsApply,{once:true});}else if(node?.tagName===window.RMLI18n.t("ui.literal.4afb184e1d11"))changed=true;}}if(changed)scheduleRmlPersonalSettingsApply();}).observe(document.head,{childList:true});} }
 
 let projectDialogOpenSequence = 0;
 
@@ -36367,9 +37136,24 @@ async function loadProjectJsonFile(
       setProjectLoadProgress(false);
       await paintBuilderUi();
 
-      await ensureLazyScriptBundle(
-        "runtime-core"
+      const compositeImportWorkSession =
+        beginBuilderWork({
+          kicker: "Project loading",
+          title: "Importing the Saved API Composite…",
+          message:
+            "The complete compatibility check and atomic library update are running.",
+          detail:
+            "The loading screen remains visible until the Saved Composite is stored or the import reports an error.",
+          progress: 32,
+          timeout: 120000
+        });
+      clearBuilderWorkDeadline(
+        compositeImportWorkSession
       );
+      try {
+        await ensureLazyScriptBundle(
+          "runtime-core"
+        );
 
       const host =
         window.RMLDynamicGraphHost;
@@ -36495,15 +37279,31 @@ async function loadProjectJsonFile(
               .filter(Boolean);
           return `${String(item?.compositeName || window.RMLI18n.t("ui.literal.8030a124d0bc"))}: '${String(item?.nodeName || item?.nodeId || window.RMLI18n.t("ui.literal.79bf95179598"))}' [${String(item?.operatorId || "unknown operator")}] at ${String(item?.path || "runtime-root")}/${String(item?.nodeId || "<unknown>")}${connections.length > 0 ? `; removed connections: ${connections.join(", ")}` : "; no connected wires were removed"}`;
         });
-      setProjectFileStatus(
+      const compositeImportStatusMessage =
         importSummary
           ? `Composite import completed: ${Number(importSummary.added || 0).toLocaleString(window.RMLI18n?.language || undefined)} new, ${Number(importSummary.updated || 0).toLocaleString(window.RMLI18n?.language || undefined)} updated, ${Number(importSummary.unchanged || 0).toLocaleString(window.RMLI18n?.language || undefined)} unchanged and ${Number(importSummary.discarded || 0).toLocaleString(window.RMLI18n?.language || undefined)} discarded.${omittedApiNodes > 0 ? ` ${omittedApiNodes.toLocaleString(window.RMLI18n?.language || undefined)} unavailable API node${omittedApiNodes === 1 ? " was" : "s were"} omitted with ${omittedApiConnections.toLocaleString(window.RMLI18n?.language || undefined)} dependent connection${omittedApiConnections === 1 ? "" : "s"}; the remaining graph was loaded.` : ""}${offlinePreservedApiNodes > 0 ? ` ${offlinePreservedApiNodes.toLocaleString(window.RMLI18n?.language || undefined)} API node${offlinePreservedApiNodes === 1 ? " was" : "s were"} preserved from complete stored portable contracts because neither cache nor Live could be verified.` : ""}${replacedInstances > 0 ? ` ${replacedInstances.toLocaleString(window.RMLI18n?.language || undefined)} placed instance${replacedInstances === 1 ? " was" : "s were"} replaced.${linkedByName > 0 ? ` ${linkedByName.toLocaleString(window.RMLI18n?.language || undefined)} matched by exact normalized name and received the imported fingerprint.` : ""}` : declinedReplacements > 0 ? ` The Library import remains stored; ${declinedReplacements.toLocaleString(window.RMLI18n?.language || undefined)} optional replacement${declinedReplacements === 1 ? " was" : "s were"} declined and the open project was not changed.` : ` ${window.RMLI18n.t("ui.literal.4a44cc28eabb")}`}${disconnectedWires > 0 ? ` ${disconnectedWires.toLocaleString(window.RMLI18n?.language || undefined)} obsolete outer wire${disconnectedWires === 1 ? " was" : "s were"} removed after confirmation and must be reconnected where still needed.` : ""}${replacementErrors > 0 ? ` ${replacementErrors.toLocaleString(window.RMLI18n?.language || undefined)} graph replacement${replacementErrors === 1 ? " failed" : "s failed"} atomically; the Library import remains stored.` : ""}`
-          : `Imported ${Number(imported?.length || 0).toLocaleString(window.RMLI18n?.language || undefined)} Saved API Composite${imported?.length === 1 ? "" : "s"}. The open project was not changed.`,
+          : `Imported ${Number(imported?.length || 0).toLocaleString(window.RMLI18n?.language || undefined)} Saved API Composite${imported?.length === 1 ? "" : "s"}. The open project was not changed.`;
+      const compositeImportStatusTone =
         replacementErrors > 0 ||
         omittedApiNodes > 0 ||
         offlinePreservedApiNodes > 0
           ? "warning"
-          : "success"
+          : "success";
+      updateBuilderWork(
+        compositeImportWorkSession,
+        {
+          title:
+            "Saved API Composite import complete",
+          message:
+            "The compatibility result and library transaction have both completed.",
+          detail:
+            "The completed result is now being shown.",
+          progress: 100
+        }
+      );
+      await paintBuilderUi();
+      finishBuilderWork(
+        compositeImportWorkSession
       );
       if (omittedApiNodes > 0) {
         await showBuilderNotice({
@@ -36538,7 +37338,16 @@ async function loadProjectJsonFile(
       }
 
       await openProjectDialog();
+      setProjectFileStatus(
+        compositeImportStatusMessage,
+        compositeImportStatusTone
+      );
       return;
+      } finally {
+        finishBuilderWork(
+          compositeImportWorkSession
+        );
+      }
     }
 
     assertProjectDocumentEnvelope(
@@ -36610,7 +37419,10 @@ async function loadProjectJsonFile(
         await ensureProjectRuntimePrerequisites(
           projectSource,
           workSession,
-          { catalogOnly: true }
+          {
+            catalogOnly: true,
+            allowAutomaticLiveRetry: true
+          }
         );
 
       updateBuilderWork(
@@ -36670,13 +37482,10 @@ async function loadProjectJsonFile(
         Array.isArray(prerequisites?.importValidationDiagnostics)
           ? prerequisites.importValidationDiagnostics
           : [];
+      void importWarnings;
       setProjectFileStatus(
-        importResult?.retainedAfterImportError === true || importWarnings.length > 0
-          ? window.RMLI18n.t("import.loaded_with_runtime_errors")
-          : `Loaded ${file.name} successfully.`,
-        importResult?.retainedAfterImportError === true || importWarnings.length > 0
-          ? "warning"
-          : "success"
+        `Loaded ${file.name} successfully.`,
+        "success"
       );
     } catch (error) {
       finishBuilderWork(
@@ -36697,24 +37506,24 @@ async function loadProjectJsonFile(
         "RML_PROJECT_IMPORT_CANCELLED";
     const syntaxError = error instanceof SyntaxError;
     if (!importCancelled) {
-      console.error(
-        syntaxError
-          ? "[RML IMPORT JSON SYNTAX ERROR]"
-          : "[RML IMPORT INTERNAL ERROR — JSON SYNTAX WAS ACCEPTED]",
-        error
-      );
+      console.error(error);
     }
-    if (!elements.projectDialog.open) openProjectDialog();
-    setProjectFileStatus(
-      importCancelled
-        ? String(error?.message || window.RMLI18n.t("ui.literal.8380b64d7286"))
-        : syntaxError
-          ? window.RMLI18n.format("import.syntax_error", {
-              message: error instanceof Error ? error.message : String(error)
-            })
-          : window.RMLI18n.t("import.internal_before_apply"),
-      importCancelled ? "" : "error"
-    );
+    if (syntaxError) {
+      if (!elements.projectDialog.open) {
+        openProjectDialog();
+      }
+      setProjectFileStatus(
+        window.RMLI18n.format("import.syntax_error", {
+          message:
+            error instanceof Error
+              ? error.message
+              : String(error)
+        }),
+        "error"
+      );
+    } else {
+      setProjectFileStatus("", "");
+    }
   } finally {
     if (
       loadSession ===
@@ -41677,7 +42486,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle"
+    "../../templates/help_template.html?v=1.21.76-custom-csharp-catalog-provenance"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -48355,7 +49164,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -48373,7 +49182,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -49208,7 +50017,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-copy"></use></svg>
   `;
 }
 

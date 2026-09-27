@@ -2,7 +2,7 @@
   "use strict";
 
   const NODE_GRAPH_RELEASE_ID =
-    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
+    "1.21.76-custom-csharp-catalog-provenance";
 
   if (
     window.RMLTypedNodeGraphGenerator?.moduleId ===
@@ -24,8 +24,8 @@
   const workerFiles = [
     "../core/code_templates.js?v=797-readable-visual-functions-node-index",
     "../core/guidance.js?v=793",
-    "node_graph_registry.js?v=1-physical-modules-v750-offline-core-types",
-    "node_graph_codegen.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle"
+    "node_graph_registry.js?v=1-physical-modules-v752-catalog-cache-equivalent",
+    "node_graph_codegen.js?v=1.21.76-custom-csharp-catalog-provenance"
   ];
 
   if (
@@ -82,7 +82,7 @@
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL(
-      "../../styles/features/styles.runtime-graph.css?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+      "../../styles/features/styles.runtime-graph.css?v=1.21.76-custom-csharp-catalog-provenance",
       scriptUrl
     ).href;
     link.dataset.rmlStyleBundle = "runtime-graph";
@@ -103,19 +103,19 @@
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle"
+            "../loaders/style_loader.js?v=1.21.76-custom-csharp-catalog-provenance"
           ]
     ),
-    "node_graph_registry.js?v=1-physical-modules-v750-offline-core-types",
-    "node_graph_codegen.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
-    "runtime_bridge.js?v=1000-live-loss-status",
-    "../workers/saved_api_composite_compare_worker.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
-    "node_graph_composites.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
-    "node_graph_custom_csharp.js?v=1.21.24-contextual-csharp-api",
+    "node_graph_registry.js?v=1-physical-modules-v752-catalog-cache-equivalent",
+    "node_graph_codegen.js?v=1.21.76-custom-csharp-catalog-provenance",
+    "runtime_bridge.js?v=1.21.76-custom-csharp-catalog-provenance&status-runtime=4",
+    "../workers/saved_api_composite_compare_worker.js?v=1.21.76-custom-csharp-catalog-provenance",
+    "node_graph_composites.js?v=1.21.76-custom-csharp-catalog-provenance",
+    "node_graph_custom_csharp.js?v=1.21.76-custom-csharp-catalog-provenance",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=1.21.24-contextual-csharp-api",
-    "graph_gpu_renderer.js?v=807-webgpu-texture-limits",
-    "node_graph_bootstrap.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle"
+    "node_graph_view.js?v=1.21.76-custom-csharp-catalog-provenance&status-readiness=4",
+    "graph_gpu_renderer.js?v=1.21.76-custom-csharp-catalog-provenance",
+    "node_graph_bootstrap.js?v=1.21.76-custom-csharp-catalog-provenance"
   ];
 
   const ready = files.reduce(

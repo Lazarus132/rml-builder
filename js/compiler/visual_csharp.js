@@ -2623,7 +2623,6 @@ internal static class EarlyHarmonyPatches
     ).filter(([, definition]) =>
       definition?.catalogGenerated === true &&
       definition?.customCSharpCatalogNode === true &&
-      definition?.apiVerification?.catalogSource === "scanner" &&
       String(definition?.apiVerification?.catalogFingerprint || "").trim()
     );
     const catalogTypeAlias = new Map([
@@ -4354,54 +4353,9 @@ internal static class EarlyHarmonyPatches
       return { ...prepared, nodes: [], connections: [] };
     }
     const { mainFileNode, importedSyntaxNodeCount } = prepared;
-    if (state.nodes.some(node => node?.id === mainFileNode.id)) {
-      return { ok: false, diagnostics: [`A node with id '${mainFileNode.id}' already exists in ${target?.label || "the active graph"}.`], nodes: [], connections: [] };
-    }
-
-    state.customCSharpFiles = state.customCSharpFiles && typeof state.customCSharpFiles === "object"
-      ? state.customCSharpFiles
-      : {};
-    const importedFileName = String(mainFileNode.parameters?.fileName || window.RMLI18n.t("ui.literal.ee6d86d67877")).trim().toLowerCase();
-    const importedProjectId = String(mainFileNode.parameters?.projectId || "main").trim().toLowerCase() || "main";
-    const matchingFiles = state.nodes.filter(node =>
-      node?.operatorId === "csharp.file" &&
-      String(node.parameters?.fileName || "").trim().toLowerCase() === importedFileName &&
-      (String(node.parameters?.projectId || "main").trim().toLowerCase() || "main") === importedProjectId
-    );
-    const runtimeFileNode = matchingFiles[0] || mainFileNode;
-    const duplicateIds = new Set(matchingFiles.slice(1).map(node => node.id));
-    if (duplicateIds.size > 0) {
-      state.nodes = state.nodes.filter(node => !duplicateIds.has(node.id));
-      state.connections = state.connections.filter(connection =>
-        !duplicateIds.has(connection.fromNode) && !duplicateIds.has(connection.toNode)
-      );
-      for (const duplicateId of duplicateIds) delete state.customCSharpFiles[duplicateId];
-    }
-    const viewport = state.viewport && typeof state.viewport === "object"
-      ? state.viewport
-      : { x: 56, y: 54, scale: 0.9 };
-    const scale = Math.max(0.1, Number(viewport.scale) || 0.9);
-    if (matchingFiles.length === 0) {
-      runtimeFileNode.x = (600 - (Number(viewport.x) || 0)) / scale - 160;
-      runtimeFileNode.y = (380 - (Number(viewport.y) || 0)) / scale - 100;
-      state.nodes.push(runtimeFileNode);
-    }
-    runtimeFileNode.parameters = {
-      ...(runtimeFileNode.parameters || {}),
-      ...(mainFileNode.parameters || {}),
-      source: String(originalSource ?? fragment.normalizedSource ?? "")
-    };
-    prepared.customGraph.sourceHash = stableHash(
-      String(originalSource ?? fragment.normalizedSource ?? "")
-    );
-    prepared.customGraph.importedSource = true;
-    state.customCSharpFiles[runtimeFileNode.id] = prepared.customGraph;
-    state.selectedNodeId = runtimeFileNode.id;
-    state.selectedConnectionId = null;
-    state.selectedWirePoint = null;
-    state.revision = Math.max(0, Number(state.revision) || 0) + 1;
-    state.nextSequence = Math.max(Number(state.nextSequence) || 1, state.nodes.length + state.connections.length + 1);
-    const activation = host.ensureActiveMode?.({ activateIfNeeded: true });
+    const activation = host.ensureActiveMode?.({
+      activateIfNeeded: true
+    });
     if (activation?.ok !== true) {
       return {
         ok: false,
@@ -4410,13 +4364,150 @@ internal static class EarlyHarmonyPatches
         connections: []
       };
     }
-    host.commit?.({
-      documentChanged:
-        activation?.documentMutationAccepted !== true,
-      mutationClass: "topology",
-      refreshGeneratedOutput: true,
-      refreshCompositeActions: true
-    });
+    const currentNodes = Array.isArray(state.nodes)
+      ? state.nodes
+      : [];
+    const currentConnections = Array.isArray(
+      state.connections
+    )
+      ? state.connections
+      : [];
+    const currentCustomCSharpFiles =
+      state.customCSharpFiles &&
+      typeof state.customCSharpFiles === "object" &&
+      !Array.isArray(state.customCSharpFiles)
+        ? state.customCSharpFiles
+        : {};
+    const importedFileName = String(mainFileNode.parameters?.fileName || window.RMLI18n.t("ui.literal.ee6d86d67877")).trim().toLowerCase();
+    const importedProjectId = String(mainFileNode.parameters?.projectId || "main").trim().toLowerCase() || "main";
+    const matchingFiles = currentNodes.filter(node =>
+      node?.operatorId === "csharp.file" &&
+      String(node.parameters?.fileName || "").trim().toLowerCase() === importedFileName &&
+      (String(node.parameters?.projectId || "main").trim().toLowerCase() || "main") === importedProjectId
+    );
+    const collidingNode = currentNodes.find(
+      node => node?.id === mainFileNode.id
+    );
+    if (
+      collidingNode &&
+      !matchingFiles.includes(collidingNode)
+    ) {
+      return { ok: false, diagnostics: [`A node with id '${mainFileNode.id}' already exists in ${target?.label || "the active graph"}.`], nodes: [], connections: [] };
+    }
+
+    const runtimeFileNode = {
+      ...(matchingFiles[0] || mainFileNode),
+      parameters: {
+        ...(matchingFiles[0]?.parameters || {}),
+        ...(mainFileNode.parameters || {}),
+        source: String(
+          originalSource ??
+          fragment.normalizedSource ??
+          ""
+        )
+      }
+    };
+    const duplicateIds = new Set(matchingFiles.slice(1).map(node => node.id));
+    const viewport = state.viewport && typeof state.viewport === "object"
+      ? state.viewport
+      : { x: 56, y: 54, scale: 0.9 };
+    const scale = Math.max(0.1, Number(viewport.scale) || 0.9);
+    if (matchingFiles.length === 0) {
+      runtimeFileNode.x = (600 - (Number(viewport.x) || 0)) / scale - 160;
+      runtimeFileNode.y = (380 - (Number(viewport.y) || 0)) / scale - 100;
+    }
+    prepared.customGraph.sourceHash = stableHash(
+      String(originalSource ?? fragment.normalizedSource ?? "")
+    );
+    prepared.customGraph.importedSource = true;
+
+    const nextNodes = currentNodes
+      .filter(node => !duplicateIds.has(node.id))
+      .map(node =>
+        node === matchingFiles[0]
+          ? runtimeFileNode
+          : node
+      );
+    if (matchingFiles.length === 0) {
+      nextNodes.push(runtimeFileNode);
+    }
+    const nextConnections = currentConnections.filter(
+      connection =>
+        !duplicateIds.has(connection.fromNode) &&
+        !duplicateIds.has(connection.toNode)
+    );
+    const nextCustomCSharpFiles = {
+      ...currentCustomCSharpFiles
+    };
+    for (const duplicateId of duplicateIds) {
+      delete nextCustomCSharpFiles[duplicateId];
+    }
+    nextCustomCSharpFiles[runtimeFileNode.id] =
+      prepared.customGraph;
+
+    const previous = {
+      nodes: state.nodes,
+      connections: state.connections,
+      customCSharpFiles: state.customCSharpFiles,
+      customCSharpFilesPresent:
+        Object.hasOwn(state, "customCSharpFiles"),
+      selectedNodeId: state.selectedNodeId,
+      selectedConnectionId:
+        state.selectedConnectionId,
+      selectedWirePoint: state.selectedWirePoint,
+      revision: state.revision,
+      nextSequence: state.nextSequence
+    };
+    try {
+      state.nodes = nextNodes;
+      state.connections = nextConnections;
+      state.customCSharpFiles =
+        nextCustomCSharpFiles;
+      state.selectedNodeId = runtimeFileNode.id;
+      state.selectedConnectionId = null;
+      state.selectedWirePoint = null;
+      state.revision =
+        Math.max(0, Number(state.revision) || 0) + 1;
+      state.nextSequence = Math.max(
+        Number(state.nextSequence) || 1,
+        nextNodes.length + nextConnections.length + 1
+      );
+      host.commit?.({
+        documentChanged:
+          activation?.documentMutationAccepted !== true,
+        mutationClass: "topology",
+        refreshGeneratedOutput: true,
+        refreshCompositeActions: true
+      });
+    } catch (error) {
+      state.nodes = previous.nodes;
+      state.connections = previous.connections;
+      if (previous.customCSharpFilesPresent) {
+        state.customCSharpFiles =
+          previous.customCSharpFiles;
+      } else {
+        delete state.customCSharpFiles;
+      }
+      state.selectedNodeId = previous.selectedNodeId;
+      state.selectedConnectionId =
+        previous.selectedConnectionId;
+      state.selectedWirePoint =
+        previous.selectedWirePoint;
+      state.revision = previous.revision;
+      state.nextSequence = previous.nextSequence;
+      console.error(
+        "Custom C# import commit failed; the previous graph was restored.",
+        error
+      );
+      return {
+        ok: false,
+        diagnostics: [
+          "The Custom C# import could not be committed. The previous graph was restored unchanged."
+        ],
+        nodes: [],
+        connections: []
+      };
+    }
     return {
       ...fragment,
       nodes: [runtimeFileNode],
@@ -4443,22 +4534,11 @@ internal static class EarlyHarmonyPatches
 
     const expertPanel = document.createElement("details");
     expertPanel.className = "project-csharp-import-expert";
+    expertPanel.open = true;
 
     const refreshExpertPanelVisibility = () => {
-      const host = window.RMLDynamicGraphHost;
-      const editorState = host?.getCustomCSharpEditorState?.();
-      if (editorState?.active === true) {
-        expertPanel.hidden = true;
-        expertPanel.open = false;
-        return;
-      }
-      const rootState = host?.getRootState?.();
-      expertPanel.hidden = !(
-        rootState?.showAdvancedNodes === true
-      );
-      if (expertPanel.hidden) {
-        expertPanel.open = false;
-      }
+      expertPanel.hidden = false;
+      expertPanel.open = true;
       const target =
         resolveCSharpImportTarget();
       expertPanel.dataset
@@ -4470,6 +4550,7 @@ internal static class EarlyHarmonyPatches
 
     const summary = document.createElement("summary");
     summary.textContent = window.RMLI18n.t("{{i18n:ui.js.a1d4d48f13ed}}");
+    summary.hidden = true;
     expertPanel.appendChild(summary);
 
     const body = document.createElement("div");
@@ -4492,10 +4573,12 @@ internal static class EarlyHarmonyPatches
     const acknowledgement = document.createElement("input");
     acknowledgement.type = "checkbox";
     acknowledgement.id = "project-import-csharp-acknowledgement";
+    acknowledgement.checked = true;
     const acknowledgementText = document.createElement("span");
     acknowledgementText.textContent =
       window.RMLI18n.t("{{i18n:ui.js.006a07e230b3}}");
     acknowledgementLabel.append(acknowledgement, acknowledgementText);
+    acknowledgementLabel.hidden = true;
     body.appendChild(acknowledgementLabel);
 
     const button = document.createElement("button");
@@ -4526,7 +4609,7 @@ internal static class EarlyHarmonyPatches
             reason;
         }
       };
-    setImportButtonAvailability(false);
+    setImportButtonAvailability(true);
 
     const input = document.createElement("input");
     input.type = "file";
@@ -4606,26 +4689,23 @@ internal static class EarlyHarmonyPatches
       );
       if (!acknowledgement.checked) clearPending();
     });
-    button.addEventListener("click", () => {
-      if (!acknowledgement.checked) {
-        localStatus.textContent =
-          window.RMLI18n.t("{{i18n:ui.js.b1b2e4f4b658}}");
-        localStatus.classList.toggle(
-          "success",
-          false
-        );
-        localStatus.classList.toggle(
-          "error",
-          true
-        );
-        return;
-      }
-      input.click();
-    });
+    button.addEventListener("click", () => input.click());
     input.addEventListener("change", async () => {
       const file = input.files?.[0];
       if (!file) return;
+      const workSession =
+        window.RMLBuilderWork?.begin?.({
+          kicker: "Custom C# import",
+          title: `Importing ${file.name}…`,
+          message:
+            "Roslyn is validating the complete C# source.",
+          detail:
+            "The editable syntax graph is built automatically after validation.",
+          progress: 18,
+          timeout: 120000
+        }) || 0;
       try {
+        await window.RMLBuilderWork?.paint?.();
         const target =
           resolveCSharpImportTarget();
         if (!target.ok) {
@@ -4641,7 +4721,14 @@ internal static class EarlyHarmonyPatches
         localStatus.classList.remove("success", "error");
         const parseResult = await window.RMLCSharp14Roslyn.parse(source);
         if (parseResult.ok !== true) {
-          throw new Error(formatRoslynDiagnostics(parseResult.diagnostics).join("\n"));
+          const syntaxError = new SyntaxError(
+            formatRoslynDiagnostics(
+              parseResult.diagnostics
+            ).join("\n")
+          );
+          syntaxError.code =
+            "RML_CUSTOM_CSHARP_SYNTAX_INVALID";
+          throw syntaxError;
         }
         const syntaxItemCount = countRoslynSyntaxItems(parseResult.root);
         pendingImport = {
@@ -4651,7 +4738,8 @@ internal static class EarlyHarmonyPatches
           syntaxItemCount,
           targetKey: target.key,
           targetKind: target.kind,
-          targetLabel: target.label
+          targetLabel: target.label,
+          workSession
         };
         pendingText.textContent =
           window.RMLI18n.format(
@@ -4667,13 +4755,47 @@ internal static class EarlyHarmonyPatches
             }
           );
         pending.hidden = false;
-        localStatus.textContent = window.RMLI18n.t("{{i18n:ui.js.9e7c52fb16ac}}");
+        localStatus.textContent = "";
         localStatus.classList.remove("success", "error");
+        window.RMLBuilderWork?.update?.(
+          workSession,
+          {
+            title: `Building ${file.name}…`,
+            message:
+              "The complete Roslyn AST is being converted into editable nodes.",
+            detail:
+              `${syntaxItemCount.toLocaleString(window.RMLI18n?.language || undefined)} syntax items were validated.`,
+            progress: 56
+          }
+        );
+        commit.click();
       } catch (error) {
         clearPending();
-        localStatus.textContent = error instanceof Error ? error.message : String(error);
-        localStatus.classList.toggle("success", false);
-        localStatus.classList.toggle("error", true);
+        if (
+          error instanceof SyntaxError ||
+          error?.code ===
+            "RML_CUSTOM_CSHARP_SYNTAX_INVALID"
+        ) {
+          localStatus.textContent =
+            error instanceof Error
+              ? error.message
+              : String(error);
+          localStatus.classList.toggle("success", false);
+          localStatus.classList.toggle("error", true);
+        } else {
+          console.error(
+            "Custom C# import preparation failed.",
+            error
+          );
+          localStatus.textContent = "";
+          localStatus.classList.remove(
+            "success",
+            "error"
+          );
+        }
+        window.RMLBuilderWork?.finish?.(
+          workSession
+        );
       } finally {
         input.value = "";
       }
@@ -4687,6 +4809,8 @@ internal static class EarlyHarmonyPatches
 
     commit.addEventListener("click", async () => {
       if (!pendingImport || !acknowledgement.checked) return;
+      const workSession =
+        pendingImport.workSession || 0;
       try {
         const result = await importRoslynIntoCurrentGraph(pendingImport.source, pendingImport.parseResult, {
           fileName: pendingImport.fileName,
@@ -4697,8 +4821,8 @@ internal static class EarlyHarmonyPatches
         if (!result.ok) throw new Error(result.diagnostics.join("\n"));
         const importedFileName = pendingImport.fileName;
         clearPending();
-        acknowledgement.checked = false;
-        setImportButtonAvailability(false);
+        acknowledgement.checked = true;
+        setImportButtonAvailability(true);
         const duplicateText =
           result.removedDuplicateFileCount
             ? window.RMLI18n.format(
@@ -4740,10 +4864,30 @@ internal static class EarlyHarmonyPatches
           );
         localStatus.classList.toggle("success", true);
         localStatus.classList.toggle("error", false);
+        window.RMLBuilderWork?.update?.(
+          workSession,
+          {
+            title: `Imported ${importedFileName}`,
+            message:
+              "The complete editable Custom C# graph is ready.",
+            detail:
+              `${result.importedSyntaxNodeCount.toLocaleString(window.RMLI18n?.language || undefined)} nodes were constructed automatically.`,
+            progress: 100
+          }
+        );
+        await window.RMLBuilderWork?.paint?.();
       } catch (error) {
-        localStatus.textContent = error instanceof Error ? error.message : String(error);
-        localStatus.classList.toggle("success", false);
-        localStatus.classList.toggle("error", true);
+        console.error(
+          "Custom C# import failed after syntax validation; the previous graph was preserved.",
+          error
+        );
+        clearPending();
+        localStatus.textContent = "";
+        localStatus.classList.remove("success", "error");
+      } finally {
+        window.RMLBuilderWork?.finish?.(
+          workSession
+        );
       }
     });
 

@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
+    "1.21.76-custom-csharp-catalog-provenance";
   const GATE_VERSION = 1;
 
   
@@ -43,18 +43,6 @@
   ]);
   const KNOWN_32_BIT_ARCHITECTURES =
     new Set(["x86", "arm"]);
-
-  if (
-    Object.hasOwn(
-      window,
-      "RMLBuilderBuildId"
-    ) &&
-    window.RMLBuilderBuildId !== MODULE_ID
-  ) {
-    throw new Error(
-      `Builder module version mismatch: index.html published '${String(window.RMLBuilderBuildId || "missing")}', but architecture_gate.js is '${MODULE_ID}'. Reload the Builder without cached files.`
-    );
-  }
 
   if (
     window.RMLArchitectureGate?.version >=

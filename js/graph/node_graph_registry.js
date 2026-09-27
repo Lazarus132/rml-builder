@@ -845,7 +845,9 @@ function apiCompositeProxyPort(
       internalNodeId:
         String(boundary?.internalNodeId || ""),
       internalPortId:
-        String(boundary?.internalPortId || "")
+        String(boundary?.internalPortId || ""),
+      optional:
+        boundary?.optional === true
     };
 
     return type
@@ -1818,12 +1820,6 @@ function registerGraphNode(
           `Catalog API node '${id}' was not registered because its verification contract is missing or invalid.`
         );
         return false;
-      }
-
-      if (
-        contract.catalogSource !== "scanner"
-      ) {
-        definition.catalogVerificationUnavailable = true;
       }
     }
 
