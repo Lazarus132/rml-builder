@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.21.85-preview-open-transition";
+  "1.21.86-reflection-numeric-parity";
 
 self.window = self;
 
@@ -777,10 +777,10 @@ async function ensureRuntime(
       "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=1.21.85-preview-open-transition"
+      "../compiler/visual_csharp.js?v=1.21.86-reflection-numeric-parity"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.85-preview-open-transition"
+      "../catalog/api_nodes.js?v=1.21.86-reflection-numeric-parity"
     );
 
     if (
@@ -805,7 +805,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.21.85-preview-open-transition"
+      "../graph/node_graph_codegen.js?v=1.21.86-reflection-numeric-parity"
     );
 
     if (

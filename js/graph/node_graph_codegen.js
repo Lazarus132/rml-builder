@@ -8633,7 +8633,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.85-preview-open-transition",
+        "1.21.86-reflection-numeric-parity",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8666,7 +8666,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.85-preview-open-transition" &&
+        "1.21.86-reflection-numeric-parity" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -11662,6 +11662,34 @@ function graphCsStaticFieldDeclaration(
         : ` = ${defaultCode}`;
 
     return `${indent}private static ${csType} ${fieldName}${initializer};`;
+  }
+
+function graphCsNumberLiteralType(node, resolvedType) {
+    const type = canonicalGraphType(resolvedType || "");
+    if (type && type !== "object") {
+      return type;
+    }
+
+    const configured = canonicalGraphType(
+      node?.parameters?.valueType || ""
+    );
+    if (configured && configured !== "auto" && configured !== "object") {
+      return configured;
+    }
+
+    const raw = node?.parameters?.value ?? "0";
+    const preferred = [
+      "int", "long", "uint", "ulong",
+      "float", "double", "decimal",
+      ...SCALAR_NUMERIC_TYPES
+    ];
+    for (const candidate of [...new Set(preferred)]) {
+      if (validateNumericValue(raw, candidate, { coerce: false }).valid) {
+        return candidate;
+      }
+    }
+
+    return "float";
   }
 
 function graphCsNumberLiteral(
@@ -15683,7 +15711,7 @@ function buildTypedNodeGraphCSharpContribution(
           case "constant.number":
             code = graphCsNumberLiteral(
               node.parameters?.value,
-              type
+              graphCsNumberLiteralType(node, type)
             );
             break;
 
@@ -18415,7 +18443,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.85-preview-open-transition",
+          "1.21.86-reflection-numeric-parity",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

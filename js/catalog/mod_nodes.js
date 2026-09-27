@@ -4376,7 +4376,12 @@ failureSource]);
       port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
       port("target", window.RMLI18n.t("ui.auto.ba52d97729b9"), "object"),
       port("name", window.RMLI18n.t("ui.auto.a2f0764fec62"), "string"),
-      port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "object")
+      genericPort(
+        "value",
+        window.RMLI18n.t("ui.auto.3b53ce63a0cc"),
+        "T",
+        "anyValue"
+      )
     ],
     outputs: [
       port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),

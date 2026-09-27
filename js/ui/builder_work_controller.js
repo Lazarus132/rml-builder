@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.85-preview-open-transition";
+    "1.21.86-reflection-numeric-parity";
   let installedController = null;
 
   if (

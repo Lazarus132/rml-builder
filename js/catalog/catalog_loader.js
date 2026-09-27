@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.85-preview-open-transition";
+    "1.21.86-reflection-numeric-parity";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -148,11 +148,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.21.85-preview-open-transition",
+    "../compiler/visual_csharp.js?v=1.21.86-reflection-numeric-parity",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.85-preview-open-transition",
+    "api_nodes.js?v=1.21.86-reflection-numeric-parity",
     scriptUrl
   ).href;
 

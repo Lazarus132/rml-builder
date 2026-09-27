@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.85-preview-open-transition";
+  "1.21.86-reflection-numeric-parity";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];
