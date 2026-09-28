@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.22.4-core-clean-ux-timing";
+    "1.22.5-dead-control-flow-cleanup";
   let installedController = null;
 
   if (

@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.22.4-core-clean-ux-timing";
+  "1.22.5-dead-control-flow-cleanup";
 
 self.window = self;
 
@@ -777,10 +777,10 @@ async function ensureRuntime(
       "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=1.22.4-core-clean-ux-timing"
+      "../compiler/visual_csharp.js?v=1.22.5-dead-control-flow-cleanup"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.22.4-core-clean-ux-timing"
+      "../catalog/api_nodes.js?v=1.22.5-dead-control-flow-cleanup"
     );
 
     if (
@@ -805,7 +805,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.22.4-core-clean-ux-timing"
+      "../graph/node_graph_codegen.js?v=1.22.5-dead-control-flow-cleanup"
     );
 
     if (

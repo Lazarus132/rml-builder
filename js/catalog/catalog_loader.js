@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.22.4-core-clean-ux-timing";
+    "1.22.5-dead-control-flow-cleanup";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -140,11 +140,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.22.4-core-clean-ux-timing",
+    "../compiler/visual_csharp.js?v=1.22.5-dead-control-flow-cleanup",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.22.4-core-clean-ux-timing",
+    "api_nodes.js?v=1.22.5-dead-control-flow-cleanup",
     scriptUrl
   ).href;
 
@@ -1720,10 +1720,6 @@
         callback(value);
       };
       const onAbort = () => {
-        // The underlying promise may reject after its AbortSignal has fired.
-        // That rejection is an expected consequence of lifecycle cancellation,
-        // not an internal Builder failure. Observe it to prevent an unhandled
-        // rejection without producing a false failure report.
         pending.catch(() => {});
         finish(
           reject,
@@ -6433,8 +6429,6 @@
           try {
             const cancellation =
               reader?.cancel?.();
-            // reader.cancel() is best-effort after abort. Browsers are allowed
-            // to reject it when the stream has already been torn down.
             Promise.resolve(cancellation).catch(() => {});
           } catch {}
         }
@@ -12499,9 +12493,6 @@
           detail:
             window.RMLI18n.t("ui.auto.112240abb0c0"),
           progress: 1,
-          // Scanner/catalog work is progress-driven and may legitimately run
-          // for an arbitrary amount of time. A zero timeout explicitly disables
-          // the Builder Work watchdog; lifecycle cancellation remains available.
         }) || 0;
     }
     return scannerCheckWorkSession;
@@ -13575,10 +13566,6 @@
           );
         }
         if (scannerCheckGeneration === sessionKey) {
-          // Terminal-state invariant: a finished scanner/catalog operation may
-          // never leave the public UI in a transient checking/updating state.
-          // This guard is intentionally independent of the normal success and
-          // error branches so future exceptions cannot create a zombie state.
           const terminalCatalog =
             statusCatalog() ||
             cachedCatalogStatus ||

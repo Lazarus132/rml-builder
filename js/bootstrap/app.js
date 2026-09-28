@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.22.4-core-clean-ux-timing";
+  "1.22.5-dead-control-flow-cleanup";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 let alwaysClickableButtonFeedbackOwner = null;
@@ -346,7 +346,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -933,8 +933,6 @@ let typedNodeGraphModulesTrackingStarted = false;
 
 let generatedOutlineArtifactKey = "";
 let generatedGraphArtifactKey = "";
-// Global generated-file selection. The active graph/composite view must never
-// restrict which generated artifact can be selected or copied.
 let generatedSelectedArtifactKey = "";
 let generatedArtifactSelectionLock = null;
 let generatedOutputValidationSequence = 0;
@@ -986,8 +984,6 @@ let exportReadiness = Object.freeze({
 });
 let validatedGeneratedPublication = null;
 let validatedSemanticExportPublication = null;
-// Latest complete generated artifact catalog already built for the visible preview.
-// Copy must consume this snapshot directly and must never start export/preflight/codegen.
 let generatedArtifactPreviewSnapshot = null;
 
 function commitValidatedGeneratedPublication({
@@ -1268,10 +1264,6 @@ function applyPrimaryExportAvailability(synchronousDiagnostics = getDiagnostics(
           diagnostic
         )
       );
-  // Generated-code Copy and opening the Export dialog are presentation actions.
-  // They must never wait for export preflight/semantic work.  Only an actual
-  // blocking project diagnostic may disable the Export entry point; delivery
-  // controls inside the already-open dialog carry the readiness state.
   setExportControlAvailability(
     elements.copyCodeBottom,
     !blocked
@@ -1910,10 +1902,6 @@ function requestExportPreflight({
 } = {}) {
   const semanticRequired = requireSemantic === true;
 
-  // Final ZIP/Build actions must reuse an already validated semantic build when
-  // neither generated sources nor compiler references changed. This fast path
-  // deliberately runs before creating exportPreflightRequest, so opening or
-  // downloading an unchanged package does not flash the preflight indicator.
   if (semanticRequired && !exportPreflightRequest) {
     const cached = currentValidatedGeneratedPublication();
     const semantic = validatedSemanticExportPublication;
@@ -1953,11 +1941,6 @@ function requestExportPreflight({
     }
   }
 
-  // A validated generated publication is already keyed to the semantic project
-  // inputs (graph/config/catalog/path). Opening Export must not regenerate and
-  // revalidate identical sources. Reuse it immediately for syntax-only
-  // preflight; semantic compilation is still performed on demand when a DLL is
-  // actually requested.
   if (!semanticRequired && !exportPreflightRequest) {
     const cached = currentValidatedGeneratedPublication();
     if (cached) {
@@ -2032,9 +2015,6 @@ function requestExportPreflight({
   window.addEventListener("keydown", escape, true);
   setExportReadiness("checking", {}, []);
   setExportPreflightStage("prepare");
-  // The preflight indicator is controlled solely by the lifetime of the
-  // request. Commit at least one browser paint before any expensive work so
-  // a busy main thread cannot hide the fact that export preparation is active.
   request.promise = (async () => {
     await awaitExportStep(request, nextBuilderVisualFrame());
     await awaitExportStep(request, yieldBuilderTask());
@@ -2686,8 +2666,6 @@ const GRAPH_CODEGEN_MAX_TRANSIENT_RETRIES =
   2;
 let graphCodegenSettlementRevision = 0;
 let graphCodegenLastSettlement = null;
-// Codegen settlement is event driven; no wall-clock recheck/stall deadline.
-
 let pendingImportedGraphAnalysisCertificate = null;
 let graphCodegenProjectEpoch = 1;
 
@@ -3316,12 +3294,6 @@ async function postGraphCodegenTokenStream(
       if (typeof cursor.value === "string") {
         characters += cursor.value.length;
       }
-      if (
-        (tokenCount & 31) === 0 &&
-        false
-      ) {
-        break;
-      }
     }
     if (tokens.length > 0) {
       worker.postMessage({
@@ -3864,7 +3836,6 @@ async function graphCodegenFindCatalogMember(
   const rows = Array.isArray(members)
     ? members
     : [];
-  let sliceStarted = performance.now();
   for (let index = 0; index < rows.length; index += 1) {
     if (
       graphCodegenMemberMatchesContract(
@@ -3874,13 +3845,6 @@ async function graphCodegenFindCatalogMember(
       )
     ) {
       return { member: rows[index], index };
-    }
-    if (
-      (index & 63) === 0 &&
-      false
-    ) {
-      await yieldBuilderTask();
-      sliceStarted = performance.now();
     }
   }
   return null;
@@ -3956,7 +3920,6 @@ async function graphCodegenCatalogProjection(
     return value;
   };
 
-  let sliceStarted = performance.now();
   for (
     let requirementIndex = 0;
     requirementIndex < required.length;
@@ -3968,13 +3931,6 @@ async function graphCodegenCatalogProjection(
       required[requirementIndex]?.availability ===
         "unavailable"
     ) {
-      if (
-        (requirementIndex & 63) === 0 &&
-        false
-      ) {
-        await yieldBuilderTask();
-        sliceStarted = performance.now();
-      }
       continue;
     }
     const kind = String(contract?.kind || "");
@@ -4039,13 +3995,6 @@ async function graphCodegenCatalogProjection(
         );
       }
     }
-    if (
-      (requirementIndex & 63) === 0 &&
-      false
-    ) {
-      await yieldBuilderTask();
-      sliceStarted = performance.now();
-    }
   }
 
   for (
@@ -4062,13 +4011,6 @@ async function graphCodegenCatalogProjection(
         ? owner.row.interfaces
         : []) {
       enqueueType(implemented);
-    }
-    if (
-      (queueIndex & 63) === 0 &&
-      false
-    ) {
-      await yieldBuilderTask();
-      sliceStarted = performance.now();
     }
   }
 
@@ -4101,7 +4043,6 @@ async function graphCodegenCatalogProjection(
       left.index - right.index
   );
   const projectedTypes = [];
-  sliceStarted = performance.now();
   for (
     let selectedIndex = 0;
     selectedIndex <
@@ -4122,13 +4063,6 @@ async function graphCodegenCatalogProjection(
       fields: selectedMembers(owner.fields),
       events: selectedMembers(owner.events)
     });
-    if (
-      (selectedIndex & 127) === 0 &&
-      false
-    ) {
-      await yieldBuilderTask();
-      sliceStarted = performance.now();
-    }
   }
   const selectedEnumOccurrences = [];
   for (const name of enumRows.keys()) {
@@ -4349,7 +4283,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.22.4-core-clean-ux-timing",
+      "../workers/graph_codegen_worker.js?v=1.22.5-dead-control-flow-cleanup",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -4402,17 +4336,6 @@ function ensureGraphCodegenWorker() {
     });
     void pumpGraphCodegenWorkerQueue();
   };
-  const refreshWorkerStallWatchdog = () => {
-    // Worker completion/error/message events own settlement. No elapsed-time failure.
-  };
-  Object.defineProperty(
-    worker,
-    "__rmlRefreshCodegenStallWatchdog",
-    {
-      value: refreshWorkerStallWatchdog,
-      configurable: true
-    }
-  );
 
   worker.addEventListener(
     "message",
@@ -4425,14 +4348,9 @@ function ensureGraphCodegenWorker() {
         !active ||
         response.id !== active.id ||
         active.projectEpoch !==
-          graphCodegenProjectEpoch
+          graphCodegenProjectEpoch ||
+        response.progress === true
       ) {
-        return;
-      }
-
-      refreshWorkerStallWatchdog();
-
-      if (response.progress === true) {
         return;
       }
 
@@ -4761,9 +4679,6 @@ async function pumpGraphCodegenWorkerQueue() {
       id: build.id,
       operation: "buildStreamCommit"
     });
-    worker
-      .__rmlRefreshCodegenStallWatchdog
-      ?.();
   } catch (error) {
     const stale =
       error?.code ===
@@ -13554,7 +13469,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -13569,7 +13484,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -13588,7 +13503,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -13925,7 +13840,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -13956,7 +13871,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -21487,7 +21402,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -24209,9 +24124,6 @@ function updateGeneratedOutput() {
         selectedArtifact?.content ||
         "// No generated project file is available yet.\n"
     });
-    // Publish the complete preview catalog atomically as soon as generation
-    // succeeds. Clipboard/file selection consume this snapshot without waiting
-    // for compiler validation or export preflight.
     generatedArtifactPreviewSnapshot = Object.freeze({
       projectEpoch: projectApplicationEpoch,
       inputSnapshot: generatedPublicationInputSnapshot(),
@@ -24800,14 +24712,14 @@ function previewEnumEditorMarkup(
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -24882,7 +24794,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -28612,8 +28524,6 @@ async function copyText(text, button) {
       }
     }
 
-    // Synchronous fallback: copy the exact selected generated file from the
-    // document that owns the clicked button. Never delay or retry later.
     if (!copied) {
       const temporary = clipboardDocument.createElement("textarea");
       temporary.value = text;
@@ -28669,9 +28579,6 @@ async function copyText(text, button) {
 }
 
 async function copyGeneratedCodeForCurrentView(button) {
-  // Copy is deliberately a pure read of the already-generated preview.
-  // Never run export preflight, validation, graph codegen, catalog checks or
-  // worker settlement from a clipboard click.
   const graphViewActive =
     state.extensions?.typedNodeGraph?.active === true;
   const selectedKey = String(
@@ -28700,9 +28607,6 @@ async function copyGeneratedCodeForCurrentView(button) {
     if (artifact) break;
   }
 
-  // The visible code element is the authoritative last-resort cache for the
-  // currently selected file. This keeps Copy instant even while background
-  // validation is still settling.
   if (!artifact) {
     const visibleKey = String(
       elements.generatedFileSelect?.value || ""
@@ -33588,9 +33492,6 @@ function queueImportedCodegen(
     return;
   }
   try {
-    // No timer/idle delay: once import verification releases generated output,
-    // start generation immediately.  Large Runtime Graph codegen can still run
-    // through its worker-backed contribution path without delaying project use.
     updateGeneratedOutput();
   } catch (error) {
     console.error(
@@ -34596,8 +34497,6 @@ async function applyLoadedProjectWithFeedback(
       }
     );
 
-    // The installed project is now verified.  Generated output no longer waits
-    // for guidance/storage/finalization work that is unrelated to codegen.
     generatedOutputDeferredImportEpoch = 0;
     queueImportedCodegen(
       importedProjectEpoch
@@ -35977,10 +35876,6 @@ async function loadProjectJsonFile(
     } catch (error) {
       throw error;
     } finally {
-      // Global operation invariant: a project-load work session must never
-      // survive the async scope that created it. This also covers early
-      // returns caused by a superseding load session. finishBuilderWork()
-      // is idempotent, so downstream completion may safely have released it.
       finishBuilderWork(
         workSession
       );
@@ -39217,9 +39112,6 @@ function openExportDialog() {
   if (exportDialogOpenPromise) return exportDialogOpenPromise;
   const sequence = ++exportDialogOpenSequence;
 
-  // Opening the dialog is a UI operation, not an export operation.  Publish the
-  // dialog immediately from current state; expensive preflight/codegen/catalog
-  // work continues after the user can already see and interact with it.
   elements.exportPlatform.value = state.exportOptions.platform || inferExportPlatform(state.exportOptions.resonitePath);
   elements.exportResonitePath.value = state.exportOptions.resonitePath;
   elements.exportIncludeCs.checked = Boolean(state.exportOptions.includeCs);
@@ -39282,9 +39174,6 @@ async function downloadSelectedExport() {
   const requireSemantic =
     state.exportOptions.includeCompiled === true;
 
-  // File/directory chooser APIs require transient user activation. If the
-  // compiled ZIP still needs references, open the chooser synchronously from
-  // this click before any preflight Promise/worker hop can consume activation.
   if (requireSemantic) {
     const publication = currentValidatedGeneratedPublication();
     const catalog = publication?.catalog || null;
@@ -40641,7 +40530,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.22.4-core-clean-ux-timing"
+    "../../templates/help_template.html?v=1.22.5-dead-control-flow-cleanup"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -47377,7 +47266,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -47395,7 +47284,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -48230,7 +48119,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-copy"></use></svg>
   `;
 }
 

@@ -8633,7 +8633,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.22.4-core-clean-ux-timing",
+        "1.22.5-dead-control-flow-cleanup",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8666,7 +8666,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.22.4-core-clean-ux-timing" &&
+        "1.22.5-dead-control-flow-cleanup" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -18441,7 +18441,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.22.4-core-clean-ux-timing",
+          "1.22.5-dead-control-flow-cleanup",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

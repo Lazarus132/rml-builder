@@ -676,7 +676,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.22.4-core-clean-ux-timing";
+    "1.22.5-dead-control-flow-cleanup";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -911,7 +911,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.22.4-core-clean-ux-timing&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.22.5-dead-control-flow-cleanup&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -16973,7 +16973,7 @@ function setSavedApiCompositeIcon(
     const namespace =
       "http://www.w3.org/2000/svg";
     const href =
-      `assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-${normalizedIconName}`;
+      `assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-${normalizedIconName}`;
     const existingSvg =
       element.firstElementChild;
     const existingUse =
@@ -17566,7 +17566,7 @@ function createSavedApiCompositePaletteItem(
     const add =
       document.createElement("small");
     if (!compatibilityIssue && !currentOpen && savedCompositeAvailable) {
-      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg>`;
+      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg>`;
     } else {
       add.textContent = compatibilityIssue ? "!" : currentOpen ? window.RMLI18n.t("composite.library.status_open") : "·";
     }
@@ -17630,7 +17630,7 @@ function createSavedApiCompositePaletteItem(
     const exportButton =
       document.createElement("button");
     exportButton.type = "button";
-    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-download"></use></svg>`;
+    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-download"></use></svg>`;
     exportButton.title =
       window.RMLI18n.format("composite.actions.export_title", { name: record.name });
     exportButton.addEventListener(
@@ -17689,7 +17689,7 @@ function createSavedApiCompositePaletteItem(
     const deleteButton =
       document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-close"></use></svg>`;
+    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-close"></use></svg>`;
     deleteButton.title =
       window.RMLI18n.format("composite.actions.delete_title", { name: record.name });
     deleteButton.addEventListener(
@@ -17718,7 +17718,7 @@ function createSavedApiCompositePaletteItem(
     const menuTrigger = document.createElement("button");
     menuTrigger.type = "button";
     menuTrigger.className = "rml-saved-api-composite-menu-trigger";
-    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-more"></use></svg>`;
+    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-more"></use></svg>`;
     menuTrigger.setAttribute("aria-haspopup", "menu");
     menuTrigger.setAttribute("aria-expanded", "false");
     menuTrigger.setAttribute(
@@ -17824,7 +17824,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.22.4-core-clean-ux-timing",
+      "1.22.5-dead-control-flow-cleanup",
     writable: false,
     enumerable: true,
     configurable: true
