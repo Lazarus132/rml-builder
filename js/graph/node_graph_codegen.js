@@ -8633,7 +8633,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.97-strict-catalog-live-picker-stable",
+        "1.21.98-terminal-catalog-state",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8666,7 +8666,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.97-strict-catalog-live-picker-stable" &&
+        "1.21.98-terminal-catalog-state" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -18443,7 +18443,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.97-strict-catalog-live-picker-stable",
+          "1.21.98-terminal-catalog-state",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

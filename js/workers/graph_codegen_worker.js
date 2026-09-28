@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.21.97-strict-catalog-live-picker-stable";
+  "1.21.98-terminal-catalog-state";
 
 self.window = self;
 
@@ -777,10 +777,10 @@ async function ensureRuntime(
       "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=1.21.97-strict-catalog-live-picker-stable"
+      "../compiler/visual_csharp.js?v=1.21.98-terminal-catalog-state"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.97-strict-catalog-live-picker-stable"
+      "../catalog/api_nodes.js?v=1.21.98-terminal-catalog-state"
     );
 
     if (
@@ -805,7 +805,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.21.97-strict-catalog-live-picker-stable"
+      "../graph/node_graph_codegen.js?v=1.21.98-terminal-catalog-state"
     );
 
     if (

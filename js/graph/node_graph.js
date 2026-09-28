@@ -2,7 +2,7 @@
   "use strict";
 
   const NODE_GRAPH_RELEASE_ID =
-    "1.21.97-strict-catalog-live-picker-stable";
+    "1.21.98-terminal-catalog-state";
 
   if (
     window.RMLTypedNodeGraphGenerator?.moduleId ===
@@ -25,7 +25,7 @@
     "../core/code_templates.js?v=797-readable-visual-functions-node-index",
     "../core/guidance.js?v=793",
     "node_graph_registry.js?v=1-physical-modules-v752-catalog-cache-equivalent",
-    "node_graph_codegen.js?v=1.21.97-strict-catalog-live-picker-stable"
+    "node_graph_codegen.js?v=1.21.98-terminal-catalog-state"
   ];
 
   if (
@@ -82,7 +82,7 @@
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL(
-      "../../styles/features/styles.runtime-graph.css?v=1.21.97-strict-catalog-live-picker-stable",
+      "../../styles/features/styles.runtime-graph.css?v=1.21.98-terminal-catalog-state",
       scriptUrl
     ).href;
     link.dataset.rmlStyleBundle = "runtime-graph";
@@ -103,19 +103,19 @@
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=1.21.97-strict-catalog-live-picker-stable"
+            "../loaders/style_loader.js?v=1.21.98-terminal-catalog-state"
           ]
     ),
     "node_graph_registry.js?v=1-physical-modules-v752-catalog-cache-equivalent",
-    "node_graph_codegen.js?v=1.21.97-strict-catalog-live-picker-stable",
-    "runtime_bridge.js?v=1.21.97-strict-catalog-live-picker-stable&status-runtime=4",
-    "../workers/saved_api_composite_compare_worker.js?v=1.21.97-strict-catalog-live-picker-stable",
-    "node_graph_composites.js?v=1.21.97-strict-catalog-live-picker-stable",
-    "node_graph_custom_csharp.js?v=1.21.97-strict-catalog-live-picker-stable",
+    "node_graph_codegen.js?v=1.21.98-terminal-catalog-state",
+    "runtime_bridge.js?v=1.21.98-terminal-catalog-state&status-runtime=4",
+    "../workers/saved_api_composite_compare_worker.js?v=1.21.98-terminal-catalog-state",
+    "node_graph_composites.js?v=1.21.98-terminal-catalog-state",
+    "node_graph_custom_csharp.js?v=1.21.98-terminal-catalog-state",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=1.21.97-strict-catalog-live-picker-stable&status-readiness=4",
-    "graph_gpu_renderer.js?v=1.21.97-strict-catalog-live-picker-stable",
-    "node_graph_bootstrap.js?v=1.21.97-strict-catalog-live-picker-stable"
+    "node_graph_view.js?v=1.21.98-terminal-catalog-state&status-readiness=4",
+    "graph_gpu_renderer.js?v=1.21.98-terminal-catalog-state",
+    "node_graph_bootstrap.js?v=1.21.98-terminal-catalog-state"
   ];
 
   const ready = files.reduce(

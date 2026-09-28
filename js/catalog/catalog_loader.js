@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.97-strict-catalog-live-picker-stable";
+    "1.21.98-terminal-catalog-state";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -146,11 +146,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.21.97-strict-catalog-live-picker-stable",
+    "../compiler/visual_csharp.js?v=1.21.98-terminal-catalog-state",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.97-strict-catalog-live-picker-stable",
+    "api_nodes.js?v=1.21.98-terminal-catalog-state",
     scriptUrl
   ).href;
 
@@ -13717,6 +13717,93 @@
           );
         }
         if (scannerCheckGeneration === sessionKey) {
+          // Terminal-state invariant: a finished scanner/catalog operation may
+          // never leave the public UI in a transient checking/updating state.
+          // This guard is intentionally independent of the normal success and
+          // error branches so future exceptions cannot create a zombie state.
+          const terminalCatalog =
+            statusCatalog() ||
+            cachedCatalogStatus ||
+            cachedCatalogRecord?.catalog ||
+            null;
+          const progressChannel =
+            scannerCheckProgressChannels.get(
+              sessionKey
+            );
+          const terminalPhases = new Set([
+            "complete",
+            "failed",
+            "cache-fallback",
+            "factory-preserved",
+            "catalog-unavailable",
+            "latched-failure",
+            "unavailable",
+            "stale-session"
+          ]);
+          const currentPhase = String(
+            progressChannel?.snapshot?.phase ||
+            ""
+          );
+          const operationWasCancelled =
+            signal?.aborted === true ||
+            !sessionIsCurrent();
+
+          if (!terminalPhases.has(currentPhase)) {
+            const terminalError = String(
+              document.documentElement.dataset
+                .rmlCatalogSyncError ||
+              (operationWasCancelled
+                ? "Catalog synchronization was cancelled before completion."
+                : "Catalog synchronization ended without a terminal result.")
+            );
+            catalogAvailabilityKnown = true;
+            catalogAvailable =
+              Boolean(terminalCatalog);
+            if (!factoryActivated) {
+              demoteLiveFactoryReport();
+            }
+            document.documentElement.dataset
+              .rmlCatalogSyncError =
+                terminalError;
+            publishScannerCheckProgress(
+              sessionKey,
+              {
+                branch: "fallback",
+                phase: operationWasCancelled
+                  ? "cancelled"
+                  : terminalCatalog
+                    ? "cache-fallback"
+                    : "failed",
+                progress: 1,
+                phaseProgress: 1,
+                success: false,
+                cacheAvailable:
+                  Boolean(terminalCatalog),
+                error: terminalError
+              }
+            );
+          }
+
+          const statusElement =
+            document.getElementById(
+              "api-catalog-state"
+            );
+          if (statusElement) {
+            statusElement.setAttribute(
+              "aria-busy",
+              "false"
+            );
+            if (
+              statusElement.dataset.source ===
+              "updating"
+            ) {
+              statusElement.dataset.source =
+                terminalCatalog
+                  ? "cache"
+                  : "unavailable";
+            }
+          }
+
           scannerCheckPromise = null;
           scannerCheckMismatchSessionKey = "";
           if (

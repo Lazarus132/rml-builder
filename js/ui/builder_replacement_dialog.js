@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.97-strict-catalog-live-picker-stable";
+    "1.21.98-terminal-catalog-state";
 
   if (
     window.RMLBuilderReplacementDialog
@@ -362,7 +362,7 @@
                     ? "!"
                     : "·";
           if (status === "selected") {
-            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-check"></use></svg>`;
+            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.98-terminal-catalog-state#icon-check"></use></svg>`;
           }
           const name =
             document.createElement("span");

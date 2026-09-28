@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.21.97-strict-catalog-live-picker-stable";
+    "1.21.98-terminal-catalog-state";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 2;

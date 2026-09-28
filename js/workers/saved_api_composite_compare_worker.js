@@ -5,7 +5,7 @@ function savedApiCompositeCompareWorkerMain(
 ) {
 const self = workerScope;
 const SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID =
-  "1.21.97-strict-catalog-live-picker-stable";
+  "1.21.98-terminal-catalog-state";
 const SAVED_API_COMPOSITE_CANONICAL_SCHEMA_VERSION = 4;
 const MESSAGE_TYPE = "rml-saved-api-composite-compare";
 const RESULT_TYPE = `${MESSAGE_TYPE}-result`;
@@ -1946,7 +1946,7 @@ if (savedApiCompositeCompareWorkerThread) {
     {
       value: Object.freeze({
         moduleId:
-          "1.21.97-strict-catalog-live-picker-stable",
+          "1.21.98-terminal-catalog-state",
         canonicalSchemaVersion:
           4,
         source:

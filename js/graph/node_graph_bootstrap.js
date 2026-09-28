@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.97-strict-catalog-live-picker-stable";
+  "1.21.98-terminal-catalog-state";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];
