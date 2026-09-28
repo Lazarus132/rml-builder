@@ -9885,11 +9885,47 @@
         buildCatalogStreamDemandSnapshot(
           state
         );
-      const catalog = normalizeCatalog(
+      const cachedCatalog = normalizeCatalog(
         raw,
         "scanner-cache",
         state.manifest.sourceUrl || ""
       );
+
+      const activeCatalog =
+        statusCatalog();
+
+      const activeReport =
+        window.RMLApiNodeFactoryReport;
+
+      const preserveLiveGeneration =
+        Boolean(
+          activeCatalog &&
+          activeReport &&
+          activeReport.verificationPassed === true &&
+          activeReport.liveCatalogVerified === true &&
+          String(
+            activeReport.catalogFingerprint || ""
+          ) ===
+            String(
+              cachedCatalog.catalogFingerprint || ""
+            ) &&
+          String(
+            activeReport.engineVersion || ""
+          ) ===
+            String(
+              cachedCatalog.engineVersion || ""
+            )
+        );
+
+      const catalog =
+        preserveLiveGeneration
+          ? Object.freeze({
+              ...cachedCatalog,
+              catalogSource: "scanner",
+              catalogDataSource:
+                "scanner-cache"
+            })
+          : cachedCatalog;
       await queueCatalogActivationOperation(
         () => activateCatalogAndFactoryNow(
           catalog
@@ -10069,11 +10105,47 @@
       const raw = buildCatalogDemandSnapshot(
         state
       );
-      const catalog = normalizeCatalog(
+      const cachedCatalog = normalizeCatalog(
         raw,
         "scanner-cache",
         state.fullManifest.sourceUrl || ""
       );
+
+      const activeCatalog =
+        statusCatalog();
+
+      const activeReport =
+        window.RMLApiNodeFactoryReport;
+
+      const preserveLiveGeneration =
+        Boolean(
+          activeCatalog &&
+          activeReport &&
+          activeReport.verificationPassed === true &&
+          activeReport.liveCatalogVerified === true &&
+          String(
+            activeReport.catalogFingerprint || ""
+          ) ===
+            String(
+              cachedCatalog.catalogFingerprint || ""
+            ) &&
+          String(
+            activeReport.engineVersion || ""
+          ) ===
+            String(
+              cachedCatalog.engineVersion || ""
+            )
+        );
+
+      const catalog =
+        preserveLiveGeneration
+          ? Object.freeze({
+              ...cachedCatalog,
+              catalogSource: "scanner",
+              catalogDataSource:
+                "scanner-cache"
+            })
+          : cachedCatalog;
       let published = false;
       try {
         await queueCatalogActivationOperation(
