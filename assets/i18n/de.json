@@ -3228,5 +3228,8 @@
   "export.preflight.codegen": "Generierter Code wird aktualisiert…",
   "export.preflight.artifacts": "Generierte Dateien werden vorbereitet…",
   "export.preflight.validate": "Generierter C#-Code wird geprüft…",
-  "export.preflight.ready": "Export bereit."
+  "export.preflight.ready": "Export bereit.",
+  "export.preflight.idle": "Export ist aktuell; Änderungen werden nur bei Bedarf geprüft.",
+  "export.preflight.error": "Exportprüfung fehlgeschlagen.",
+  "export.preflight.dll_not_selected": "DLL-Erstellung ist nicht ausgewählt."
 }

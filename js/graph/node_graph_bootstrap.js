@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.22.5-dead-control-flow-cleanup";
+  "1.22.6-unified-export-state";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

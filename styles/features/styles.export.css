@@ -729,6 +729,9 @@ dialog#export-dialog > .export-dialog-body {
   font-size: calc(10px * var(--rml-ux-text-scale, 1));
 }
 .export-preflight-status[hidden] { display: none !important; }
+.export-preflight-copy { min-width: 0; display: grid; gap: 2px; }
+.export-preflight-copy small { opacity: .78; line-height: 1.35; }
+.export-preflight-spinner[hidden] { display: none !important; }
 .export-preflight-spinner {
   width: 16px; height: 16px; flex: 0 0 16px;
   border: 2px solid rgba(255,255,255,.2);

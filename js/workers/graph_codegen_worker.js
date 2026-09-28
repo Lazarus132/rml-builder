@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.22.5-dead-control-flow-cleanup";
+  "1.22.6-unified-export-state";
 
 self.window = self;
 
@@ -777,10 +777,10 @@ async function ensureRuntime(
       "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=1.22.5-dead-control-flow-cleanup"
+      "../compiler/visual_csharp.js?v=1.22.6-unified-export-state"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.22.5-dead-control-flow-cleanup"
+      "../catalog/api_nodes.js?v=1.22.6-unified-export-state"
     );
 
     if (
@@ -805,7 +805,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.22.5-dead-control-flow-cleanup"
+      "../graph/node_graph_codegen.js?v=1.22.6-unified-export-state"
     );
 
     if (

@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.22.5-dead-control-flow-cleanup";
+    "1.22.6-unified-export-state";
   let installedController = null;
 
   if (

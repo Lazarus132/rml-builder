@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.22.5-dead-control-flow-cleanup";
+  "1.22.6-unified-export-state";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 let alwaysClickableButtonFeedbackOwner = null;
@@ -346,7 +346,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -961,16 +961,60 @@ let exportPreflightSequence = 0;
 let exportPreflightRequest = null;
 let exportPreflightStage = "";
 
+function refreshUnifiedExportStatus() {
+  if (!elements?.exportPreflightStatus) return;
+
+  const dialogOpen = Boolean(elements.exportDialog?.open);
+  const active = Boolean(exportPreflightRequest);
+  const phase = exportPreflightStage ||
+    (exportReadiness.phase === "ready" ? "ready" : "idle");
+
+  elements.exportPreflightStatus.hidden = !dialogOpen;
+  if (elements.exportPreflightSpinner) {
+    elements.exportPreflightSpinner.hidden = !active;
+  }
+
+  const primaryKey = active
+    ? `export.preflight.${phase || "prepare"}`
+    : exportReadiness.phase === "ready"
+      ? "export.preflight.ready"
+      : exportReadiness.phase === "error"
+        ? "export.preflight.error"
+        : "export.preflight.idle";
+
+  if (elements.exportPreflightStatusText) {
+    elements.exportPreflightStatusText.textContent =
+      window.RMLI18n.t(primaryKey);
+  }
+
+  if (elements.exportPreflightStatusDetail) {
+    const details = [];
+    if (elements.exportIncludeCompiled?.checked) {
+      const references = String(
+        elements.exportCompilerReferenceStatus?.textContent || ""
+      ).trim();
+      const build = String(
+        elements.exportCompilerBuildStatus?.textContent || ""
+      ).trim();
+      if (references) details.push(references);
+      if (build && build !== references) details.push(build);
+    } else {
+      details.push(
+        window.RMLI18n.t("export.preflight.dll_not_selected")
+      );
+    }
+    elements.exportPreflightStatusDetail.textContent =
+      details.join(" · ");
+  }
+
+  elements.exportPreflightStatus.dataset.state = active
+    ? "working"
+    : exportReadiness.phase;
+}
+
 function setExportPreflightStage(stage) {
   exportPreflightStage = String(stage || "");
-  if (elements?.exportPreflightStatus) {
-    const active = Boolean(exportPreflightRequest);
-    elements.exportPreflightStatus.hidden = !active;
-    if (active) {
-      const key = `export.preflight.${exportPreflightStage || "prepare"}`;
-      elements.exportPreflightStatusText.textContent = window.RMLI18n.t(key);
-    }
-  }
+  refreshUnifiedExportStatus();
 }
 let exportDialogOpenPromise = null;
 let exportDeliveryBusy = false;
@@ -1545,6 +1589,7 @@ function setExportReadiness(
   applyPrimaryExportAvailability(
     synchronousDiagnostics
   );
+  refreshUnifiedExportStatus();
 }
 
 function updateExportPreviewStatus(_artifacts, synchronousDiagnostics = []) {
@@ -2016,21 +2061,12 @@ function requestExportPreflight({
   setExportReadiness("checking", {}, []);
   setExportPreflightStage("prepare");
   request.promise = (async () => {
-    await awaitExportStep(request, nextBuilderVisualFrame());
-    await awaitExportStep(request, yieldBuilderTask());
     assertExportRequestCurrent(request);
     const host = window.RMLDynamicGraphHost;
     if (host?.prepareForExport?.() !== true) {
       host?.flushPendingEditorEdits?.();
-      const stored = state.extensions?.typedNodeGraph;
-      if (stored) state.extensions.typedNodeGraph = {
-        ...stored, revision: (Number(stored.revision) || 0) + 1
-      };
     }
-    graphCodegenWorkerCachedKey = "";
-    graphCodegenWorkerCachedResult = null;
     request.inputRevision = projectDraftPersistRevision;
-    setExportPreflightStage("catalog");
     const requiredExportCatalogNodes =
       projectRequiredCatalogNodes({
         extensions: state.extensions
@@ -2038,6 +2074,7 @@ function requestExportPreflight({
         requirement.catalogScope === "api"
       );
     if (requiredExportCatalogNodes.length > 0) {
+      setExportPreflightStage("catalog");
       const gate =
         window.RMLCatalogImportGate;
       let catalogResult = null;
@@ -2301,8 +2338,8 @@ function requestExportPreflight({
     if (exportPreflightRequest === request) {
       exportPreflightRequest = null;
       exportPreflightStage = "";
-      if (elements?.exportPreflightStatus) elements.exportPreflightStatus.hidden = true;
       applyPrimaryExportAvailability([]);
+      refreshUnifiedExportStatus();
     }
   });
   return request.promise;
@@ -4283,7 +4320,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.22.5-dead-control-flow-cleanup",
+      "../workers/graph_codegen_worker.js?v=1.22.6-unified-export-state",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -13469,7 +13506,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -13484,7 +13521,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -13503,7 +13540,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -13840,7 +13877,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -13871,7 +13908,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -21402,7 +21439,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -24712,14 +24749,14 @@ function previewEnumEditorMarkup(
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -24794,7 +24831,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -38195,6 +38232,7 @@ function updateBrowserCompilerStatus(
       pickerDisabled;
   }
 
+  refreshUnifiedExportStatus();
   return {
     available,
     missing,
@@ -40559,7 +40597,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.22.5-dead-control-flow-cleanup"
+    "../../templates/help_template.html?v=1.22.6-unified-export-state"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -40925,8 +40963,14 @@ function cacheElements() {
     exportPreflightStatus: document.getElementById(
       "export-preflight-status"
     ),
+    exportPreflightSpinner: document.getElementById(
+      "export-preflight-spinner"
+    ),
     exportPreflightStatusText: document.getElementById(
       "export-preflight-status-text"
+    ),
+    exportPreflightStatusDetail: document.getElementById(
+      "export-preflight-status-detail"
     ),
     exportDownloadSelected: document.getElementById(
       "export-download-selected"
@@ -47295,7 +47339,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -47313,7 +47357,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -48148,7 +48192,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.5-dead-control-flow-cleanup#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-copy"></use></svg>
   `;
 }
 
