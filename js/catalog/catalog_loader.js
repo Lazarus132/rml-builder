@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.87-scanner-demand-no-deadline";
+    "1.21.96-export-action-preflight-cache";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -146,11 +146,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.21.87-scanner-demand-no-deadline",
+    "../compiler/visual_csharp.js?v=1.21.96-export-action-preflight-cache",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.87-scanner-demand-no-deadline",
+    "api_nodes.js?v=1.21.96-export-action-preflight-cache",
     scriptUrl
   ).href;
 

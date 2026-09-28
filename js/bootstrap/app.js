@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.21.87-scanner-demand-no-deadline";
+  "1.21.96-export-action-preflight-cache";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -361,7 +361,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -951,9 +951,11 @@ let typedNodeGraphModulesTrackingStarted = false;
 
 let generatedOutlineArtifactKey = "";
 let generatedGraphArtifactKey = "";
+// Global generated-file selection. The active graph/composite view must never
+// restrict which generated artifact can be selected or copied.
+let generatedSelectedArtifactKey = "";
 let generatedArtifactSelectionLock = null;
 let generatedOutputValidationSequence = 0;
-let exportCopyArtifactKey = "";
 const browserCompilerReferenceFiles = new Map();
 const browserCompilerAdditionalRequiredReferences =
   new Map();
@@ -977,6 +979,19 @@ let browserCompilerReferenceSearchRunning = false;
 let browserCompilerReferenceDragDepth = 0;
 let exportPreflightSequence = 0;
 let exportPreflightRequest = null;
+let exportPreflightStage = "";
+
+function setExportPreflightStage(stage) {
+  exportPreflightStage = String(stage || "");
+  if (elements?.exportPreflightStatus) {
+    const active = Boolean(exportPreflightRequest);
+    elements.exportPreflightStatus.hidden = !active;
+    if (active) {
+      const key = `export.preflight.${exportPreflightStage || "prepare"}`;
+      elements.exportPreflightStatusText.textContent = window.RMLI18n.t(key);
+    }
+  }
+}
 let exportDialogOpenPromise = null;
 let exportDeliveryBusy = false;
 let exportDeliverySequence = 0;
@@ -988,6 +1003,10 @@ let exportReadiness = Object.freeze({
   fileCount: 0
 });
 let validatedGeneratedPublication = null;
+let validatedSemanticExportPublication = null;
+// Latest complete generated artifact catalog already built for the visible preview.
+// Copy must consume this snapshot directly and must never start export/preflight/codegen.
+let generatedArtifactPreviewSnapshot = null;
 
 function commitValidatedGeneratedPublication({
   catalog,
@@ -1267,16 +1286,26 @@ function applyPrimaryExportAvailability(synchronousDiagnostics = getDiagnostics(
           diagnostic
         )
       );
-  for (const button of [elements.copyCodeBottom, elements.downloadCode]) {
-    setExportControlAvailability(
-      button,
-      !busy && !blocked
-    );
-    if (button) button.setAttribute("aria-busy", String(busy));
+  // Generated-code Copy and opening the Export dialog are presentation actions.
+  // They must never wait for export preflight/semantic work.  Only an actual
+  // blocking project diagnostic may disable the Export entry point; delivery
+  // controls inside the already-open dialog carry the readiness state.
+  setExportControlAvailability(
+    elements.copyCodeBottom,
+    !blocked
+  );
+  if (elements.copyCodeBottom) {
+    elements.copyCodeBottom.setAttribute("aria-busy", "false");
+  }
+  setExportControlAvailability(
+    elements.downloadCode,
+    !blocked
+  );
+  if (elements.downloadCode) {
+    elements.downloadCode.setAttribute("aria-busy", "false");
   }
   if (busy || blocked) {
     setExportControlAvailability(elements.exportDownloadSelected, false);
-    setExportControlAvailability(elements.exportCopySelectedFile, false);
   }
   const label = elements.downloadCode?.querySelector(".top-action-label");
   if (label) label.textContent = busy ? window.RMLI18n.t("js.presentation.820d6004b037") : window.RMLI18n.t("index.text.62ff58f211c4");
@@ -1911,6 +1940,91 @@ function requestExportPreflight({
   requireSemantic = false
 } = {}) {
   const semanticRequired = requireSemantic === true;
+
+  // Final ZIP/Build actions must reuse an already validated semantic build when
+  // neither generated sources nor compiler references changed. This fast path
+  // deliberately runs before creating exportPreflightRequest, so opening or
+  // downloading an unchanged package does not flash the preflight indicator.
+  if (semanticRequired && !exportPreflightRequest) {
+    const cached = currentValidatedGeneratedPublication();
+    const semantic = validatedSemanticExportPublication;
+    if (
+      cached &&
+      semantic &&
+      semantic.projectEpoch === projectApplicationEpoch &&
+      semantic.sourceFingerprint === cached.fingerprint &&
+      semantic.referenceRevision === browserCompilerReferenceRevision
+    ) {
+      setExportReadiness(
+        "ready",
+        { fingerprint: cached.fingerprint, fileCount: cached.files.length },
+        []
+      );
+      return Promise.resolve(Object.freeze({
+        request: Object.freeze({
+          id: exportPreflightSequence,
+          projectEpoch: projectApplicationEpoch,
+          inputRevision: projectDraftPersistRevision,
+          snapshot: exportInputSnapshot(),
+          semanticReferenceFingerprint: semantic.compilation.referenceFingerprint,
+          sourceFingerprint: cached.fingerprint,
+          sourceFileCount: cached.files.length,
+          syntaxValidated: true,
+          requireSemantic: true,
+          controller: new AbortController()
+        }),
+        files: cached.files,
+        artifacts: cached.catalog.artifacts,
+        catalog: cached.catalog,
+        code: "",
+        fingerprint: cached.fingerprint,
+        semanticCompilation: semantic.compilation,
+        reused: true
+      }));
+    }
+  }
+
+  // A validated generated publication is already keyed to the semantic project
+  // inputs (graph/config/catalog/path). Opening Export must not regenerate and
+  // revalidate identical sources. Reuse it immediately for syntax-only
+  // preflight; semantic compilation is still performed on demand when a DLL is
+  // actually requested.
+  if (!semanticRequired && !exportPreflightRequest) {
+    const cached = currentValidatedGeneratedPublication();
+    if (cached) {
+      const request = Object.freeze({
+        id: exportPreflightSequence,
+        projectEpoch: projectApplicationEpoch,
+        inputRevision: projectDraftPersistRevision,
+        snapshot: exportInputSnapshot(),
+        semanticReferenceFingerprint: "",
+        sourceFingerprint: cached.fingerprint,
+        sourceFileCount: cached.files.length,
+        syntaxValidated: true,
+        requireSemantic: false,
+        controller: new AbortController()
+      });
+      setExportReadiness(
+        "ready",
+        {
+          fingerprint: cached.fingerprint,
+          fileCount: cached.files.length
+        },
+        []
+      );
+      return Promise.resolve(Object.freeze({
+        request,
+        files: cached.files,
+        artifacts: cached.catalog.artifacts,
+        catalog: cached.catalog,
+        code: "",
+        fingerprint: cached.fingerprint,
+        semanticCompilation: null,
+        reused: true
+      }));
+    }
+  }
+
   if (exportPreflightRequest) {
     if (
       !semanticRequired ||
@@ -1948,6 +2062,10 @@ function requestExportPreflight({
   document.addEventListener("rml-builder:project-replacement", replaced);
   window.addEventListener("keydown", escape, true);
   setExportReadiness("checking", {}, []);
+  setExportPreflightStage("prepare");
+  // The preflight indicator is controlled solely by the lifetime of the
+  // request. Commit at least one browser paint before any expensive work so
+  // a busy main thread cannot hide the fact that export preparation is active.
   request.promise = (async () => {
     await awaitExportStep(request, nextBuilderVisualFrame());
     await awaitExportStep(request, yieldBuilderTask());
@@ -1963,6 +2081,7 @@ function requestExportPreflight({
     graphCodegenWorkerCachedKey = "";
     graphCodegenWorkerCachedResult = null;
     request.inputRevision = projectDraftPersistRevision;
+    setExportPreflightStage("catalog");
     const requiredExportCatalogNodes =
       projectRequiredCatalogNodes({
         extensions: state.extensions
@@ -2065,6 +2184,7 @@ function requestExportPreflight({
         );
       }
     }
+    setExportPreflightStage("codegen");
     await awaitExportStep(request, Promise.all([
       ensureLazyScriptBundle("code-templates"),
       prepareStyles ? ensureLazyStyleBundle("export") : Promise.resolve(true)
@@ -2112,6 +2232,7 @@ function requestExportPreflight({
         assertExportRequestCurrent(request);
       }
     }
+    setExportPreflightStage("artifacts");
     const diagnostics = getDiagnostics();
     if (diagnostics.length) throw new Error(diagnostics.slice(0, 8).join(" | "));
     const output = generatedCodeForCurrentView();
@@ -2140,6 +2261,7 @@ function requestExportPreflight({
     if (!files.length) throw new Error(window.RMLI18n.t("ui.auto.82f2b528a79c"));
     assertExportRequestCurrent(request);
     request.snapshot = exportInputSnapshot();
+    setExportPreflightStage("validate");
     await awaitExportStep(request, ensureLazyScriptBundle("compiler"));
     assertExportRequestCurrent(request);
     const compiler = window.RMLCompile;
@@ -2158,6 +2280,7 @@ function requestExportPreflight({
     request.sourceFingerprint = fingerprint;
     request.sourceFileCount = files.length;
     request.syntaxValidated = true;
+    setExportPreflightStage("ready");
     setExportReadiness(
       "ready",
       { fingerprint, fileCount: files.length },
@@ -2178,6 +2301,14 @@ function requestExportPreflight({
             request
           )
         : null;
+    if (semanticCompilation) {
+      validatedSemanticExportPublication = Object.freeze({
+        projectEpoch: request.projectEpoch,
+        sourceFingerprint: fingerprint,
+        referenceRevision: browserCompilerReferenceRevision,
+        compilation: semanticCompilation
+      });
+    }
     assertExportRequestCurrent(request, true);
     const finalDiagnostics = getDiagnostics();
     if (finalDiagnostics.length) {
@@ -2220,6 +2351,8 @@ function requestExportPreflight({
     window.removeEventListener("keydown", escape, true);
     if (exportPreflightRequest === request) {
       exportPreflightRequest = null;
+      exportPreflightStage = "";
+      if (elements?.exportPreflightStatus) elements.exportPreflightStatus.hidden = true;
       applyPrimaryExportAvailability([]);
     }
   });
@@ -4284,7 +4417,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.21.87-scanner-demand-no-deadline",
+      "../workers/graph_codegen_worker.js?v=1.21.96-export-action-preflight-cache",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -13531,7 +13664,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -13546,7 +13679,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -13565,7 +13698,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -13902,7 +14035,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -13933,7 +14066,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -21500,7 +21633,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -23492,15 +23625,14 @@ function generatedCodeForCurrentView() {
     generatedArtifactSelectionLock &&
     generatedArtifactSelectionLock.projectEpoch ===
       projectApplicationEpoch &&
-    generatedArtifactSelectionLock.graphViewActive ===
-      graphViewActive &&
     generatedArtifactSelectionLock.key
   );
   const currentKey = selectionLocked
     ? generatedArtifactSelectionLock.key
-    : graphViewActive
-      ? generatedGraphArtifactKey
-      : generatedOutlineArtifactKey;
+    : generatedSelectedArtifactKey ||
+      (graphViewActive
+        ? generatedGraphArtifactKey
+        : generatedOutlineArtifactKey);
 
   let selected = artifacts.find(
     artifact =>
@@ -23518,16 +23650,13 @@ function generatedCodeForCurrentView() {
         );
   }
 
+  if (!selectionLocked || selected?.key === currentKey) {
+    generatedSelectedArtifactKey = selected?.key || "";
+  }
   if (graphViewActive) {
-    if (!selectionLocked || selected?.key === currentKey) {
-      generatedGraphArtifactKey =
-        selected?.key || "";
-    }
+    generatedGraphArtifactKey = selected?.key || "";
   } else {
-    if (!selectionLocked || selected?.key === currentKey) {
-      generatedOutlineArtifactKey =
-        selected?.key || "";
-    }
+    generatedOutlineArtifactKey = selected?.key || "";
   }
 
   return {
@@ -24226,6 +24355,14 @@ function updateGeneratedOutput() {
         selectedArtifact?.content ||
         "// No generated project file is available yet.\n"
     });
+    // Publish the complete preview catalog atomically as soon as generation
+    // succeeds. Clipboard/file selection consume this snapshot without waiting
+    // for compiler validation or export preflight.
+    generatedArtifactPreviewSnapshot = Object.freeze({
+      projectEpoch: projectApplicationEpoch,
+      inputSnapshot: generatedPublicationInputSnapshot(),
+      catalog: frozenCatalog
+    });
     const generationErrors =
       (output.catalog
         ?.generationDiagnostics || [])
@@ -24250,10 +24387,6 @@ function updateGeneratedOutput() {
         generationErrors
       );
       setExportControlAvailability(
-        elements.exportCopySelectedFile,
-        false
-      );
-      setExportControlAvailability(
         elements.exportDownloadSelected,
         false
       );
@@ -24265,8 +24398,6 @@ function updateGeneratedOutput() {
     if (
       generatedArtifactSelectionLock?.projectEpoch ===
         projectApplicationEpoch &&
-      generatedArtifactSelectionLock.graphViewActive ===
-        output.graphActive &&
       generatedArtifactSelectionLock.key &&
       output.selectedArtifact?.key !==
         generatedArtifactSelectionLock.key
@@ -24288,10 +24419,6 @@ function updateGeneratedOutput() {
     elements.generatedCode.setAttribute("aria-busy", String(pending));
     elements.codeSummary.textContent = pending ? message : window.RMLI18n.t("ui.auto.e2daf7b469e4");
     updateExportPreviewStatus([], [pending ? message : `Generated project: ${message}`]);
-    setExportControlAvailability(
-      elements.exportCopySelectedFile,
-      false
-    );
     setExportControlAvailability(
       elements.exportDownloadSelected,
       false
@@ -24819,14 +24946,14 @@ function previewEnumEditorMarkup(
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -24901,7 +25028,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -28607,20 +28734,63 @@ async function copyText(text, button) {
     );
   }
 
+  const clipboardDocument =
+    button?.ownerDocument || document;
+
+  const clipboardWindow =
+    clipboardDocument.defaultView || window;
+
+  const clipboardNavigator =
+    clipboardWindow.navigator || navigator;
+
+  const documentFocused =
+    typeof clipboardDocument.hasFocus === "function" &&
+    clipboardDocument.hasFocus();
+
+  const userActivation =
+    clipboardNavigator.userActivation;
+
+  const hasActiveUserGesture =
+    !userActivation ||
+    userActivation.isActive === true;
+
   try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      const temporary = document.createElement("textarea");
+    let copied = false;
+    if (
+      documentFocused &&
+      hasActiveUserGesture &&
+      clipboardNavigator.clipboard?.writeText &&
+      clipboardWindow.isSecureContext
+    ) {
+      try {
+        await clipboardNavigator.clipboard.writeText(text);
+        copied = true;
+      } catch (error) {
+        if (error?.name !== "NotAllowedError") throw error;
+      }
+    }
+
+    // Synchronous fallback: copy the exact selected generated file from the
+    // document that owns the clicked button. Never delay or retry later.
+    if (!copied) {
+      const temporary = clipboardDocument.createElement("textarea");
       temporary.value = text;
       temporary.className = "rml-clipboard-fallback";
-      document.body.appendChild(temporary);
-      temporary.focus();
-      temporary.select();
-      if (!document.execCommand("copy")) {
-        throw new Error(window.RMLI18n.t("ui.literal.4ee6587a348c"));
+      temporary.setAttribute("readonly", "");
+      clipboardDocument.body.appendChild(temporary);
+      try {
+        temporary.select();
+        temporary.setSelectionRange(0, temporary.value.length);
+        if (!clipboardDocument.execCommand("copy")) {
+          throw Object.assign(
+            new Error(clipboardWindow.RMLI18n.t("ui.literal.4ee6587a348c")),
+            { name: "RMLClipboardUnavailable" }
+          );
+        }
+        copied = true;
+      } finally {
+        temporary.remove();
       }
-      temporary.remove();
     }
 
     if (iconOnlyCopyButton) {
@@ -28634,7 +28804,13 @@ async function copyText(text, button) {
       button.textContent = window.RMLI18n.t("{{i18n:js.presentation.8e3df45a49db}}");
     }
   } catch (error) {
-    console.error(error);
+    const expectedClipboardRejection =
+      error?.name === "RMLClipboardUnavailable" ||
+      error?.name === "NotAllowedError";
+
+    if (!expectedClipboardRejection) {
+      console.error(error);
+    }
 
     if (iconOnlyCopyButton) {
       button.classList.add("copy-failed");
@@ -28671,55 +28847,69 @@ async function copyText(text, button) {
 }
 
 async function copyGeneratedCodeForCurrentView(button) {
-  if (exportPreflightRequest || exportDeliveryBusy) return;
+  // Copy is deliberately a pure read of the already-generated preview.
+  // Never run export preflight, validation, graph codegen, catalog checks or
+  // worker settlement from a clipboard click.
   const graphViewActive =
     state.extensions?.typedNodeGraph?.active === true;
   const selectedKey = String(
     elements.generatedFileSelect?.value ||
+    generatedSelectedArtifactKey ||
     (graphViewActive
       ? generatedGraphArtifactKey
       : generatedOutlineArtifactKey) ||
     ""
   );
-  const selectionLock = {
-    projectEpoch: projectApplicationEpoch,
-    graphViewActive,
-    key: selectedKey
-  };
-  generatedArtifactSelectionLock =
-    selectionLock;
-  try {
-    const checked = await requestExportPreflight({
-      requireSemantic: false
-    });
-    assertExportRequestCurrent(checked.request, true);
-    const artifact = checked.artifacts.find(
-      candidate => candidate.key === selectedKey
-    );
-    if (!artifact) {
-      throw new Error(
-        window.RMLI18n.t("ui.literal.6513029b18f3")
-      );
-    }
-    if (graphViewActive) {
-      generatedGraphArtifactKey = selectedKey;
-    } else {
-      generatedOutlineArtifactKey = selectedKey;
-    }
-    await copyText(artifact.content, button);
-  } catch (error) {
-    if (!expectedExportCancellation(error)) {
-      void showExportPreparationFailure(error);
-    }
-  } finally {
+
+  const snapshots = [
+    generatedArtifactPreviewSnapshot,
+    validatedGeneratedPublication
+  ];
+  let artifact = null;
+  for (const snapshot of snapshots) {
     if (
-      generatedArtifactSelectionLock ===
-      selectionLock
+      snapshot?.projectEpoch !== projectApplicationEpoch
     ) {
-      generatedArtifactSelectionLock = null;
-      updateGeneratedOutput();
+      continue;
+    }
+    artifact = snapshot.catalog?.artifacts?.find(
+      candidate => candidate.key === selectedKey
+    ) || null;
+    if (artifact) break;
+  }
+
+  // The visible code element is the authoritative last-resort cache for the
+  // currently selected file. This keeps Copy instant even while background
+  // validation is still settling.
+  if (!artifact) {
+    const visibleKey = String(
+      elements.generatedFileSelect?.value || ""
+    );
+    if (
+      selectedKey &&
+      visibleKey === selectedKey &&
+      elements.generatedCode?.textContent
+    ) {
+      artifact = {
+        key: selectedKey,
+        content: elements.generatedCode.textContent
+      };
     }
   }
+
+  if (!artifact) {
+    throw new Error(
+      window.RMLI18n.t("ui.literal.6513029b18f3")
+    );
+  }
+
+  generatedSelectedArtifactKey = selectedKey;
+  if (graphViewActive) {
+    generatedGraphArtifactKey = selectedKey;
+  } else {
+    generatedOutlineArtifactKey = selectedKey;
+  }
+  await copyText(String(artifact.content ?? ""), button);
 }
 
 function downloadBlob(blob, filename) {
@@ -33626,22 +33816,23 @@ function queueImportedCodegen(
   projectEpoch =
     projectApplicationEpoch
 ) {
-  window.setTimeout(() => {
-    if (
-      Number(projectEpoch) !==
-        Number(projectApplicationEpoch)
-    ) {
-      return;
-    }
-    try {
-      updateGeneratedOutput();
-    } catch (error) {
-      console.error(
-        "[RML BUILDER INTERNAL FAILURE] Background code generation could not be started after project import.",
-        error
-      );
-    }
-  }, 0);
+  if (
+    Number(projectEpoch) !==
+      Number(projectApplicationEpoch)
+  ) {
+    return;
+  }
+  try {
+    // No timer/idle delay: once import verification releases generated output,
+    // start generation immediately.  Large Runtime Graph codegen can still run
+    // through its worker-backed contribution path without delaying project use.
+    updateGeneratedOutput();
+  } catch (error) {
+    console.error(
+      "[RML BUILDER INTERNAL FAILURE] Background code generation could not be started after project import.",
+      error
+    );
+  }
 }
 
 const importedGraphPresentationWork =
@@ -34672,6 +34863,13 @@ async function applyLoadedProjectWithFeedback(
       }
     );
 
+    // The installed project is now verified.  Generated output no longer waits
+    // for guidance/storage/finalization work that is unrelated to codegen.
+    generatedOutputDeferredImportEpoch = 0;
+    queueImportedCodegen(
+      importedProjectEpoch
+    );
+
     updateBuilderWork(
       session,
       {
@@ -34784,11 +34982,6 @@ async function applyLoadedProjectWithFeedback(
           finalizationProgress(3)
       }
     );
-    generatedOutputDeferredImportEpoch = 0;
-    queueImportedCodegen(
-      importedProjectEpoch
-    );
-
     const omittedApiNodes =
       Array.isArray(
         prerequisites
@@ -38824,341 +39017,6 @@ function clearBrowserCompilerReferences() {
   updateExportDialog();
 }
 
-function renderExportProjectSummary(
-  catalog
-) {
-  const host =
-    elements.exportProjectSummary;
-
-  if (!host) {
-    return;
-  }
-
-  const fragment =
-    document.createDocumentFragment();
-  const projectPaths = new Set(
-    catalog.artifacts
-      .map(artifact => artifact.projectId)
-  );
-
-  for (const project of catalog.projects) {
-    if (!projectPaths.has(project.id)) {
-      continue;
-    }
-
-    const card =
-      document.createElement("div");
-    const title =
-      document.createElement("strong");
-    const detail =
-      document.createElement("small");
-    const target =
-      document.createElement("b");
-
-    card.className =
-      "export-generated-project";
-    title.textContent =
-      project.label;
-    detail.textContent =
-      project.folder
-        ? `${project.folder}/${project.assemblyName}.csproj`
-        : `${project.assemblyName}.csproj`;
-    target.textContent =
-      `→ ${project.deployDirectory}`;
-
-    card.append(
-      title,
-      detail,
-      target
-    );
-    fragment.appendChild(card);
-  }
-
-  host.replaceChildren(fragment);
-  host.hidden =
-    host.childElementCount === 0;
-}
-
-function renderExportGeneratedFiles(
-  catalog
-) {
-  const host =
-    elements.exportGeneratedFiles;
-
-  if (!host) {
-    return;
-  }
-
-  if (catalog.artifacts.length === 0) {
-    const empty =
-      document.createElement("p");
-
-    empty.className =
-      "export-generated-empty";
-    empty.textContent =
-      window.RMLI18n.t("{{i18n:js.presentation.a3e75bb14825}}");
-    host.replaceChildren(empty);
-    return;
-  }
-
-  const fragment =
-    document.createDocumentFragment();
-
-  for (const artifact of
-    catalog.artifacts) {
-    const row =
-      document.createElement("button");
-    const badge =
-      document.createElement("span");
-    const copy =
-      document.createElement("span");
-    const path =
-      document.createElement("strong");
-    const detail =
-      document.createElement("small");
-    const target =
-      document.createElement("b");
-
-    row.type = "button";
-    row.className =
-      "export-generated-file";
-    row.dataset.kind = artifact.kind;
-    row.dataset.artifactKey =
-      artifact.key;
-    row.title = artifact.copyable === false
-      ? `${artifact.relativePath} is created by the browser compiler.`
-      : `Select ${artifact.relativePath} for copying`;
-    row.disabled =
-      artifact.copyable === false;
-
-    badge.className =
-      "export-generated-file-badge";
-    badge.textContent = artifact.badge;
-    copy.className =
-      "export-generated-file-copy";
-    path.textContent =
-      artifact.relativePath;
-    detail.textContent = artifact.copyable === false
-      ? `${artifact.kindLabel} · compiled locally · ${artifact.projectLabel}`
-      : `${artifact.kindLabel} · ${artifact.projectLabel}`;
-    copy.append(path, detail);
-
-    target.className =
-      "export-generated-file-target";
-    target.textContent =
-      artifact.deployDirectory
-        ? artifact.deployDirectory
-        : "support";
-
-    row.append(
-      badge,
-      copy,
-      target
-    );
-    if (artifact.copyable !== false) {
-      row.addEventListener(
-        "click",
-        () => {
-          exportCopyArtifactKey =
-            artifact.key;
-
-          updateExportCopyButtonState(
-            catalog
-          );
-        }
-      );
-    }
-    fragment.appendChild(row);
-  }
-
-  host.replaceChildren(fragment);
-}
-
-function currentExportCopyArtifact(
-  existingCatalog = null
-) {
-  const catalog =
-    existingCatalog ||
-    currentValidatedGeneratedPublication()
-      ?.catalog ||
-    {
-      projects: [],
-      artifacts: [],
-      generationDiagnostics: [],
-      multiProject: false
-    };
-  let artifact = catalog.artifacts.find(
-    candidate =>
-      candidate.copyable !== false &&
-      candidate.key ===
-        exportCopyArtifactKey
-  );
-
-  if (!artifact) {
-    const graphFiles =
-      getAdditionalGeneratedSourceFiles();
-
-    artifact =
-      preferredGraphArtifact(
-        catalog.artifacts.filter(candidate =>
-          candidate.copyable !== false
-        ),
-        graphFiles
-      ) ||
-      catalog.artifacts.find(candidate =>
-        candidate.copyable !== false
-      ) ||
-      null;
-  }
-
-  exportCopyArtifactKey =
-    artifact?.key || "";
-
-  return {
-    catalog,
-    artifact
-  };
-}
-
-function updateExportCopyButtonState(
-  existingCatalog = null,
-  existingPathAvailable = null,
-  existingHasDiagnostics = null
-) {
-  const { artifact } =
-    currentExportCopyArtifact(
-      existingCatalog
-    );
-  const pathAvailable =
-    existingPathAvailable === null
-      ? Boolean(
-          elements.exportResonitePath
-            ?.value.trim()
-        )
-      : existingPathAvailable;
-  const hasDiagnostics =
-    existingHasDiagnostics === null
-      ? getDiagnostics().length > 0
-      : existingHasDiagnostics;
-  const exportReady =
-    !hasDiagnostics &&
-    !exportPreflightRequest &&
-    !exportDeliveryBusy &&
-    !["checking", "error"].includes(
-      exportReadiness.phase
-    );
-
-  elements.exportGeneratedFiles
-    ?.querySelectorAll(
-      ".export-generated-file"
-    )
-    .forEach(row => {
-      const selected =
-        row.dataset.artifactKey ===
-          artifact?.key;
-
-      row.classList.toggle(
-        "selected",
-        selected
-      );
-
-      row.setAttribute(
-        "aria-pressed",
-        String(selected)
-      );
-    });
-
-  if (elements.exportCopySelectedFile) {
-    const unavailable =
-      !exportReady ||
-      !artifact ||
-      artifact.copyable === false ||
-      (
-        artifact.requiresResonitePath &&
-        !pathAvailable
-      );
-    setExportControlAvailability(
-      elements.exportCopySelectedFile,
-      !unavailable
-    );
-    elements.exportCopySelectedFile.textContent =
-      window.RMLI18n.t("{{i18n:js.presentation.af74f7c5362a}}");
-    elements.exportCopySelectedFile.title =
-      artifact
-        ? artifact.relativePath
-        : window.RMLI18n.t("ui.literal.20d50b2f5695");
-  }
-}
-
-function setExportValidationFailure(error) {
-  const message = error instanceof Error ? error.message : String(error);
-  setExportReadiness(
-    "error",
-    {
-      fingerprint:
-        exportReadiness.fingerprint,
-      diagnostics: [
-        [
-          "Generated C#:",
-          window.RMLI18n.t("ui.literal.b4580a3d5f8d")
-        ].some(prefix => message.startsWith(prefix))
-          ? message
-          : `Generated C#: ${message}`
-      ],
-      fileCount:
-        exportReadiness.fileCount
-    }
-  );
-  setExportControlAvailability(
-    elements.exportDownloadSelected,
-    false
-  );
-  setExportControlAvailability(
-    elements.exportCopySelectedFile,
-    false
-  );
-  elements.exportDownloadHint.textContent = message;
-  elements.exportDownloadHint.classList.add("error");
-}
-
-async function copySelectedExportArtifact(button) {
-  if (exportPreflightRequest || exportDeliveryBusy || !exportControlAvailable(button)) return;
-  const selectedKey = exportCopyArtifactKey;
-  const job = beginExportDelivery();
-  try {
-    const checked = await awaitExportDelivery(
-      job,
-      requestExportPreflight({
-        requireSemantic: false
-      })
-    );
-    assertExportDeliveryCurrent(job);
-    assertExportRequestCurrent(checked.request, true);
-    const artifact = checked.artifacts.find(
-      candidate =>
-        candidate.copyable !== false &&
-        candidate.key === selectedKey
-    );
-    if (!artifact) throw new Error(window.RMLI18n.t("ui.literal.6513029b18f3"));
-    exportCopyArtifactKey = selectedKey;
-    await awaitExportDelivery(
-      job,
-      copyText(artifact.content, button)
-    );
-  } catch (error) {
-    if (!expectedExportCancellation(error)) {
-      setExportValidationFailure(error);
-    }
-  } finally {
-    if (finishExportDelivery(job)) {
-      applyPrimaryExportAvailability([]);
-      if (elements.exportDialog?.open) {
-        updateExportDialog();
-      }
-    }
-  }
-}
-
 function currentApiExportCompatibilityWarning() {
   const graph =
     state.extensions
@@ -39287,20 +39145,14 @@ function renderExportApiCompatibilityWarning() {
 }
 
 function updateExportDialog() {
-  setExportControlAvailability(
-    elements.exportCopySelectedFile,
-    false
-  );
+  setExportPreflightStage(exportPreflightStage);
   setExportControlAvailability(
     elements.exportDownloadSelected,
     false
   );
   const guidanceStatus = generatedGuidanceStatus();
   if (guidanceStatus) {
-    elements.exportPackageSummary.textContent = guidanceStatus;
-    elements.exportPackageMode.textContent = window.RMLI18n.t("{{i18n:js.presentation.2b50ff807d04}}");
-    elements.exportProjectSummary.replaceChildren();
-    elements.exportGeneratedFiles.textContent = guidanceStatus;
+    elements.exportDownloadHint.textContent = guidanceStatus;
     return;
   }
   elements.exportDownloadHint.classList.remove("error");
@@ -39321,29 +39173,12 @@ function updateExportDialog() {
   const publication =
     currentValidatedGeneratedPublication();
   if (!publication) {
-    elements.exportPackageSummary.textContent =
-      window.RMLI18n.t(
-        "generated.validation.in_progress"
-      );
-    elements.exportPackageMode.textContent =
-      window.RMLI18n.t(
-        "generated.validation.in_progress"
-      );
-    elements.exportProjectSummary.replaceChildren();
-    elements.exportGeneratedFiles.textContent =
-      window.RMLI18n.t(
-        "generated.validation.in_progress"
-      );
     elements.exportDownloadHint.textContent =
       window.RMLI18n.t(
         "generated.validation.in_progress"
       );
     setExportControlAvailability(
       elements.exportDownloadSelected,
-      false
-    );
-    setExportControlAvailability(
-      elements.exportCopySelectedFile,
       false
     );
     return;
@@ -39454,32 +39289,6 @@ function updateExportDialog() {
           );
   }
 
-  if (elements.exportPackageSummary) {
-    elements.exportPackageSummary.textContent =
-      `${activeProjectCount} project${activeProjectCount === 1 ? "" : "s"} · ${displayCatalog.artifacts.length} file${displayCatalog.artifacts.length === 1 ? "" : "s"}`;
-  }
-
-  if (elements.exportPackageMode) {
-    elements.exportPackageMode.textContent =
-      displayCatalog.artifacts.length === 0
-        ? window.RMLI18n.t("ui.literal.a8fcece9d93a")
-        : effectiveMultiProject
-          ? window.RMLI18n.t("ui.literal.120602fc10d2")
-          : window.RMLI18n.t("index.text.9d3ad1a06503");
-    elements.exportPackageMode.dataset.mode =
-      effectiveMultiProject
-        ? "multi"
-        : "single";
-  }
-
-  renderExportProjectSummary(displayCatalog);
-  renderExportGeneratedFiles(displayCatalog);
-  updateExportCopyButtonState(
-    displayCatalog,
-    pathAvailable,
-    hasDiagnostics
-  );
-
   elements.exportResonitePath.setAttribute(
     "aria-invalid",
     String(projectPathMissing)
@@ -39568,7 +39377,7 @@ function updateExportDialog() {
     elements.exportDownloadSelected.textContent =
       window.RMLI18n.t("{{i18n:js.presentation.7bd0e4b0ebc2}}");
     elements.exportDownloadHint.textContent =
-      `The live manifest above is the exact ZIP content: ${displayCatalog.artifacts.length} files across ${activeProjectCount} independently compiled projects${destinations.length > 0 ? `, deploying to ${destinations.join(" and ")}` : ""}.`;
+      `ZIP will contain ${displayCatalog.artifacts.length} files across ${activeProjectCount} independently compiled projects${destinations.length > 0 ? `, deploying to ${destinations.join(" and ")}` : ""}.`;
     return;
   }
 
@@ -39588,7 +39397,7 @@ function updateExportDialog() {
   elements.exportDownloadSelected.textContent =
     window.RMLI18n.t("{{i18n:js.presentation.7bd0e4b0ebc2}}");
   elements.exportDownloadHint.textContent =
-    `The live manifest above contains the exact ${catalog.artifacts.length} files that will be bundled into the ZIP.`;
+    `${catalog.artifacts.length} files will be bundled into the ZIP.`;
 }
 
 function syncExportOptions() {
@@ -39656,46 +39465,51 @@ function syncEditedResonitePath() {
 let exportDialogOpenSequence = 0;
 
 function openExportDialog() {
+  if (elements.exportDialog?.open) return Promise.resolve(true);
   if (exportDialogOpenPromise) return exportDialogOpenPromise;
-  if (exportPreflightRequest || exportDeliveryBusy) return Promise.resolve(false);
   const sequence = ++exportDialogOpenSequence;
-  exportDialogOpenPromise = (async () => {
-    try {
-      const checked = await requestExportPreflight({
-        prepareStyles: true,
-        requireSemantic: false
-      });
-      if (sequence !== exportDialogOpenSequence) return false;
-      assertExportRequestCurrent(checked.request, true);
-      elements.exportPlatform.value = state.exportOptions.platform || inferExportPlatform(state.exportOptions.resonitePath);
-      elements.exportResonitePath.value = state.exportOptions.resonitePath;
-      elements.exportIncludeCs.checked = Boolean(state.exportOptions.includeCs);
-      elements.exportIncludeCsproj.checked = Boolean(state.exportOptions.includeCsproj);
-      elements.exportIncludeNodeIndex.checked = Boolean(state.exportOptions.includeNodeIndex);
-      elements.exportIncludeCompiled.checked = Boolean(state.exportOptions.includeCompiled);
-      updateExportDialog();
-      ensureUniversalCustomSelect(elements.exportPlatform)?.refresh?.();
-      elements.exportDialog.classList.remove("rml-dialog-loading");
-      if (typeof elements.exportDialog.showModal === "function") elements.exportDialog.showModal();
-      else elements.exportDialog.setAttribute("open", "");
-      stabilizeDialogFocus(elements.exportDialog);
-      requestAnimationFrame(() => {
-        if (sequence === exportDialogOpenSequence && elements.exportDialog.open) {
-          updateAdaptiveUtilityDialog(elements.exportDialog);
-        }
-      });
-      return true;
-    } catch (error) {
-      if (
-        sequence === exportDialogOpenSequence &&
-        !expectedExportCancellation(error)
-      ) {
-        void showExportPreparationFailure(error);
-      }
-      return false;
+
+  // Opening the dialog is a UI operation, not an export operation.  Publish the
+  // dialog immediately from current state; expensive preflight/codegen/catalog
+  // work continues after the user can already see and interact with it.
+  elements.exportPlatform.value = state.exportOptions.platform || inferExportPlatform(state.exportOptions.resonitePath);
+  elements.exportResonitePath.value = state.exportOptions.resonitePath;
+  elements.exportIncludeCs.checked = Boolean(state.exportOptions.includeCs);
+  elements.exportIncludeCsproj.checked = Boolean(state.exportOptions.includeCsproj);
+  elements.exportIncludeNodeIndex.checked = Boolean(state.exportOptions.includeNodeIndex);
+  elements.exportIncludeCompiled.checked = Boolean(state.exportOptions.includeCompiled);
+  elements.exportDialog.classList.remove("rml-dialog-loading");
+  updateExportDialog();
+  ensureUniversalCustomSelect(elements.exportPlatform)?.refresh?.();
+  if (typeof elements.exportDialog.showModal === "function") elements.exportDialog.showModal();
+  else elements.exportDialog.setAttribute("open", "");
+  stabilizeDialogFocus(elements.exportDialog);
+  requestAnimationFrame(() => {
+    if (sequence === exportDialogOpenSequence && elements.exportDialog.open) {
+      updateAdaptiveUtilityDialog(elements.exportDialog);
     }
-  })().finally(() => { exportDialogOpenPromise = null; });
-  return exportDialogOpenPromise;
+  });
+
+  exportDialogOpenPromise = requestExportPreflight({
+    prepareStyles: true,
+    requireSemantic: false
+  }).then(checked => {
+    if (sequence !== exportDialogOpenSequence) return false;
+    assertExportRequestCurrent(checked.request, true);
+    updateExportDialog();
+    return true;
+  }).catch(error => {
+    if (
+      sequence === exportDialogOpenSequence &&
+      !expectedExportCancellation(error)
+    ) {
+      void showExportPreparationFailure(error);
+    }
+    return false;
+  }).finally(() => {
+    exportDialogOpenPromise = null;
+  });
+  return Promise.resolve(true);
 }
 
 function closeExportDialog() {
@@ -41051,7 +40865,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.21.87-scanner-demand-no-deadline"
+    "../../templates/help_template.html?v=1.21.96-export-action-preflight-cache"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -41411,23 +41225,14 @@ function cacheElements() {
     exportCsprojFilename: document.getElementById(
       "export-csproj-filename"
     ),
-    exportPackageSummary: document.getElementById(
-      "export-package-summary"
-    ),
-    exportPackageMode: document.getElementById(
-      "export-package-mode"
-    ),
-    exportProjectSummary: document.getElementById(
-      "export-project-summary"
-    ),
-    exportGeneratedFiles: document.getElementById(
-      "export-generated-files"
-    ),
     exportDownloadHint: document.getElementById(
       "export-download-hint"
     ),
-    exportCopySelectedFile: document.getElementById(
-      "export-copy-selected-file"
+    exportPreflightStatus: document.getElementById(
+      "export-preflight-status"
+    ),
+    exportPreflightStatusText: document.getElementById(
+      "export-preflight-status-text"
     ),
     exportDownloadSelected: document.getElementById(
       "export-download-selected"
@@ -46414,12 +46219,14 @@ async function initialize() {
             ?.active === true
         );
 
+      generatedSelectedArtifactKey =
+        elements.generatedFileSelect.value;
       if (graphViewActive) {
         generatedGraphArtifactKey =
-          elements.generatedFileSelect.value;
+          generatedSelectedArtifactKey;
       } else {
         generatedOutlineArtifactKey =
-          elements.generatedFileSelect.value;
+          generatedSelectedArtifactKey;
       }
 
       updateGeneratedOutput();
@@ -46774,15 +46581,6 @@ async function initialize() {
   elements.exportCompilerReferenceStatus.addEventListener(
     "drop",
     browserCompilerReferenceDrop
-  );
-  elements.exportCopySelectedFile.addEventListener(
-    "click",
-    () => {
-      syncExportOptions();
-      copySelectedExportArtifact(
-        elements.exportCopySelectedFile
-      );
-    }
   );
   elements.exportDownloadSelected.addEventListener(
     "click",
@@ -47827,7 +47625,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -47845,7 +47643,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -48680,7 +48478,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-copy"></use></svg>
   `;
 }
 

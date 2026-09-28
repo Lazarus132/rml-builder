@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.87-scanner-demand-no-deadline";
+    "1.21.96-export-action-preflight-cache";
 
   if (
     window.RMLBuilderReplacementDialog
@@ -362,7 +362,7 @@
                     ? "!"
                     : "·";
           if (status === "selected") {
-            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.87-scanner-demand-no-deadline#icon-check"></use></svg>`;
+            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-check"></use></svg>`;
           }
           const name =
             document.createElement("span");

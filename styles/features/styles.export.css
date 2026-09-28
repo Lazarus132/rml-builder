@@ -716,3 +716,23 @@ dialog#export-dialog > .export-dialog-body {
   overflow-y: auto !important;
   overscroll-behavior: contain !important;
 }
+
+.export-preflight-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
+}
+.export-preflight-status[hidden] { display: none !important; }
+.export-preflight-spinner {
+  width: 16px; height: 16px; flex: 0 0 16px;
+  border: 2px solid rgba(255,255,255,.2);
+  border-top-color: currentColor; border-radius: 50%;
+  animation: rml-export-preflight-spin .7s linear infinite;
+}
+@keyframes rml-export-preflight-spin { to { transform: rotate(360deg); } }

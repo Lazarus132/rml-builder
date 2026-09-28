@@ -3222,5 +3222,11 @@
   "generated.validation.download_bridge_restricted": "The generic download bridge only accepts Saved API Composite data. Generated project files require a validated publication snapshot.",
   "export.compiler_references.changed": "Compiler references changed.",
   "export.compiler_references.sha256_unavailable": "SHA-256 is unavailable, so the selected compiler DLLs cannot be verified byte for byte.",
-  "export.compiler_references.identity_missing": "The compiler reference DLLs were not bound to verified SHA-256 content identities. Compilation was stopped."
+  "export.compiler_references.identity_missing": "The compiler reference DLLs were not bound to verified SHA-256 content identities. Compilation was stopped.",
+  "export.preflight.prepare": "Preparing export…",
+  "export.preflight.catalog": "Checking API catalog…",
+  "export.preflight.codegen": "Updating generated code…",
+  "export.preflight.artifacts": "Preparing generated files…",
+  "export.preflight.validate": "Validating generated C#…",
+  "export.preflight.ready": "Export ready."
 }

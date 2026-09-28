@@ -3222,5 +3222,11 @@
   "generated.validation.download_bridge_restricted": "Die allgemeine Download-Schnittstelle akzeptiert nur Daten gespeicherter API-Composites. Erzeugte Projektdateien benötigen einen geprüften Generierungsstand.",
   "export.compiler_references.changed": "Die Compiler-Referenzen wurden geändert.",
   "export.compiler_references.sha256_unavailable": "SHA-256 ist nicht verfügbar. Daher können die ausgewählten Compiler-DLLs nicht bytegenau geprüft werden.",
-  "export.compiler_references.identity_missing": "Die Compiler-Referenz-DLLs sind nicht an geprüfte SHA-256-Inhaltsidentitäten gebunden. Die Kompilierung wurde abgebrochen."
+  "export.compiler_references.identity_missing": "Die Compiler-Referenz-DLLs sind nicht an geprüfte SHA-256-Inhaltsidentitäten gebunden. Die Kompilierung wurde abgebrochen.",
+  "export.preflight.prepare": "Export wird vorbereitet…",
+  "export.preflight.catalog": "API-Katalog wird geprüft…",
+  "export.preflight.codegen": "Generierter Code wird aktualisiert…",
+  "export.preflight.artifacts": "Generierte Dateien werden vorbereitet…",
+  "export.preflight.validate": "Generierter C#-Code wird geprüft…",
+  "export.preflight.ready": "Export bereit."
 }

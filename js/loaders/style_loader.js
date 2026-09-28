@@ -2,7 +2,7 @@
   "use strict";
 
   const STYLE_LOADER_MODULE_ID =
-    "1.21.87-scanner-demand-no-deadline";
+    "1.21.96-export-action-preflight-cache";
 
   const CLASS_STYLE_VERSION = 3;
 
@@ -702,7 +702,7 @@
     information: "../../styles/features/styles.information.css?v=1.10-shortcut-key-groups",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.21.87-scanner-demand-no-deadline"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.21.96-export-action-preflight-cache"
   });
   const bundleOrder = Object.freeze([
     "preview",

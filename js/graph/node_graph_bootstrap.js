@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.87-scanner-demand-no-deadline";
+  "1.21.96-export-action-preflight-cache";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

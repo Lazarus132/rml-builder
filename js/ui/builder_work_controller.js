@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.87-scanner-demand-no-deadline";
+    "1.21.96-export-action-preflight-cache";
   let installedController = null;
 
   if (
