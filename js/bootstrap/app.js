@@ -39044,7 +39044,7 @@ function updateExportDialog() {
 }
 
 function syncExportOptions() {
-  state.exportOptions = {
+  const nextOptions = {
     platform:
       elements.exportPlatform.value,
     resonitePath:
@@ -39058,13 +39058,42 @@ function syncExportOptions() {
     includeCompiled:
       elements.exportIncludeCompiled.checked
   };
+
+  const previousOptions =
+    state.exportOptions || {};
+
+  const changed =
+    previousOptions.platform !==
+      nextOptions.platform ||
+    previousOptions.resonitePath !==
+      nextOptions.resonitePath ||
+    previousOptions.includeCs !==
+      nextOptions.includeCs ||
+    previousOptions.includeCsproj !==
+      nextOptions.includeCsproj ||
+    previousOptions.includeNodeIndex !==
+      nextOptions.includeNodeIndex ||
+    previousOptions.includeCompiled !==
+      nextOptions.includeCompiled;
+
+  if (!changed) {
+    updateExportDialog();
+    return false;
+  }
+
+  state.exportOptions =
+    nextOptions;
+
   updateBuilderPreferences({
     exportOptions:
       state.exportOptions
   });
+
   persist();
   requestGeneratedOutputUpdate();
   updateExportDialog();
+
+  return true;
 }
 
 function applyExportPlatformPreset() {

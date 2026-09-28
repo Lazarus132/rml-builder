@@ -11768,7 +11768,8 @@
   function promoteFactoryReportForCatalog(
     catalog,
     {
-      liveFingerprintVerified = false
+      liveFingerprintVerified = false,
+      preserveLiveVerification = false
     } = {}
   ) {
     const report =
@@ -11789,20 +11790,31 @@
       return false;
     }
 
-    const catalogSource =
-      liveFingerprintVerified
-        ? "scanner"
-        : String(
-            catalog?.catalogSource || ""
-          );
+    const catalogDataSource =
+      String(
+        catalog?.catalogSource || ""
+      );
+
     const liveCatalogVerified =
-      liveFingerprintVerified ||
-      catalogSource === "scanner";
+      liveFingerprintVerified === true ||
+      (
+        preserveLiveVerification === true &&
+        report.liveCatalogVerified === true
+      ) ||
+      catalogDataSource === "scanner";
+
+    const catalogSource =
+      liveCatalogVerified
+        ? "scanner"
+        : catalogDataSource;
+
     if (
       String(report.catalogSource || "") ===
         catalogSource &&
       report.liveCatalogVerified ===
-        liveCatalogVerified
+        liveCatalogVerified &&
+      String(report.catalogDataSource || "") ===
+        catalogDataSource
     ) {
       return true;
     }
@@ -11811,15 +11823,14 @@
       ...report,
       catalogSource,
       liveCatalogVerified,
-      catalogDataSource:
-        String(
-          catalog?.catalogSource || ""
-        )
+      catalogDataSource
     });
+
     publishFactoryReportMetadata(
       report,
       nextReport
     );
+
     return true;
   }
 
@@ -11944,6 +11955,26 @@
   ) {
     const existingReport =
       window.RMLApiNodeFactoryReport;
+
+    const preserveLiveVerification =
+      Boolean(
+        existingReport &&
+        existingReport.verificationPassed === true &&
+        existingReport.liveCatalogVerified === true &&
+        String(
+          existingReport.catalogFingerprint || ""
+        ) ===
+          String(
+            catalog?.catalogFingerprint || ""
+          ) &&
+        String(
+          existingReport.engineVersion || ""
+        ) ===
+          String(
+            catalog?.engineVersion || ""
+          )
+      );
+
     if (
       factoryMatchesCatalog(
         catalog,
@@ -11955,8 +11986,12 @@
       )
     ) {
       promoteFactoryReportForCatalog(
-        catalog
+        catalog,
+        {
+          preserveLiveVerification
+        }
       );
+
       return assertCatalogFactoryCommit(
         catalog,
         window.RMLApiNodeFactoryReport ||
@@ -11969,6 +12004,7 @@
       signal,
       "The base node modules"
     );
+
     await awaitCatalogSettlement(
       ensureApiNodesModuleLoaded(),
       signal,
@@ -11989,8 +12025,12 @@
       )
     ) {
       promoteFactoryReportForCatalog(
-        catalog
+        catalog,
+        {
+          preserveLiveVerification
+        }
       );
+
       return assertCatalogFactoryCommit(
         catalog,
         window.RMLApiNodeFactoryReport ||
@@ -12007,7 +12047,9 @@
         "function"
     ) {
       throw new Error(
-        window.RMLI18n.t("ui.literal.9d9796871ed3")
+        window.RMLI18n.t(
+          "ui.literal.9d9796871ed3"
+        )
       );
     }
 
@@ -12015,8 +12057,14 @@
       createCatalogPublication,
       signal
     };
+
     let rebuildError = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+
+    for (
+      let attempt = 0;
+      attempt < 3;
+      attempt += 1
+    ) {
       try {
         await awaitCatalogSettlement(
           controller.rebuild(
@@ -12026,23 +12074,35 @@
           signal,
           "The API node factory rebuild"
         );
+
         rebuildError = null;
         break;
       } catch (error) {
         rebuildError = error;
+
         const message = String(
           error?.message || error || ""
         );
+
         const registryChanged =
           message.includes(
-            window.RMLI18n.t("ui.literal.6bafcf11ed48")
+            window.RMLI18n.t(
+              "ui.literal.6bafcf11ed48"
+            )
           ) ||
           message.includes(
-            window.RMLI18n.t("ui.literal.a57d9e3cfe81")
+            window.RMLI18n.t(
+              "ui.literal.a57d9e3cfe81"
+            )
           );
-        if (!registryChanged || attempt >= 2) {
+
+        if (
+          !registryChanged ||
+          attempt >= 2
+        ) {
           throw error;
         }
+
         await awaitCatalogSettlement(
           new Promise(resolve =>
             window.RMLScheduleTask(resolve)
@@ -12052,11 +12112,27 @@
         );
       }
     }
+
     if (rebuildError) {
       throw rebuildError;
     }
+
     report =
       window.RMLApiNodeFactoryReport;
+
+    if (preserveLiveVerification) {
+      promoteFactoryReportForCatalog(
+        catalog,
+        {
+          preserveLiveVerification: true
+        }
+      );
+
+      report =
+        window.RMLApiNodeFactoryReport ||
+        report;
+    }
+
     return assertCatalogFactoryCommit(
       catalog,
       report
@@ -14759,8 +14835,6 @@
           integrity.valid !== true ||
           missing.length > 0
         ) {
-          await baseModNodesReady;
-          await ensureApiNodesModuleLoaded();
           if (
             statusCatalog() !== catalog ||
             !catalogSnapshotsMatch(
@@ -14772,23 +14846,11 @@
               window.RMLI18n.t("ui.literal.35f76455ea57")
             );
           }
-          const controller =
-            window.RMLApiNodeFactoryController;
-          if (
-            !controller ||
-            typeof controller.rebuild !==
-              "function"
-          ) {
-            throw new Error(
-              window.RMLI18n.t("ui.literal.c5989983bcb6")
-            );
-          }
-          await controller.rebuild(
-            catalog,
-            {
-              createCatalogPublication
-            }
+
+          await activateCatalogAndFactoryNow(
+            catalog
           );
+
           rebuilt = true;
         }
 
