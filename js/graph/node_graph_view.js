@@ -4692,7 +4692,7 @@ function setRmlNodeSymbolContent(element, symbol) {
   svg.setAttribute("aria-hidden", "true");
   svg.classList.add("rml-node-symbol-svg");
   const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", `assets/rml-icons.svg?v=1.22.6-unified-export-state#${iconId}`);
+  use.setAttribute("href", `assets/rml-icons.svg?v=1.22.7-unified-operation-status#${iconId}`);
   svg.appendChild(use);
   element.appendChild(svg);
 }
@@ -14141,7 +14141,7 @@ function graphPresentationVisible() {
   }
 
 function graphOutlineToggleMarkup() {
-    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-outline"></use></svg>`;
+    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-outline"></use></svg>`;
   }
 
 function markGraphPackPresentationPending() {
@@ -15350,7 +15350,7 @@ function restoreGraphPaletteScroll(
 
 function setGraphPanelToggleIcon(button, iconName) {
   if (!button) return;
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-${iconName}"></use></svg>`;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-${iconName}"></use></svg>`;
 }
 
 let graphPanelScrollPreservationSequence = 0;
@@ -16450,7 +16450,7 @@ function createPaletteItem(
 
     const add =
       document.createElement("small");
-    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
 
     button.append(
       symbol,
@@ -16752,7 +16752,7 @@ function refreshGraphPaletteConfigurationAvailability() {
     );
     const marker = button.querySelector("small");
     if (marker) {
-      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
     }
   }
 
@@ -21368,20 +21368,20 @@ function createToolbarButton(
 const GRAPH_TOOLBAR_ICONS =
     Object.freeze({
       center: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-center"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-center"></use></svg>`,
       clear: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-delete"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-delete"></use></svg>`,
       zoomOut: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-zoom-out"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-zoom-out"></use></svg>`,
       zoomIn: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-zoom-in"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-zoom-in"></use></svg>`,
       editMode: `
-        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-expand"></use></svg>
-        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-collapse"></use></svg>`,
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-expand"></use></svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-collapse"></use></svg>`,
       search: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-search"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-search"></use></svg>`,
       next: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-next"></use></svg>`
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-next"></use></svg>`
     });
 
 function createToolbarIconButton(
@@ -21864,7 +21864,7 @@ function renderGraphCanvas() {
       <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="{{i18n:js.presentation.f0d095db4021}}">
         <div class="rml-graph-search-overlay-head">
           <strong>{{i18n:js.presentation.f0d095db4021}}</strong>
-          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-close"></use></svg></button>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-close"></use></svg></button>
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="{{i18n:js.presentation.a00d3271edfc}}" aria-label="{{i18n:js.presentation.f0d095db4021}}" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
@@ -28063,7 +28063,7 @@ function createGraphNodeElementRmlOriginal(
       flip.className =
         "rml-graph-node-flip";
       flip.type = "button";
-      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-node-swap"></use></svg>`;
+      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-node-swap"></use></svg>`;
       flip.title = mirrored
         ? window.RMLI18n.t("ui.literal.9114b1bfc765")
         : window.RMLI18n.t("ui.literal.c8b7ca53198e");
@@ -36713,7 +36713,7 @@ function renderGraphInspector(options = {}) {
       empty.className =
         "empty-inspector";
       empty.innerHTML =
-        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-lightning"></use></svg></span>
+        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-lightning"></use></svg></span>
          <h2>{{i18n:ui.text.e02d912b50bb}}</h2>
          <p>{{i18n:ui.text.d19bd2965c4f}}</p>`;
       dom.inspectorContent.appendChild(
@@ -41954,7 +41954,7 @@ const INSPECTOR_ACTION_PRESENTATION = Object.freeze({
 
   function inspectorButtonIconMarkup(actionId) {
     const iconName = INSPECTOR_ACTION_PRESENTATION[actionId]?.[0] || "more";
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-${iconName}"></use></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-${iconName}"></use></svg>`;
   }
 
   function inspectorButtonTone(actionId) {
@@ -42020,7 +42020,7 @@ function visualFunctionParameterButton(action, label, handler) {
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("aria-hidden", "true");
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    use.setAttribute("href", `assets/rml-icons.svg?v=1.22.6-unified-export-state#icon-visual-function-parameter-${action}`);
+    use.setAttribute("href", `assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-visual-function-parameter-${action}`);
     svg.appendChild(use);
     button.appendChild(svg);
     button.addEventListener("click", event => {
@@ -50403,7 +50403,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.22.6-unified-export-state",
+      "1.22.7-unified-operation-status",
     writable: false,
     enumerable: true,
     configurable: true

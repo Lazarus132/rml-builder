@@ -739,3 +739,35 @@ dialog#export-dialog > .export-dialog-body {
   animation: rml-export-preflight-spin .7s linear infinite;
 }
 @keyframes rml-export-preflight-spin { to { transform: rotate(360deg); } }
+
+/* Unified export operation presentation: one state, one visible owner. */
+#export-compiler-reference-status,
+#export-compiler-build-status {
+  display: none !important;
+}
+.export-preflight-status {
+  border-color: rgba(118, 198, 255, .36);
+  background: linear-gradient(145deg, rgba(17, 31, 50, .96), rgba(8, 17, 30, .96));
+  box-shadow: 0 10px 30px rgba(0,0,0,.22), 0 0 24px rgba(50,156,255,.08);
+  color: #bfd1e4;
+}
+.export-preflight-status strong { color: #f5fbff; }
+.export-preflight-status small { color: #91a8bf; opacity: 1; }
+.export-preflight-status[data-state="working"] {
+  border-color: rgba(117,216,255,.52);
+}
+.export-preflight-status[data-state="ready"] {
+  border-color: rgba(110,224,164,.42);
+}
+.export-preflight-status[data-state="error"] {
+  border-color: rgba(255,120,120,.55);
+}
+.export-preflight-spinner {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  animation: none;
+}

@@ -8633,7 +8633,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.22.6-unified-export-state",
+        "1.22.7-unified-operation-status",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8666,7 +8666,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.22.6-unified-export-state" &&
+        "1.22.7-unified-operation-status" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -18441,7 +18441,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.22.6-unified-export-state",
+          "1.22.7-unified-operation-status",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

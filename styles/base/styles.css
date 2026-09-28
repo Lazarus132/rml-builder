@@ -5171,6 +5171,8 @@ html[data-rml-architecture-gate="blocked"] body > :not(#rml-architecture-gate) {
   pointer-events: none;
 }
 .builder-settings-inspector-back { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; }
-
 .delete-node > .delete-node-icon path { stroke:#aeb9c4 !important; fill:none !important; }
 .delete-node:hover > .delete-node-icon path,.delete-node:focus-visible > .delete-node-icon path { stroke:#ff8a9b !important; }
+body.rml-export-status-owned .builder-work-overlay:not([data-mode="replacement"]) {
+  display: none !important;
+}

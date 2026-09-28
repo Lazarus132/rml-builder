@@ -5,7 +5,7 @@ function savedApiCompositeCompareWorkerMain(
 ) {
 const self = workerScope;
 const SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID =
-  "1.22.6-unified-export-state";
+  "1.22.7-unified-operation-status";
 const SAVED_API_COMPOSITE_CANONICAL_SCHEMA_VERSION = 4;
 const MESSAGE_TYPE = "rml-saved-api-composite-compare";
 const RESULT_TYPE = `${MESSAGE_TYPE}-result`;
@@ -1933,7 +1933,7 @@ if (savedApiCompositeCompareWorkerThread) {
     {
       value: Object.freeze({
         moduleId:
-          "1.22.6-unified-export-state",
+          "1.22.7-unified-operation-status",
         canonicalSchemaVersion:
           4,
         source:

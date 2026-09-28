@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.22.6-unified-export-state";
+    "1.22.7-unified-operation-status";
   let installedController = null;
 
   if (

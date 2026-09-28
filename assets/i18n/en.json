@@ -3231,5 +3231,19 @@
   "export.preflight.ready": "Export ready.",
   "export.preflight.idle": "Export is current; changes are checked only when needed.",
   "export.preflight.error": "Export validation failed.",
-  "export.preflight.dll_not_selected": "DLL build is not selected."
+  "export.preflight.dll_not_selected": "DLL build is not selected.",
+  "export.preflight.references": "Checking compiler references…",
+  "export.preflight.compile": "Compiling DLL…",
+  "export.preflight.semantic": "Verifying compilation…",
+  "export.preflight.detail.prepare": "Evaluating the current project state.",
+  "export.preflight.detail.catalog": "Only API definitions required by the project are being checked.",
+  "export.preflight.detail.codegen": "Only stale generated outputs are being updated.",
+  "export.preflight.detail.artifacts": "Export files are being assembled from the current publication.",
+  "export.preflight.detail.validate": "C# syntax and generated files are checked against the current fingerprint.",
+  "export.preflight.detail.references": "Only missing or changed compiler references are evaluated.",
+  "export.preflight.detail.compile": "Selected DLL outputs are built from the current source and reference state.",
+  "export.preflight.detail.semantic": "Source, reference, and build fingerprints are checked for consistency.",
+  "export.preflight.detail.ready": "All stages required for the selected export action are current.",
+  "export.preflight.detail.idle": "No export work is running.",
+  "export.preflight.detail.error": "The last required export stage failed."
 }

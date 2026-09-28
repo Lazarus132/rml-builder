@@ -3231,5 +3231,19 @@
   "export.preflight.ready": "Export bereit.",
   "export.preflight.idle": "Export ist aktuell; Änderungen werden nur bei Bedarf geprüft.",
   "export.preflight.error": "Exportprüfung fehlgeschlagen.",
-  "export.preflight.dll_not_selected": "DLL-Erstellung ist nicht ausgewählt."
+  "export.preflight.dll_not_selected": "DLL-Erstellung ist nicht ausgewählt.",
+  "export.preflight.references": "Compiler-Referenzen werden geprüft…",
+  "export.preflight.compile": "DLL wird kompiliert…",
+  "export.preflight.semantic": "Kompilierung wird verifiziert…",
+  "export.preflight.detail.prepare": "Aktueller Projektzustand wird ausgewertet.",
+  "export.preflight.detail.catalog": "Nur die vom Projekt benötigten API-Definitionen werden geprüft.",
+  "export.preflight.detail.codegen": "Nur veraltete generierte Ausgaben werden aktualisiert.",
+  "export.preflight.detail.artifacts": "Exportdateien werden aus der aktuellen Publication zusammengestellt.",
+  "export.preflight.detail.validate": "C#-Syntax und generierte Dateien werden gegen den aktuellen Fingerprint geprüft.",
+  "export.preflight.detail.references": "Nur fehlende oder geänderte Compiler-Referenzen werden ausgewertet.",
+  "export.preflight.detail.compile": "Die ausgewählten DLL-Ausgaben werden aus dem aktuellen Source- und Referenzstand erstellt.",
+  "export.preflight.detail.semantic": "Source-, Referenz- und Build-Fingerprints werden auf Konsistenz geprüft.",
+  "export.preflight.detail.ready": "Alle für die gewählte Exportaktion erforderlichen Stufen sind aktuell.",
+  "export.preflight.detail.idle": "Es läuft keine Exportarbeit.",
+  "export.preflight.detail.error": "Die zuletzt erforderliche Exportstufe ist fehlgeschlagen."
 }
