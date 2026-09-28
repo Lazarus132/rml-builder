@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.96-export-action-preflight-cache";
+    "1.21.97-strict-catalog-live-picker-stable";
   const GATE_VERSION = 1;
 
   

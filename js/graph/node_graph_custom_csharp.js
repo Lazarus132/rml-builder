@@ -2422,7 +2422,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.21.96-export-action-preflight-cache",
+        "js/workers/graph_codegen_worker.js?v=1.21.97-strict-catalog-live-picker-stable",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -5527,7 +5527,7 @@ function createCustomCSharpOverlayFrame(
     actions.className =
       "rml-custom-csharp-overlay-window-actions";
     const windowIcon = name =>
-      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-${name}"></use></svg>`;
+      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-${name}"></use></svg>`;
     const returnIcon = windowIcon("back");
     const minimizeIcon = windowIcon("minimize");
     const maximizeIcon = windowIcon("maximize");
@@ -6076,7 +6076,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.21.96-export-action-preflight-cache",
+      "styles/features/styles.runtime-graph.css?v=1.21.97-strict-catalog-live-picker-stable",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -7618,7 +7618,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.21.96-export-action-preflight-cache",
+      "1.21.97-strict-catalog-live-picker-stable",
     writable: false,
     enumerable: true,
     configurable: true

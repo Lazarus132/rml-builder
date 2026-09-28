@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.96-export-action-preflight-cache";
+    "1.21.97-strict-catalog-live-picker-stable";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -146,11 +146,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.21.96-export-action-preflight-cache",
+    "../compiler/visual_csharp.js?v=1.21.97-strict-catalog-live-picker-stable",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.96-export-action-preflight-cache",
+    "api_nodes.js?v=1.21.97-strict-catalog-live-picker-stable",
     scriptUrl
   ).href;
 
@@ -1536,6 +1536,8 @@
     const connectionHealth =
       connection?.health;
     return Boolean(
+      _catalog &&
+      _report?.liveCatalogVerified === true &&
       selectedSession &&
       selectedHealth?.ok === true &&
       selectedHealth.runtimeBridgeReady ===

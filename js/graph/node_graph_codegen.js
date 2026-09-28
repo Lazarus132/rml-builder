@@ -8633,7 +8633,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.96-export-action-preflight-cache",
+        "1.21.97-strict-catalog-live-picker-stable",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8666,7 +8666,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.96-export-action-preflight-cache" &&
+        "1.21.97-strict-catalog-live-picker-stable" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -18443,7 +18443,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.96-export-action-preflight-cache",
+          "1.21.97-strict-catalog-live-picker-stable",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

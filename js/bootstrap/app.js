@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.21.96-export-action-preflight-cache";
+  "1.21.97-strict-catalog-live-picker-stable";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -361,7 +361,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -4417,7 +4417,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.21.96-export-action-preflight-cache",
+      "../workers/graph_codegen_worker.js?v=1.21.97-strict-catalog-live-picker-stable",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -13664,7 +13664,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -13679,7 +13679,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -13698,7 +13698,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -14035,7 +14035,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -14066,7 +14066,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -21633,7 +21633,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -24946,14 +24946,14 @@ function previewEnumEditorMarkup(
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -25028,7 +25028,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -37691,13 +37691,15 @@ function selectBrowserCompilerFiles(
   return result;
 }
 
+let browserCompilerUserSelectionPromise = null;
+
 function requestBrowserCompilerInputFiles(
   input,
   signal = null
 ) {
   if (!input) return Promise.resolve([]);
 
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     let settled = false;
     const finish = files => {
       if (settled) return;
@@ -37730,8 +37732,18 @@ function requestBrowserCompilerInputFiles(
     }
     try {
       input.click();
-    } catch {
-      finish([]);
+    } catch (error) {
+      if (settled) return;
+      settled = true;
+      input.removeEventListener("change", changed);
+      input.removeEventListener("cancel", cancelled);
+      signal?.removeEventListener("abort", cancelled);
+      input.value = "";
+      const failure = new Error(
+        `The file chooser could not be opened from this user action: ${error?.message || String(error)}`
+      );
+      failure.code = "RML_FILE_CHOOSER_NOT_ALLOWED";
+      reject(failure);
     }
   });
 }
@@ -38030,9 +38042,13 @@ async function ensureBrowserCompilerReferences(
 
     if (missing.length > 0) {
       const directoryPromise =
-        requestBrowserCompilerDirectoryFiles(
-          signal
+        browserCompilerUserSelectionPromise;
+      browserCompilerUserSelectionPromise = null;
+      if (!directoryPromise) {
+        throw browserCompilerReferenceSelectionError(
+          "The Resonite folder must be selected directly from the ZIP button. Click ZIP erstellen again to open the folder chooser."
         );
+      }
       const directoryFiles =
         await directoryPromise;
       assertCurrent();
@@ -39533,6 +39549,25 @@ async function downloadSelectedExport() {
   syncExportOptions();
   const requireSemantic =
     state.exportOptions.includeCompiled === true;
+
+  // File/directory chooser APIs require transient user activation. If the
+  // compiled ZIP still needs references, open the chooser synchronously from
+  // this click before any preflight Promise/worker hop can consume activation.
+  if (requireSemantic) {
+    const publication = currentValidatedGeneratedPublication();
+    const catalog = publication?.catalog || null;
+    const missing = catalog
+      ? missingBrowserCompilerReferences(catalog)
+      : [];
+    if (
+      catalog &&
+      missing.length > 0 &&
+      browserCompilerDirectoryFiles.length === 0
+    ) {
+      browserCompilerUserSelectionPromise =
+        requestBrowserCompilerDirectoryFiles();
+    }
+  }
   const job = beginExportDelivery();
   const originalLabel =
     elements.exportDownloadSelected.textContent;
@@ -40865,7 +40900,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.21.96-export-action-preflight-cache"
+    "../../templates/help_template.html?v=1.21.97-strict-catalog-live-picker-stable"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -47625,7 +47660,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -47643,7 +47678,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -48478,7 +48513,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.96-export-action-preflight-cache#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.97-strict-catalog-live-picker-stable#icon-copy"></use></svg>
   `;
 }
 
