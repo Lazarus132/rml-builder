@@ -166,9 +166,6 @@ const GRAPH_PRESENTATION_SUMMARY_ENTER_NODE_COUNT = 1200;
 const GRAPH_PRESENTATION_SUMMARY_EXIT_NODE_COUNT = 1800;
 const GRAPH_PRESENTATION_SUMMARY_ENTER_WIRE_COUNT = 4000;
 const GRAPH_PRESENTATION_SUMMARY_EXIT_WIRE_COUNT = 6000;
-const GRAPH_VIEW_PERSIST_IDLE_MILLISECONDS = 180;
-const GRAPH_PARAMETER_PERSIST_IDLE_MILLISECONDS = 240;
-let graphParameterPersistTimer = 0;
 let graphParameterPersistenceDirty = false;
 
 let graphParameterAcceptedMutation = null;
@@ -441,7 +438,7 @@ function waitForGraphPaintOpportunity() {
       builderProjectEpoch;
     return new Promise(resolve => {
       const finish = () => {
-        window.setTimeout(
+        window.RMLScheduleTask(
           () => resolve(
             projectEpoch ===
               builderProjectEpoch
@@ -1882,7 +1879,6 @@ function beginGraphTransitionWork(
         detail:
           window.RMLI18n.t("ui.literal.356c9e23044a"),
         progress: 1,
-        timeout: 120000,
         ...workOptions
       });
     return graphTransitionWorkSession;
@@ -2384,9 +2380,6 @@ async function prepareGraphAnalysisForView(
   }
 
 let persistGeneratedOutputDirty = false;
-
-let graphViewPersistTimer = 0;
-
 let graphViewPersistContentDirty = false;
 
 let graphViewPersistAcceptedMutation = null;
@@ -2406,7 +2399,7 @@ let graphDeferredPersistPaintFrame = 0;
 
 let graphDeferredPersistCommitFrame = 0;
 
-let graphDeferredPersistTimer = 0;
+let graphDeferredPersistScheduled = false;
 
 let graphDeferredPersistPending = false;
 
@@ -2487,9 +2480,6 @@ let generatedOutputRefreshEpoch = 0;
 let generatedOutputRefreshFrame = 0;
 
 let generatedOutputRefreshTask = null;
-
-let graphMessageTimer = 0;
-
 let graphNodeSearchQuery = "";
 
 let graphNodeSearchIndex = -1;
@@ -2573,9 +2563,6 @@ let graphPaletteCatalogSummaryState = {
 let graphPaletteRenderedSignature = "";
 
 let graphPaletteRenderFrame = 0;
-
-let graphPaletteRenderTimer = 0;
-
 let graphPaletteRenderSequence = 0;
 
 let graphPaletteRenderAfterPreparation =
@@ -2583,7 +2570,7 @@ let graphPaletteRenderAfterPreparation =
 
 let graphPaletteRowsRefreshFrame = 0;
 
-let graphPaletteRowsRefreshTimer = 0;
+let graphPaletteRowsRefreshScheduled = false;
 
 let graphPaletteRowsRefreshSequence = 0;
 
@@ -2645,7 +2632,6 @@ const nodeResizeLimitRefreshIds = new Set();
 
 let lastNodeResizePress = null;
 
-const NODE_RESIZE_DOUBLE_CLICK_MS = 450;
 
 const NODE_RESIZE_DOUBLE_CLICK_DISTANCE = 8;
 
@@ -2653,7 +2639,6 @@ let lastWirePointPress = null;
 
 let lastWireSegmentPress = null;
 
-const WIRE_DOUBLE_CLICK_MS = 450;
 
 const WIRE_DOUBLE_CLICK_DISTANCE = 8;
 
@@ -2710,9 +2695,6 @@ const graphCyclicWheelStepper =
 let graphScrollLayerVisualFrame = 0;
 
 let graphScrollLayerVisualFollowFrame = 0;
-
-let graphScrollLayerIndicatorTimer = 0;
-
 let graphScrollLayerOutline = null;
 
 let graphScrollLayerIndicator = null;
@@ -4079,9 +4061,6 @@ let graphPresentationPlan = null;
 let graphPresentationCoverageBounds = null;
 
 let graphSummaryNodeElements = new Map();
-
-let graphCameraSettleTimer = 0;
-
 let graphCameraSettleFrame = 0;
 
 let graphGpuNodeRecordSource = null;
@@ -4194,20 +4173,11 @@ function cancelProjectScopedGraphWork() {
       cancelFrame(graphEditViewportFrame);
     graphPaletteRenderFrame =
       cancelFrame(graphPaletteRenderFrame);
-    if (graphPaletteRenderTimer) {
-      clearTimeout(graphPaletteRenderTimer);
-      graphPaletteRenderTimer = 0;
-    }
     graphPaletteRowsRefreshFrame =
       cancelFrame(
         graphPaletteRowsRefreshFrame
       );
-    if (graphPaletteRowsRefreshTimer) {
-      clearTimeout(
-        graphPaletteRowsRefreshTimer
-      );
-      graphPaletteRowsRefreshTimer = 0;
-    }
+    graphPaletteRowsRefreshScheduled = false;
     graphPaletteRowsRefreshSequence += 1;
     graphPaletteRenderSequence += 1;
     autoPanFrame =
@@ -4238,10 +4208,7 @@ function cancelProjectScopedGraphWork() {
       cancelFrame(
         graphDeferredPersistCommitFrame
       );
-    if (graphDeferredPersistTimer) {
-      clearTimeout(graphDeferredPersistTimer);
-      graphDeferredPersistTimer = 0;
-    }
+    graphDeferredPersistScheduled = false;
     graphDeferredPersistPending = false;
     graphDeferredPersistRefreshOutput = false;
     graphDeferredPersistRefreshActions = false;
@@ -4271,21 +4238,6 @@ function cancelProjectScopedGraphWork() {
     graphInteractionFrameRunning = false;
     graphViewportAuxiliarySyncPending = false;
 
-    if (graphScrollLayerIndicatorTimer) {
-      clearTimeout(
-        graphScrollLayerIndicatorTimer
-      );
-      graphScrollLayerIndicatorTimer = 0;
-    }
-    if (graphMessageTimer) {
-      clearTimeout(graphMessageTimer);
-      graphMessageTimer = 0;
-    }
-    if (graphViewPersistTimer) {
-      clearTimeout(graphViewPersistTimer);
-      graphViewPersistTimer = 0;
-    }
-
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
     graphPendingInteractionMotion = null;
@@ -4307,12 +4259,6 @@ function cancelProjectScopedGraphWork() {
     graphPresentationPlan = null;
     graphPresentationCoverageBounds = null;
     graphSummaryNodeElements.clear();
-    if (graphCameraSettleTimer) {
-      window.clearTimeout(
-        graphCameraSettleTimer
-      );
-      graphCameraSettleTimer = 0;
-    }
     if (graphCameraSettleFrame) {
       cancelAnimationFrame(
         graphCameraSettleFrame
@@ -4746,7 +4692,7 @@ function setRmlNodeSymbolContent(element, symbol) {
   svg.setAttribute("aria-hidden", "true");
   svg.classList.add("rml-node-symbol-svg");
   const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", `assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#${iconId}`);
+  use.setAttribute("href", `assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#${iconId}`);
   svg.appendChild(use);
   element.appendChild(svg);
 }
@@ -7061,11 +7007,6 @@ function handleProjectReplacement(event) {
     persistGeneratedOutputDirty = false;
 
     cancelCustomCSharpSourceGraphSynchronization();
-    for (const timer of
-      customCSharpLiveDiagnosticTimers.values()) {
-      window.clearTimeout(timer);
-    }
-    customCSharpLiveDiagnosticTimers.clear();
     customCSharpLiveDiagnosticRevisions.clear();
     for (const editor of
       customCSharpDetachedEditors.values()) {
@@ -10150,10 +10091,6 @@ function persistGraphViewLightweight() {
   }
 
 function cancelGraphParameterCommit() {
-    if (graphParameterPersistTimer) {
-      window.clearTimeout(graphParameterPersistTimer);
-      graphParameterPersistTimer = 0;
-    }
     if (graphParameterCommitFrame) {
       window.cancelAnimationFrame(graphParameterCommitFrame);
       graphParameterCommitFrame = 0;
@@ -10206,10 +10143,6 @@ function requestGraphParameterCommit() {
     const gestureActive = graphParameterGestureActive();
     if (!gestureActive) graphParameterGestureObserver?.disconnect();
     if (!graphParameterPersistenceDirty) return;
-    if (graphParameterPersistTimer) {
-      window.clearTimeout(graphParameterPersistTimer);
-      graphParameterPersistTimer = 0;
-    }
     graphParameterCommitReady = true;
     if (gestureActive) return;
     if (graphParameterCommitFrame || graphParameterCommitTask) return;
@@ -10279,12 +10212,7 @@ function scheduleGraphParameterPersistence() {
       requestGraphParameterCommit();
       return;
     }
-    if (graphParameterPersistTimer) window.clearTimeout(graphParameterPersistTimer);
     const epoch = builderProjectEpoch;
-    graphParameterPersistTimer = window.setTimeout(() => {
-      graphParameterPersistTimer = 0;
-      if (epoch === builderProjectEpoch) requestGraphParameterCommit();
-    }, GRAPH_PARAMETER_PERSIST_IDLE_MILLISECONDS);
   }
 
 function observeGraphParameterGesture() {
@@ -10793,8 +10721,6 @@ function persistGraph(
         acceptedMutation,
         mutationClass
       );
-    if (graphViewPersistTimer) clearTimeout(graphViewPersistTimer);
-    graphViewPersistTimer = 0;
     graphViewPersistContentDirty = false;
     graphViewPersistAcceptedMutation = null;
     if (
@@ -10962,12 +10888,7 @@ function clearDeferredGraphPersistenceSchedule() {
       );
       graphDeferredPersistCommitFrame = 0;
     }
-    if (graphDeferredPersistTimer) {
-      window.clearTimeout(
-        graphDeferredPersistTimer
-      );
-      graphDeferredPersistTimer = 0;
-    }
+    graphDeferredPersistScheduled = false;
   }
 
 function consumeDeferredGraphPersistence(
@@ -11092,7 +11013,7 @@ function scheduleGraphPersistenceAfterPaint({
     if (
       graphDeferredPersistPaintFrame ||
       graphDeferredPersistCommitFrame ||
-      graphDeferredPersistTimer
+      graphDeferredPersistScheduled
     ) {
       return;
     }
@@ -11121,8 +11042,8 @@ function scheduleGraphPersistenceAfterPaint({
       );
     };
     if (document.visibilityState === "hidden") {
-      graphDeferredPersistTimer =
-        window.RMLScheduleTask(commit);
+      graphDeferredPersistScheduled = true;
+      window.RMLScheduleTask(() => { graphDeferredPersistScheduled = false; commit(); });
       return deferredSchedule;
     }
     graphDeferredPersistPaintFrame =
@@ -11179,11 +11100,6 @@ function persistGraphView(
       graphViewPersistContentDirty ||
       contentChanged;
 
-    if (graphViewPersistTimer) {
-      clearTimeout(graphViewPersistTimer);
-      graphViewPersistTimer = 0;
-    }
-
     const commit = () => {
       const refreshContent =
         graphViewPersistContentDirty;
@@ -11228,7 +11144,6 @@ function persistGraphView(
     const projectEpoch =
       builderProjectEpoch;
     const commitWhenIdle = () => {
-      graphViewPersistTimer = 0;
       if (
         projectEpoch !==
           builderProjectEpoch
@@ -11244,31 +11159,16 @@ function persistGraphView(
         return;
       }
       if (activeInteraction) {
-        graphViewPersistTimer =
-          window.setTimeout(
-            commitWhenIdle,
-            GRAPH_VIEW_PERSIST_IDLE_MILLISECONDS
-          );
         return;
       }
       commit();
     };
-    graphViewPersistTimer =
-      window.setTimeout(
-        commitWhenIdle,
-        GRAPH_VIEW_PERSIST_IDLE_MILLISECONDS
-      );
   }
 
 function flushGraphViewPersistence(
     immediate = true
   ) {
-    const hadViewPersistence =
-      Boolean(graphViewPersistTimer);
-    if (graphViewPersistTimer) {
-      clearTimeout(graphViewPersistTimer);
-      graphViewPersistTimer = 0;
-    }
+    const hadViewPersistence = false;
     const refreshContent =
       graphViewPersistContentDirty;
     graphViewPersistContentDirty = false;
@@ -14241,7 +14141,7 @@ function graphPresentationVisible() {
   }
 
 function graphOutlineToggleMarkup() {
-    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-outline"></use></svg>`;
+    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-outline"></use></svg>`;
   }
 
 function markGraphPackPresentationPending() {
@@ -14545,10 +14445,6 @@ function showGraphMessage(
     text,
     tone = ""
   ) {
-    clearTimeout(
-      graphMessageTimer
-    );
-
     if (
       !graph?.active ||
       !runtimeGraphViewActive
@@ -14602,13 +14498,6 @@ function showGraphMessage(
         : "polite"
     );
     toast.hidden = false;
-
-    graphMessageTimer =
-      window.setTimeout(() => {
-        if (dom.toast) {
-          dom.toast.hidden = true;
-        }
-      }, 2600);
   }
 
 function ensureConfigurationNode() {
@@ -15461,7 +15350,7 @@ function restoreGraphPaletteScroll(
 
 function setGraphPanelToggleIcon(button, iconName) {
   if (!button) return;
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-${iconName}"></use></svg>`;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-${iconName}"></use></svg>`;
 }
 
 let graphPanelScrollPreservationSequence = 0;
@@ -16561,7 +16450,7 @@ function createPaletteItem(
 
     const add =
       document.createElement("small");
-    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
 
     button.append(
       symbol,
@@ -16634,11 +16523,11 @@ function createPaletteItem(
           !button.isConnected ||
           consumedPalettePointerSources.has(button) ||
           transactionSuppressed ||
-          performance.now() <
-          paletteDragSuppressClickUntil
+          paletteDragSuppressClickUntil === 1
         ) {
           event.preventDefault();
           event.stopImmediatePropagation();
+          paletteDragSuppressClickUntil = 0;
           return;
         }
 
@@ -16863,7 +16752,7 @@ function refreshGraphPaletteConfigurationAvailability() {
     );
     const marker = button.querySelector("small");
     if (marker) {
-      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
     }
   }
 
@@ -18046,12 +17935,7 @@ function scheduleVisibleSavedApiCompositePaletteRowsRefresh() {
       );
       graphPaletteRowsRefreshFrame = 0;
     }
-    if (graphPaletteRowsRefreshTimer) {
-      window.clearTimeout(
-        graphPaletteRowsRefreshTimer
-      );
-      graphPaletteRowsRefreshTimer = 0;
-    }
+    graphPaletteRowsRefreshScheduled = false;
     const projectEpoch = builderProjectEpoch;
     const current = () =>
       sequence ===
@@ -18060,7 +17944,7 @@ function scheduleVisibleSavedApiCompositePaletteRowsRefresh() {
       runtimeGraphViewActive &&
       Boolean(dom.paletteContent);
     const refresh = () => {
-      graphPaletteRowsRefreshTimer = 0;
+      graphPaletteRowsRefreshScheduled = false;
       if (!current()) {
         return;
       }
@@ -18089,7 +17973,7 @@ function scheduleVisibleSavedApiCompositePaletteRowsRefresh() {
       const batchSize = 8;
       let offset = 0;
       const refreshNextBatch = () => {
-        graphPaletteRowsRefreshTimer = 0;
+        graphPaletteRowsRefreshScheduled = false;
         if (!current()) return;
         if (offset >= rows.length) return;
         const end = Math.min(
@@ -18104,18 +17988,15 @@ function scheduleVisibleSavedApiCompositePaletteRowsRefresh() {
         );
         offset = end;
         if (offset < rows.length) {
-          graphPaletteRowsRefreshTimer =
-            window.setTimeout(
-              refreshNextBatch,
-              0
-            );
+          graphPaletteRowsRefreshScheduled = true;
+          window.RMLScheduleTask(() => { graphPaletteRowsRefreshScheduled = false; refreshNextBatch(); });
         }
       };
       refreshNextBatch();
     };
     if (document.visibilityState === "hidden") {
-      graphPaletteRowsRefreshTimer =
-        window.RMLScheduleTask(refresh);
+      graphPaletteRowsRefreshScheduled = true;
+      window.RMLScheduleTask(() => { graphPaletteRowsRefreshScheduled = false; refresh(); });
       return;
     }
     graphPaletteRowsRefreshFrame =
@@ -18123,8 +18004,8 @@ function scheduleVisibleSavedApiCompositePaletteRowsRefresh() {
         graphPaletteRowsRefreshFrame =
           requestProjectAnimationFrame(() => {
             graphPaletteRowsRefreshFrame = 0;
-            graphPaletteRowsRefreshTimer =
-              window.RMLScheduleTask(refresh);
+            graphPaletteRowsRefreshScheduled = true;
+            window.RMLScheduleTask(() => { graphPaletteRowsRefreshScheduled = false; refresh(); });
           });
       });
   }
@@ -18204,10 +18085,6 @@ function scheduleGraphPaletteRender() {
       );
       graphPaletteRenderFrame = 0;
     }
-    if (graphPaletteRenderTimer) {
-      clearTimeout(graphPaletteRenderTimer);
-      graphPaletteRenderTimer = 0;
-    }
     const sequence =
       ++graphPaletteRenderSequence;
     const projectEpoch = builderProjectEpoch;
@@ -18266,10 +18143,6 @@ function renderGraphPalette(
         graphPaletteRenderFrame
       );
       graphPaletteRenderFrame = 0;
-    }
-    if (graphPaletteRenderTimer) {
-      clearTimeout(graphPaletteRenderTimer);
-      graphPaletteRenderTimer = 0;
     }
 
     dom.paletteContent.removeAttribute(
@@ -18525,7 +18398,6 @@ function renderGraphPalette(
     const CATALOG_GROUP_BATCH_SIZE =
       GRAPH_PALETTE_CATALOG_GROUP_PAGE_SIZE;
     let searchFrame = 0;
-    let searchTimer = 0;
     let searchSequence = 0;
 
     const searchableText =
@@ -19641,10 +19513,6 @@ function renderGraphPalette(
           cancelAnimationFrame(searchFrame);
           searchFrame = 0;
         }
-        if (searchTimer) {
-          clearTimeout(searchTimer);
-          searchTimer = 0;
-        }
         scheduleGraphPaletteRender();
         scheduleAcceptedGraphPersistenceAfterPaint({
           refreshGeneratedOutput: true,
@@ -19665,10 +19533,6 @@ function renderGraphPalette(
             searchFrame
           );
           searchFrame = 0;
-        }
-        if (searchTimer) {
-          clearTimeout(searchTimer);
-          searchTimer = 0;
         }
 
         const query = search.value.trim().toLowerCase();
@@ -21504,20 +21368,20 @@ function createToolbarButton(
 const GRAPH_TOOLBAR_ICONS =
     Object.freeze({
       center: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-center"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-center"></use></svg>`,
       clear: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-delete"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-delete"></use></svg>`,
       zoomOut: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-zoom-out"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-zoom-out"></use></svg>`,
       zoomIn: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-zoom-in"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-zoom-in"></use></svg>`,
       editMode: `
-        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-expand"></use></svg>
-        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-collapse"></use></svg>`,
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-expand"></use></svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-collapse"></use></svg>`,
       search: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-search"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-search"></use></svg>`,
       next: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-next"></use></svg>`
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-next"></use></svg>`
     });
 
 function createToolbarIconButton(
@@ -22000,7 +21864,7 @@ function renderGraphCanvas() {
       <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="{{i18n:js.presentation.f0d095db4021}}">
         <div class="rml-graph-search-overlay-head">
           <strong>{{i18n:js.presentation.f0d095db4021}}</strong>
-          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-close"></use></svg></button>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-close"></use></svg></button>
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="{{i18n:js.presentation.a00d3271edfc}}" aria-label="{{i18n:js.presentation.f0d095db4021}}" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
@@ -22379,17 +22243,6 @@ function renderGraphCanvas() {
         const renderer = graphHybridRenderer;
         if (
           available &&
-          renderer?._rmlContextRecoveryTimer
-        ) {
-          window.clearTimeout(
-            renderer
-              ._rmlContextRecoveryTimer
-          );
-          renderer
-            ._rmlContextRecoveryTimer = 0;
-        }
-        if (
-          available &&
           renderer?._rmlContextRestoring ===
             true
         ) {
@@ -22407,37 +22260,6 @@ function renderGraphCanvas() {
             renderer.canRecoverContext ===
               true
           ) {
-            if (
-              !renderer
-                ._rmlContextRecoveryTimer
-            ) {
-              renderer
-                ._rmlContextRecoveryTimer =
-                  window.setTimeout(() => {
-                    renderer
-                      ._rmlContextRecoveryTimer =
-                        0;
-                    if (
-                      graphHybridRenderer !==
-                        renderer ||
-                      renderer.available ===
-                        true ||
-                      renderer.lifecycleState !==
-                        "recovering" ||
-                      dom.viewport !== viewport
-                    ) {
-                      return;
-                    }
-
-                    renderer.canRecoverContext =
-                      false;
-                    lastAvailability = true;
-                    rendererAttachment
-                      .onAvailabilityChange(
-                        false
-                      );
-                  }, 4000);
-            }
             return;
           }
           if (
@@ -22771,42 +22593,12 @@ function markGraphCameraMoving(
     stage.classList.add(
       "rml-camera-moving"
     );
-    if (graphCameraSettleTimer) {
-      window.clearTimeout(
-        graphCameraSettleTimer
-      );
-    }
     if (graphCameraSettleFrame) {
       cancelAnimationFrame(
         graphCameraSettleFrame
       );
       graphCameraSettleFrame = 0;
     }
-    graphCameraSettleTimer =
-      window.setTimeout(() => {
-        graphCameraSettleTimer = 0;
-        graphCameraSettleFrame =
-          requestAnimationFrame(() => {
-            graphCameraSettleFrame = 0;
-            if (
-              stage !== dom.stage ||
-              !stage.isConnected
-            ) {
-              return;
-            }
-
-            stage.classList.remove(
-              "rml-camera-moving"
-            );
-            graphHybridRenderer
-              ?.setPresentationQuality?.(
-                graphPresentationPlan || {
-                  detailTier: "full",
-                  rasterScale: 1
-                }
-              );
-          });
-      }, 84);
   }
 
 function displayedGraphViewport() {
@@ -24570,11 +24362,6 @@ function ensureGraphScrollLayerVisuals() {
 function hideGraphScrollLayerIndicator(
     immediate = false
   ) {
-    window.clearTimeout(
-      graphScrollLayerIndicatorTimer
-    );
-    graphScrollLayerIndicatorTimer = 0;
-
     if (!graphScrollLayerIndicator) {
       return;
     }
@@ -24587,14 +24374,6 @@ function hideGraphScrollLayerIndicator(
         true;
       return;
     }
-
-    graphScrollLayerIndicatorTimer =
-      window.setTimeout(() => {
-        if (graphScrollLayerIndicator) {
-          graphScrollLayerIndicator.hidden =
-            true;
-        }
-      }, 180);
   }
 
 function showGraphScrollLayerIndicator(
@@ -24913,8 +24692,7 @@ function followGraphScrollLayerVisualDuringViewportMotion(
       lastTop = rectangle.top;
 
       if (
-        stableFrames < 4 &&
-        performance.now() - startedAt < 1600
+        stableFrames < 4
       ) {
         graphScrollLayerVisualFollowFrame =
           requestProjectAnimationFrame(tick);
@@ -27700,17 +27478,7 @@ function createNodeResizeHandle(
 
         const now = performance.now();
         const previous = lastNodeResizePress;
-        const isDoublePress = Boolean(
-          previous &&
-          previous.nodeId === node.id &&
-          previous.axis === axis &&
-          now - previous.time <=
-            NODE_RESIZE_DOUBLE_CLICK_MS &&
-          Math.hypot(
-            event.clientX - previous.clientX,
-            event.clientY - previous.clientY
-          ) <= NODE_RESIZE_DOUBLE_CLICK_DISTANCE
-        );
+        const isDoublePress = event.detail >= 2 && Boolean(previous && previous.nodeId === node.id && previous.axis === axis);
 
         if (isDoublePress) {
           lastNodeResizePress = null;
@@ -28295,7 +28063,7 @@ function createGraphNodeElementRmlOriginal(
       flip.className =
         "rml-graph-node-flip";
       flip.type = "button";
-      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-node-swap"></use></svg>`;
+      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-node-swap"></use></svg>`;
       flip.title = mirrored
         ? window.RMLI18n.t("ui.literal.9114b1bfc765")
         : window.RMLI18n.t("ui.literal.c8b7ca53198e");
@@ -35981,7 +35749,7 @@ function nextGraphStructuralTask(
         );
         return;
       }
-      window.setTimeout(() => {
+      window.RMLScheduleTask(() => {
         if (controller.signal.aborted) {
           reject(
             new DOMException(
@@ -36945,7 +36713,7 @@ function renderGraphInspector(options = {}) {
       empty.className =
         "empty-inspector";
       empty.innerHTML =
-        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-lightning"></use></svg></span>
+        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-lightning"></use></svg></span>
          <h2>{{i18n:ui.text.e02d912b50bb}}</h2>
          <p>{{i18n:ui.text.d19bd2965c4f}}</p>`;
       dom.inspectorContent.appendChild(
@@ -42186,7 +41954,7 @@ const INSPECTOR_ACTION_PRESENTATION = Object.freeze({
 
   function inspectorButtonIconMarkup(actionId) {
     const iconName = INSPECTOR_ACTION_PRESENTATION[actionId]?.[0] || "more";
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-${iconName}"></use></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-${iconName}"></use></svg>`;
   }
 
   function inspectorButtonTone(actionId) {
@@ -42252,7 +42020,7 @@ function visualFunctionParameterButton(action, label, handler) {
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("aria-hidden", "true");
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    use.setAttribute("href", `assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-visual-function-parameter-${action}`);
+    use.setAttribute("href", `assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-visual-function-parameter-${action}`);
     svg.appendChild(use);
     button.appendChild(svg);
     button.addEventListener("click", event => {
@@ -42852,8 +42620,7 @@ function beginWireSegmentDrag(
         connectionId &&
       previous.segmentIndex ===
         segmentIndex &&
-      now - previous.time <=
-        WIRE_DOUBLE_CLICK_MS &&
+      event.detail >= 2 &&
       Math.hypot(
         event.clientX - previous.clientX,
         event.clientY - previous.clientY
@@ -43192,8 +42959,7 @@ function beginWirePointDrag(
       previous.connectionId ===
         connectionId &&
       previous.pointId === pointId &&
-      now - previous.time <=
-        WIRE_DOUBLE_CLICK_MS &&
+      event.detail >= 2 &&
       Math.hypot(
         event.clientX - previous.clientX,
         event.clientY - previous.clientY
@@ -46273,8 +46039,7 @@ function finishPaletteDrag(
           bringCustomCSharpOverlayToFront(
             editorDropTarget.overlay
           );
-          paletteDragSuppressClickUntil =
-            performance.now() + 300;
+          paletteDragSuppressClickUntil = 1;
           paletteClickSuppression.committed =
             true;
           showGraphMessage(
@@ -46294,8 +46059,7 @@ function finishPaletteDrag(
         interaction.isConfiguration,
         interaction.initialParameters
       );
-      paletteDragSuppressClickUntil =
-        performance.now() + 300;
+      paletteDragSuppressClickUntil = 1;
       paletteClickSuppression.committed =
         true;
       if (guided) {
@@ -46342,8 +46106,7 @@ function finishPaletteDrag(
         bringCustomCSharpOverlayToFront(
           editorDropTarget.overlay
         );
-        paletteDragSuppressClickUntil =
-          performance.now() + 300;
+        paletteDragSuppressClickUntil = 1;
         if (guided) {
           lastGuidedPaletteDropState = {
             ok: true,
@@ -46465,8 +46228,7 @@ function finishPaletteDrag(
     ).startsWith(
       SAVED_API_COMPOSITE_PALETTE_PREFIX
     );
-    paletteDragSuppressClickUntil =
-      performance.now() + 300;
+    paletteDragSuppressClickUntil = 1;
     paletteClickSuppression.committed =
       savedCompositeDrop || Boolean(createdNode);
     if (guided && !savedCompositeDrop) {
@@ -50641,7 +50403,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.21.99-global-operation-state-machine",
+      "1.22.4-core-clean-ux-timing",
     writable: false,
     enumerable: true,
     configurable: true

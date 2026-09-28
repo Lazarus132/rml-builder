@@ -4853,7 +4853,6 @@ internal static class EarlyHarmonyPatches
           detail:
             "The editable syntax graph is built automatically after validation.",
           progress: 18,
-          timeout: 120000
         }) || 0;
       try {
         await window.RMLBuilderWork?.paint?.();

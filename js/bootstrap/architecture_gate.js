@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.99-global-operation-state-machine";
+    "1.22.4-core-clean-ux-timing";
   const GATE_VERSION = 1;
 
   
@@ -34,7 +34,6 @@
     window.RMLScheduleTask = callback => { taskQueue.push(callback); scheduleFlush(); };
     window.RMLYieldTask = () => new Promise(resolve => window.RMLScheduleTask(resolve));
   }
-  const DETECTION_TIMEOUT_MS = 5000;
   const HIGH_ENTROPY_HINTS = Object.freeze([
     "architecture",
     "bitness",
@@ -148,25 +147,12 @@
   }
 
   function detectionWithTimeout() {
-    return new Promise(resolve => {
-      let settled = false;
-      const finish = value => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timeout);
-        resolve(value === true);
-      };
-      const timeout = window.setTimeout(
-        () => finish(false),
-        DETECTION_TIMEOUT_MS
-      );
-      Promise.resolve(
-        detectNativeWindows32Bit()
-      ).then(
-        finish,
-        () => finish(false)
-      );
-    });
+    return Promise.resolve(
+      detectNativeWindows32Bit()
+    ).then(
+      value => value === true,
+      () => false
+    );
   }
 
   function overlay() {

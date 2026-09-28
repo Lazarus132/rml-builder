@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.21.99-global-operation-state-machine";
+    "1.22.4-core-clean-ux-timing";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 2;
@@ -3367,18 +3367,12 @@
         "function"
       ) {
         let settled = false;
-        let fallback = 0;
-        const finish = () => {
+          const finish = () => {
           if (settled) return;
           settled = true;
-          window.clearTimeout(fallback);
           resolve();
         };
-        fallback = window.setTimeout(
-          finish,
-          100
-        );
-        requestAnimationFrame(finish);
+          requestAnimationFrame(finish);
       } else {
         window.RMLScheduleTask(resolve);
       }

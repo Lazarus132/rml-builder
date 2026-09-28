@@ -231,14 +231,12 @@
     cache.set(name, entry);
     entry.promise = (async () => {
       let controller = null;
-      let timeout = 0;
       try {
         if (root.location?.protocol === "file:") {
           const payloads = await ensureStaticPayloads();
           return install(name, payloads.codeTemplates[name]);
         }
         controller = new AbortController();
-        timeout = setTimeout(() => controller.abort(), 20000);
         const response = await fetch(new URL(`${name}.json?v=797`, base), { signal: controller.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return install(name, await response.json());
@@ -246,7 +244,6 @@
         entry.error = new Error(`C# templates ${name}.json: ${cause?.message || cause}. Reload the page to retry.`);
         throw entry.error;
       } finally {
-        if (timeout) clearTimeout(timeout);
         entry.promise = null;
       }
     })();

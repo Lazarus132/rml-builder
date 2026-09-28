@@ -12,7 +12,6 @@
       ).href,
       name: "rml-csharp14-validator",
       worker: null,
-      idleTimer: 0,
       failure: null
     },
     liveValidator: {
@@ -23,7 +22,6 @@
       ).href,
       name: "rml-csharp14-live-validator",
       worker: null,
-      idleTimer: 0,
       failure: null
     },
     compiler: {
@@ -34,13 +32,10 @@
       ).href,
       name: "rml-csharp14-compiler",
       worker: null,
-      idleTimer: 0,
       failure: null
     }
   };
-  const START_TIMEOUT_MS = 5 * 60 * 1000;
-  const OPERATION_TIMEOUT_MS = 10 * 60 * 1000;
-  const IDLE_WORKER_RELEASE_MS = 15000;
+  // Worker operations settle only from worker result/error/cancellation events.
 
   let requestSequence = 0;
   const pending = new Map();
@@ -55,7 +50,6 @@
   function rejectPending(channel, error) {
     for (const [id, request] of pending) {
       if (request.channel !== channel) continue;
-      globalThis.clearTimeout(request.timer);
       request.reject(error);
       pending.delete(id);
     }
@@ -69,12 +63,6 @@
     );
     const failedWorker = channel.worker;
     channel.worker = null;
-    if (channel.idleTimer) {
-      globalThis.clearTimeout(
-        channel.idleTimer
-      );
-      channel.idleTimer = 0;
-    }
     try {
       failedWorker?.terminate();
     } catch {}
@@ -100,12 +88,6 @@
     ) {
       return false;
     }
-    if (channel.idleTimer) {
-      globalThis.clearTimeout(
-        channel.idleTimer
-      );
-      channel.idleTimer = 0;
-    }
     const worker = channel.worker;
     channel.worker = null;
     try {
@@ -117,18 +99,7 @@
   function scheduleIdleChannelRelease(
     channel
   ) {
-    if (channel.idleTimer) {
-      globalThis.clearTimeout(
-        channel.idleTimer
-      );
-    }
-    channel.idleTimer = globalThis.setTimeout(
-      () => {
-        channel.idleTimer = 0;
-        releaseIdleChannel(channel);
-      },
-      IDLE_WORKER_RELEASE_MS
-    );
+    releaseIdleChannel(channel);
   }
 
   function releaseIdleWorkers() {
@@ -155,12 +126,6 @@
     );
     if (!active) {
       return false;
-    }
-    if (channel.idleTimer) {
-      globalThis.clearTimeout(
-        channel.idleTimer
-      );
-      channel.idleTimer = 0;
     }
     const worker = channel.worker;
     channel.worker = null;
@@ -195,7 +160,6 @@
     }
 
     pending.delete(message.id);
-    globalThis.clearTimeout(request.timer);
     scheduleIdleChannelRelease(channel);
     if (message.type === "result") {
       request.resolve(message.result);
@@ -215,12 +179,6 @@
 
   function createWorker(channel) {
     if (channel.failure) throw channel.failure;
-    if (channel.idleTimer) {
-      globalThis.clearTimeout(
-        channel.idleTimer
-      );
-      channel.idleTimer = 0;
-    }
     if (channel.worker) return channel.worker;
     if (typeof globalThis.Worker !== "function") {
       throw markWorkerFailed(
@@ -261,8 +219,7 @@
     method,
     args = [],
     {
-      onProgress = null,
-      timeoutMs = OPERATION_TIMEOUT_MS
+      onProgress = null
     } = {}
   ) {
     if (channel.failure) {
@@ -279,19 +236,10 @@
       }
 
       const id = ++requestSequence;
-      const timer = globalThis.setTimeout(() => {
-        pending.delete(id);
-        const error = markWorkerFailed(
-          channel,
-          `The isolated ${channel.label} did not finish '${method}' within ${Math.round(timeoutMs / 60000)} minutes. Reload the Builder before trying again.`
-        );
-        reject(error);
-      }, timeoutMs);
       pending.set(id, {
         resolve,
         reject,
         onProgress,
-        timer,
         channel
       });
 
@@ -304,7 +252,6 @@
         });
       } catch (error) {
         pending.delete(id);
-        globalThis.clearTimeout(timer);
         reject(markWorkerFailed(
           channel,
           `The ${channel.label} request could not be sent to its worker: ${describeError(error, "unknown browser error")}`
@@ -317,8 +264,7 @@
     return invoke(
       channels.validator,
       "ensureReady",
-      [],
-      { timeoutMs: START_TIMEOUT_MS }
+      []
     );
   }
 

@@ -5,7 +5,7 @@ function savedApiCompositeCompareWorkerMain(
 ) {
 const self = workerScope;
 const SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID =
-  "1.21.99-global-operation-state-machine";
+  "1.22.4-core-clean-ux-timing";
 const SAVED_API_COMPOSITE_CANONICAL_SCHEMA_VERSION = 4;
 const MESSAGE_TYPE = "rml-saved-api-composite-compare";
 const RESULT_TYPE = `${MESSAGE_TYPE}-result`;
@@ -94,7 +94,6 @@ const SOFT_MAX_ACTIVE_STREAMED_SNAPSHOTS =
     "softMaximumActiveStreams",
     1
   );
-const STREAMED_SNAPSHOT_IDLE_TIMEOUT_MS = 60 * 1000;
 const SOFT_RETAINED_BASELINE_CHARACTERS =
   positiveWorkerLimit(
     "softRetainedBaselineCharacters",
@@ -1326,22 +1325,11 @@ function finishStreamedJsonBuilder(builder) {
 function discardStreamedSnapshot(streamKey) {
   const snapshot = streamedSnapshots.get(streamKey);
   if (!snapshot) return false;
-  if (snapshot.idleTimer !== null) {
-    clearTimeout(snapshot.idleTimer);
-  }
   streamedSnapshots.delete(streamKey);
   return true;
 }
 
 function armStreamedSnapshotTimeout(streamKey, snapshot) {
-  if (snapshot.idleTimer !== null) {
-    clearTimeout(snapshot.idleTimer);
-  }
-  snapshot.idleTimer = setTimeout(() => {
-    if (streamedSnapshots.get(streamKey) === snapshot) {
-      streamedSnapshots.delete(streamKey);
-    }
-  }, STREAMED_SNAPSHOT_IDLE_TIMEOUT_MS);
 }
 
 function clearStreamedSnapshots() {
@@ -1634,8 +1622,7 @@ function processRequest(request) {
       targetOperation: request.targetOperation,
       builder: createStreamedJsonBuilder(),
       nextPageSequence: 0,
-      transport: null,
-      idleTimer: null
+      transport: null
     };
     streamedSnapshots.set(streamKey, snapshot);
     armStreamedSnapshotTimeout(streamKey, snapshot);
@@ -1889,7 +1876,7 @@ Object.defineProperty(self, "RMLSavedApiCompositeCompareWorker", {
         SOFT_RETAINED_BASELINE_CHARACTERS,
       softMaximumRetainedBaselines:
         SOFT_MAX_RETAINED_BASELINES,
-      idleTimeoutMs: STREAMED_SNAPSHOT_IDLE_TIMEOUT_MS,
+      idleTimeoutMs: 0,
       operations: Object.freeze([
         "begin-snapshot",
         "append-snapshot-page",
@@ -1946,7 +1933,7 @@ if (savedApiCompositeCompareWorkerThread) {
     {
       value: Object.freeze({
         moduleId:
-          "1.21.99-global-operation-state-machine",
+          "1.22.4-core-clean-ux-timing",
         canonicalSchemaVersion:
           4,
         source:

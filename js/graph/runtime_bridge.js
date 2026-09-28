@@ -3,8 +3,6 @@
 
   const BRIDGE_VERSION = 14;
   const BRIDGE_PROTOCOL_VERSION = 1;
-  const STREAM_OPEN_TIMEOUT_MS = 5000;
-  const SNAPSHOT_TIMEOUT_MS = 5000;
   const PROJECT_RESERVED_IDENTIFIERS = new Set(["Class", "Namespace", "Event",
     "String", "Int", "Float", "Double", "Bool", "Object", "Default", "New",
     "Static", "Public", "Private", "Internal", "Void"]);
@@ -278,8 +276,6 @@
   }
 
   function clearStreamTimer(state) {
-    if (state.streamTimer !== null) window.clearTimeout(state.streamTimer);
-    state.streamTimer = null;
   }
 
   function closeSource(source) {
@@ -385,13 +381,11 @@
     return token === epoch && mode !== "cached" && !controller?.signal.aborted;
   }
 
-  async function fetchJson(url, timeoutMs, signal) {
+  async function fetchJson(url, signal) {
     const request = new AbortController();
-    let timedOut = false;
     const abort = () => request.abort();
     if (signal?.aborted) abort();
     else signal?.addEventListener("abort", abort, { once: true });
-    const timer = window.setTimeout(() => { timedOut = true; request.abort(); }, timeoutMs);
     try {
       const response = await fetch(url, { cache: "no-store", mode: "cors",
         credentials: "omit", redirect: "error", signal: request.signal,
@@ -403,11 +397,9 @@
       }
       return value;
     } catch (error) {
-      if (timedOut) throw new Error("Scanner request timed out. Click Cached to try again.");
       throw error;
     } finally {
       signal?.removeEventListener("abort", abort);
-      window.clearTimeout(timer);
     }
   }
 
@@ -456,11 +448,6 @@
       if (!channelIsCurrent(state, source, token, generation)) return;
       failChannel(state, "Runtime value stream interrupted.");
     };
-    state.streamTimer = window.setTimeout(() => {
-      if (channelIsCurrent(state, source, token, generation) && !state.connected) {
-        failChannel(state, "Runtime value stream did not open.");
-      }
-    }, STREAM_OPEN_TIMEOUT_MS);
     notify(state, "connection");
   }
 
@@ -935,7 +922,7 @@
       try {
         if (!channelIsCurrent(state, source, token, generation)) return false;
         const value = await fetchJson(`${scannerBaseUrl}/runtime/snapshot?channel=${encodeURIComponent(state.channel)}`,
-          SNAPSHOT_TIMEOUT_MS, request.signal);
+          request.signal);
         if (!channelIsCurrent(state, source, token, generation)) return false;
         if (!validEnvelope(value, state.channel, "snapshot") || !Array.isArray(value.values)) {
           throw new Error("Scanner returned an invalid runtime snapshot.");

@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.99-global-operation-state-machine";
+  "1.22.4-core-clean-ux-timing";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

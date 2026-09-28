@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.99-global-operation-state-machine";
+    "1.22.4-core-clean-ux-timing";
   let installedController = null;
 
   if (
@@ -43,7 +43,6 @@
     let builderWorkSessionSequence = 0;
     const builderWorkSessions = new Set();
     const builderWorkStates = new Map();
-    const builderWorkWatchdogs = new Map();
     const builderWorkCompletionToken = Symbol(
       "builder-work-completion"
     );
@@ -52,15 +51,6 @@
     let builderWorkEpisodeClosing = false;
     let builderWorkEpisodeClosePromise = null;
     const builderWorkQueuedSessions = new Set();
-    function clearBuilderWorkDeadline(session) {
-      const watchdog =
-        builderWorkWatchdogs.get(session);
-      if (watchdog) {
-        window.clearTimeout(watchdog);
-      }
-      builderWorkWatchdogs.delete(session);
-    }
-    
     function nextBuilderVisualFrame() {
       if (
         document.visibilityState ===
@@ -71,21 +61,13 @@
     
       return new Promise(resolve => {
         let settled = false;
-        let fallback = 0;
         const finish = () => {
           if (settled) {
             return;
           }
           settled = true;
-          if (fallback) {
-            window.clearTimeout(fallback);
-          }
           resolve();
         };
-        fallback = window.setTimeout(
-          finish,
-          100
-        );
         window.requestAnimationFrame(finish);
       });
     }
@@ -474,7 +456,6 @@
       builderWorkSessions.delete(session);
       builderWorkStates.delete(session);
       builderWorkQueuedSessions.delete(session);
-      clearBuilderWorkDeadline(session);
     
       if (state.episodeId === 0) {
         state.resolveActivation?.(false);
@@ -609,63 +590,8 @@
         });
       }
     
-      const requestedTimeout = Number(options.timeout);
-      const timeoutDisabled =
-        options.timeout === 0 ||
-        options.timeout === false ||
-        options.timeout === null;
-      const timeout = timeoutDisabled
-        ? 0
-        : clamp(
-            Number.isFinite(requestedTimeout) && requestedTimeout > 0
-              ? requestedTimeout
-              : 30000,
-            1000,
-            120000
-          );
-      if (timeoutDisabled) {
-        // Long-running, progress-driven work (notably scanner catalog ingestion)
-        // has no artificial completion deadline. Its owner controls cancellation.
-        return session;
-      }
-      const watchdog =
-        window.setTimeout(() => {
-          if (
-            builderWorkSessions.has(
-              session
-            )
-          ) {
-            builderWorkWatchdogs.delete(session);
-            const error = new Error(
-              `A Builder operation exceeded its declared ${timeout} ms completion deadline.`
-            );
-            error.code =
-              "RML_BUILDER_WORK_DEADLINE_EXCEEDED";
-            console.error(
-              "[RML BUILDER INTERNAL FAILURE] A Builder operation exceeded its declared completion deadline.",
-              {
-                session,
-                timeout,
-                activeSessions: [
-                  ...builderWorkSessions
-                ],
-                error
-              }
-            );
-            try {
-              options.onTimeout?.(error);
-            } catch (timeoutError) {
-              console.error(
-                "[RML BUILDER INTERNAL FAILURE] A Builder deadline handler failed.",
-                timeoutError
-              );
-            }
-          }
-        }, timeout);
-      builderWorkWatchdogs.set(
-        session,
-        watchdog
-      );
+      // Completion is exclusively owner/event driven. There is deliberately
+      // no wall-clock completion watchdog for Builder operations.
       return session;
     }
     
@@ -781,7 +707,6 @@
       replacementFactory.create({
         elements,
         setAlwaysClickableButtonAvailability,
-        clearBuilderWorkDeadline,
         updateBuilderWork,
         paintBuilderUi,
         getActiveBuilderWorkSession() {
@@ -818,7 +743,6 @@
 
     installedController = Object.freeze({
       ...publicApi,
-      clearDeadline: clearBuilderWorkDeadline,
       nextVisualFrame: nextBuilderVisualFrame,
       yieldTask: yieldBuilderTask,
       requestReplacementChoice:

@@ -6,7 +6,6 @@
   }
 
   const RML_BUILDER_PROFILE_STORAGE_KEY = "rml-builder-resonite-profile-v1";
-  const RML_BUILDER_PROFILE_REQUEST_TIMEOUT_MS = 8000;
   const RML_BUILDER_PROFILE_AVATAR_MAX_BYTES = 384 * 1024;
   const RML_BUILDER_PROFILE_AVATAR_DATA_URL_MAX_CHARACTERS =
     Math.ceil(RML_BUILDER_PROFILE_AVATAR_MAX_BYTES / 3) * 4 + 96;
@@ -238,10 +237,6 @@
     { optional = false } = {}
   ) {
     const controller = new AbortController();
-    const timeout = window.setTimeout(
-      () => controller.abort(),
-      RML_BUILDER_PROFILE_REQUEST_TIMEOUT_MS
-    );
     try {
       const response = await fetch(url, {
         cache: "no-store",
@@ -269,7 +264,6 @@
       }
       return RML_BUILDER_PROFILE_FETCH_FAILED;
     } finally {
-      window.clearTimeout(timeout);
     }
   }
 
@@ -298,10 +292,6 @@
     }
 
     const controller = new AbortController();
-    const timeout = window.setTimeout(
-      () => controller.abort(),
-      RML_BUILDER_PROFILE_REQUEST_TIMEOUT_MS
-    );
     try {
       const response = await fetch(candidate.href, {
         cache: "no-store",
@@ -371,7 +361,6 @@
     } catch {
       return null;
     } finally {
-      window.clearTimeout(timeout);
     }
   }
 

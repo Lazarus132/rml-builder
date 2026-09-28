@@ -8633,7 +8633,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.99-global-operation-state-machine",
+        "1.22.4-core-clean-ux-timing",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8666,7 +8666,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.99-global-operation-state-machine" &&
+        "1.22.4-core-clean-ux-timing" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -10372,14 +10372,12 @@ function yieldGraphAnalysisTask(signal) {
         callback();
       };
       const abort = () => {
-        clearTimeout(handle);
         finish(() =>
           reject(graphAnalysisAbortError())
         );
       };
-      const handle = setTimeout(
-        () => finish(resolve),
-        0
+      window.RMLScheduleTask(
+        () => finish(resolve)
       );
       signal?.addEventListener?.(
         "abort",
@@ -18443,7 +18441,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.99-global-operation-state-machine",
+          "1.22.4-core-clean-ux-timing",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

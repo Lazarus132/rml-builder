@@ -28,10 +28,6 @@
   let projectIoWorkerGeneration = 0;
   let projectIoRequestSequence = 1;
   const projectIoPendingRequests = new Map();
-  let projectIoWorkerIdleTimer = 0;
-  const PROJECT_IO_WORKER_IDLE_RELEASE_MS = 1500;
-  const PROJECT_IO_REQUEST_TIMEOUT_MS =
-    120000;
   const PROJECT_GZIP_MAGIC_FIRST = 0x1f;
   const PROJECT_GZIP_MAGIC_SECOND = 0x8b;
   let projectGzipFallbackLoadPromise = null;
@@ -281,10 +277,6 @@
   }
   
   function projectIoWorkerInstance() {
-    if (projectIoWorkerIdleTimer) {
-      clearTimeout(projectIoWorkerIdleTimer);
-      projectIoWorkerIdleTimer = 0;
-    }
     if (projectIoWorker) {
       return projectIoWorker;
     }
@@ -445,62 +437,11 @@
     if (pending.settled) {
       return false;
     }
-  
-    if (pending.watchdogTimer) {
-      clearTimeout(pending.watchdogTimer);
-      pending.watchdogTimer = 0;
-    }
     pending.settled = true;
     pending[completion](value);
     return true;
   }
-  
-  function armProjectIoRequestWatchdog(
-    pending,
-    worker,
-    workerGeneration,
-    id
-  ) {
-    const watchdogEpoch =
-      (Number(pending.watchdogEpoch) || 0) +
-      1;
-    pending.watchdogEpoch = watchdogEpoch;
-    if (pending.watchdogTimer) {
-      clearTimeout(pending.watchdogTimer);
-    }
-    pending.watchdogTimer = setTimeout(
-      () => {
-        if (
-          pending.watchdogEpoch !==
-            watchdogEpoch
-        ) {
-          return;
-        }
-        pending.watchdogTimer = 0;
-        if (
-          pending.settled ||
-          pending.worker !== worker ||
-          pending.workerGeneration !==
-            workerGeneration ||
-          projectIoPendingRequests.get(id) !==
-            pending
-        ) {
-          return;
-        }
-        const error = new Error(
-          window.RMLI18n.t("ui.literal.392e9aa5d496")
-        );
-        error.name = window.RMLI18n.t("ui.literal.22a4ad2c60d9");
-        retireFailedProjectIoWorker(
-          worker,
-          workerGeneration,
-          error
-        );
-      },
-      PROJECT_IO_REQUEST_TIMEOUT_MS
-    );
-  }
-  
+
   function runProjectIoRequestOnMainThread(
     operation,
     payload
@@ -629,10 +570,6 @@
   function dispatchProjectIoRequestOnMainThread(
     pending
   ) {
-    if (pending.watchdogTimer) {
-      clearTimeout(pending.watchdogTimer);
-      pending.watchdogTimer = 0;
-    }
     pending.worker = null;
     pending.workerGeneration = 0;
     void runProjectIoRequestOnMainThread(
@@ -665,11 +602,6 @@
   ) {
     if (pending.settled) {
       return;
-    }
-  
-    if (pending.watchdogTimer) {
-      clearTimeout(pending.watchdogTimer);
-      pending.watchdogTimer = 0;
     }
   
     if (
@@ -727,10 +659,6 @@
       }
   
       projectIoPendingRequests.delete(id);
-      if (pending.watchdogTimer) {
-        clearTimeout(pending.watchdogTimer);
-        pending.watchdogTimer = 0;
-      }
       ownedRequests.push(pending);
     }
   
@@ -791,13 +719,6 @@
     pending.workerGeneration =
       workerGeneration;
     projectIoPendingRequests.set(id, pending);
-    armProjectIoRequestWatchdog(
-      pending,
-      worker,
-      workerGeneration,
-      id
-    );
-  
     const streamIsCurrent = () =>
       !pending.settled &&
       pending.worker === worker &&
@@ -825,12 +746,6 @@
           },
           onProgress: () => {
             if (streamIsCurrent()) {
-              armProjectIoRequestWatchdog(
-                pending,
-                worker,
-                workerGeneration,
-                id
-              );
             }
           }
         }
@@ -856,12 +771,6 @@
           error instanceof TypeError
         ) {
           projectIoPendingRequests.delete(id);
-          if (pending.watchdogTimer) {
-            clearTimeout(
-              pending.watchdogTimer
-            );
-            pending.watchdogTimer = 0;
-          }
           try {
             worker.postMessage({
               id,
@@ -922,13 +831,6 @@
     pending.workerGeneration =
       workerGeneration;
     projectIoPendingRequests.set(id, pending);
-    armProjectIoRequestWatchdog(
-      pending,
-      worker,
-      workerGeneration,
-      id
-    );
-  
     try {
       worker.postMessage({
         id,
@@ -948,12 +850,6 @@
   
       if (error?.name === window.RMLI18n.t("ui.literal.c749561f3732")) {
         projectIoPendingRequests.delete(id);
-        if (pending.watchdogTimer) {
-          clearTimeout(
-            pending.watchdogTimer
-          );
-          pending.watchdogTimer = 0;
-        }
         recoverProjectIoRequest(
           pending,
           error,
@@ -980,21 +876,11 @@
   
     projectIoWorker.terminate();
     projectIoWorker = null;
-    if (projectIoWorkerIdleTimer) {
-      clearTimeout(projectIoWorkerIdleTimer);
-      projectIoWorkerIdleTimer = 0;
-    }
     return true;
   }
   
   function scheduleProjectIoWorkerIdleRelease() {
-    if (projectIoWorkerIdleTimer) {
-      clearTimeout(projectIoWorkerIdleTimer);
-    }
-    projectIoWorkerIdleTimer = setTimeout(() => {
-      projectIoWorkerIdleTimer = 0;
-      releaseProjectIoWorkerIfIdle();
-    }, PROJECT_IO_WORKER_IDLE_RELEASE_MS);
+    releaseProjectIoWorkerIfIdle();
   }
   
   function projectIoRequest(
@@ -1012,8 +898,6 @@
           workerGeneration: 0,
           recoveryAttempted: false,
           settled: false,
-          watchdogTimer: 0,
-          watchdogEpoch: 0
         };
         dispatchProjectIoRequest(pending);
       }
@@ -1053,8 +937,6 @@
               : null,
           streamPromise: null,
           streamMetrics: null,
-          watchdogTimer: 0,
-          watchdogEpoch: 0
         };
         dispatchProjectIoRequest(pending);
       }

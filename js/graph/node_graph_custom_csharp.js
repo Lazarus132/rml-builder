@@ -1,17 +1,12 @@
 "use strict";
 
-const customCSharpSourceSyncTimers = new Map();
-const customCSharpLiveDiagnosticTimers = new Map();
+const customCSharpSourceSyncPending = new Set();
 const customCSharpLiveDiagnosticRevisions = new Map();
 const customCSharpLiveDiagnosticJobs = new Map();
 const customCSharpLiveValidatedValues = new Map();
 const customCSharpLivePendingNodes = new Set();
 let customCSharpLiveDiagnosticRunning = null;
-let customCSharpEditorPersistenceTimer = 0;
 let customCSharpEditorPersistenceDirty = false;
-const CUSTOM_CSHARP_LIVE_INTERVAL_MS = 100;
-const CUSTOM_CSHARP_SOURCE_GRAPH_SYNC_IDLE_MS = 450;
-const CUSTOM_CSHARP_PERSIST_IDLE_MS = 320;
 const customCSharpDetachedEditors = new Map();
 const customCSharpEditorDraftValues = new Map();
 
@@ -20,7 +15,6 @@ let customCSharpActiveEditorKey = "";
 let customCSharpEditorOverlayZ = 2147482200;
 let customCSharpDetachedEditorModulePromise = null;
 const CUSTOM_CSHARP_SHORTCUT_BOOTSTRAP_VERSION = 18;
-const CUSTOM_CSHARP_CATALOG_SCAN_SLICE_MS = 1.25;
 const CUSTOM_CSHARP_CATALOG_SOURCE_CHUNK = 16 * 1024;
 
 const customCSharpBuildWorkers = new Map();
@@ -1226,15 +1220,11 @@ async function openCustomCSharpFileGraphReady(
         );
     }
     let settled = false;
-    let timer = 0;
     let cancelPresentationWait = () => {};
 
     const presentation = new Promise(
       (resolve, reject) => {
         const cleanup = () => {
-          if (timer) {
-            window.clearTimeout(timer);
-          }
           document.removeEventListener(
             "rml-graph:presentation-complete",
             handlePresented
@@ -1284,16 +1274,6 @@ async function openCustomCSharpFileGraphReady(
           "abort",
           handleAbort,
           { once: true }
-        );
-        timer = window.setTimeout(
-          () =>
-            finish(
-              reject,
-              new Error(
-                window.RMLI18n.t("ui.literal.a6afccc87aa6")
-              )
-            ),
-          60000
         );
       }
     );
@@ -1733,9 +1713,6 @@ function drainCustomCSharpLiveDiagnostics() {
 
 function cancelCustomCSharpLiveDiagnostics(nodeId, parameterKey) {
     const key = customCSharpDetachedEditorKey(nodeId, parameterKey);
-    const timer = customCSharpLiveDiagnosticTimers.get(key);
-    if (timer) window.clearTimeout(timer);
-    customCSharpLiveDiagnosticTimers.delete(key);
     customCSharpLiveDiagnosticJobs.delete(key);
     customCSharpLiveDiagnosticRevisions.set(key,
       (customCSharpLiveDiagnosticRevisions.get(key) || 0) + 1);
@@ -1743,7 +1720,7 @@ function cancelCustomCSharpLiveDiagnostics(nodeId, parameterKey) {
   }
 
 function scheduleCustomCSharpLiveDiagnostics(
-    node, specification, value, delay = CUSTOM_CSHARP_LIVE_INTERVAL_MS
+    node, specification, value
   ) {
     const parameterKey = String(specification?.key || "code");
     if (!customCSharpSupportsLiveDiagnostics(parameterKey)) return false;
@@ -1754,24 +1731,14 @@ function scheduleCustomCSharpLiveDiagnostics(
     const previous = customCSharpLiveDiagnosticJobs.get(key);
     customCSharpLiveDiagnosticJobs.set(key, {
       key, nodeId, parameterKey, revision, source: String(value ?? ""),
-      projectEpoch: customCSharpProjectEpoch, ready: previous?.ready === true
+      projectEpoch: customCSharpProjectEpoch, ready: true
     });
     setCustomCSharpLiveValidationPending(nodeId, true);
-    if (!customCSharpLiveDiagnosticTimers.has(key)) {
-      const timer = window.setTimeout(() => {
-        customCSharpLiveDiagnosticTimers.delete(key);
-        const current = customCSharpLiveDiagnosticJobs.get(key);
-        if (current) current.ready = true;
-        drainCustomCSharpLiveDiagnostics();
-      }, Math.max(0, Number(delay) || 0));
-      customCSharpLiveDiagnosticTimers.set(key, timer);
-    }
+    window.RMLScheduleTask(drainCustomCSharpLiveDiagnostics);
     return true;
   }
 
 function cancelCustomCSharpEditorPersistence() {
-    if (customCSharpEditorPersistenceTimer) window.clearTimeout(customCSharpEditorPersistenceTimer);
-    customCSharpEditorPersistenceTimer = 0;
     const wasDirty = customCSharpEditorPersistenceDirty;
     customCSharpEditorPersistenceDirty = false;
     return wasDirty;
@@ -1810,16 +1777,10 @@ function queueCustomCSharpEditorPersistence() {
     if (!customCSharpEditorPersistenceDirty) {
       return false;
     }
-    if (customCSharpEditorPersistenceTimer) window.clearTimeout(customCSharpEditorPersistenceTimer);
     const epoch = customCSharpProjectEpoch;
-    customCSharpEditorPersistenceTimer = window.setTimeout(() => {
-      if (epoch !== customCSharpProjectEpoch) return;
-      if (graphParameterGestureActive()) {
-        scheduleGraphParameterPersistence();
-        return;
-      }
-      flushCustomCSharpEditorPersistence();
-    }, CUSTOM_CSHARP_PERSIST_IDLE_MS);
+    window.RMLScheduleTask(() => {
+      if (epoch === customCSharpProjectEpoch) flushCustomCSharpEditorPersistence();
+    });
     return true;
   }
 
@@ -2006,8 +1967,6 @@ function updateCustomCSharpSynchronizationToast(
       ensureGraphViewportToast();
     const id = String(nodeId || "");
     if (status) {
-      clearTimeout(graphMessageTimer);
-      graphMessageTimer = 0;
       toast.dataset
         .rmlCustomCSharpOperation = id;
       toast.textContent =
@@ -2163,12 +2122,8 @@ async function customCSharpSourceCatalogTokens(
             .replace(/^@/, "")
         );
       }
-      if (
-        performance.now() - sliceStarted >=
-          CUSTOM_CSHARP_CATALOG_SCAN_SLICE_MS
-      ) {
+      if ((offset / CUSTOM_CSHARP_CATALOG_SOURCE_CHUNK) % 8 === 0) {
         await yieldBuilderTask();
-        sliceStarted = performance.now();
       }
     }
     return { identifiers, hasIndexer };
@@ -2422,7 +2377,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.21.99-global-operation-state-machine",
+        "js/workers/graph_codegen_worker.js?v=1.22.4-core-clean-ux-timing",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -4861,7 +4816,7 @@ function cancelCustomCSharpSourceGraphSynchronization(
   ) {
     let cancelled = false;
     for (const [owner, timer] of
-      customCSharpSourceSyncTimers) {
+      customCSharpSourceSyncPending) {
       if (
         ownerOrId &&
         owner !== ownerOrId &&
@@ -4870,8 +4825,7 @@ function cancelCustomCSharpSourceGraphSynchronization(
       ) {
         continue;
       }
-      window.clearTimeout(timer);
-      customCSharpSourceSyncTimers.delete(owner);
+      customCSharpSourceSyncPending.delete(owner);
       cancelled = true;
     }
     return cancelled;
@@ -4922,25 +4876,12 @@ function scheduleCustomCSharpSourceGraphSynchronization(
     cancelCustomCSharpSourceGraphSynchronization(
       binding.owner
     );
-    const timer = window.setTimeout(() => {
-      if (
-        customCSharpSourceSyncTimers.get(
-          binding.owner
-        ) !== timer
-      ) {
-        return;
+    customCSharpSourceSyncPending.add(binding.owner);
+    window.RMLScheduleTask(() => {
+      if (customCSharpSourceSyncPending.has(binding.owner)) {
+        void flushCustomCSharpSourceGraphSynchronization(binding.owner);
       }
-      customCSharpSourceSyncTimers.delete(
-        binding.owner
-      );
-      void startCustomCSharpSourceGraphSynchronization(
-        binding
-      );
-    }, CUSTOM_CSHARP_SOURCE_GRAPH_SYNC_IDLE_MS);
-    customCSharpSourceSyncTimers.set(
-      binding.owner,
-      timer
-    );
+    });
     return true;
   }
 
@@ -5527,7 +5468,7 @@ function createCustomCSharpOverlayFrame(
     actions.className =
       "rml-custom-csharp-overlay-window-actions";
     const windowIcon = name =>
-      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-${name}"></use></svg>`;
+      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-${name}"></use></svg>`;
     const returnIcon = windowIcon("back");
     const minimizeIcon = windowIcon("minimize");
     const maximizeIcon = windowIcon("maximize");
@@ -6076,7 +6017,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.21.99-global-operation-state-machine",
+      "styles/features/styles.runtime-graph.css?v=1.22.4-core-clean-ux-timing",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -7191,7 +7132,6 @@ function mountCustomCSharpEditorPresentation({
         );
         record.setValidationPending?.(customCSharpLivePendingNodes.has(nodeId));
         if (customCSharpLiveValidatedValues.get(editorKey) !== record.getValue() &&
-            !customCSharpLiveDiagnosticTimers.has(editorKey) &&
             !customCSharpLiveDiagnosticJobs.has(editorKey)) {
           scheduleCustomCSharpLiveDiagnostics(
             customCSharpEditorNode(nodeId), specification, record.getValue()
@@ -7618,7 +7558,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.21.99-global-operation-state-machine",
+      "1.22.4-core-clean-ux-timing",
     writable: false,
     enumerable: true,
     configurable: true

@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.99-global-operation-state-machine";
+    "1.22.4-core-clean-ux-timing";
 
   if (
     window.RMLBuilderReplacementDialog
@@ -16,8 +16,6 @@
     const setAlwaysClickableButtonAvailability =
       dependencies
         .setAlwaysClickableButtonAvailability;
-    const clearBuilderWorkDeadline =
-      dependencies.clearBuilderWorkDeadline;
     const updateBuilderWork =
       dependencies.updateBuilderWork;
     const paintBuilderUi =
@@ -191,9 +189,6 @@
             )
           : [];
     
-      clearBuilderWorkDeadline(
-        workSession
-      );
     
       const prompt =
         ++activeBuilderReplacementPrompt;
@@ -362,7 +357,7 @@
                     ? "!"
                     : "·";
           if (status === "selected") {
-            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-check"></use></svg>`;
+            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-check"></use></svg>`;
           }
           const name =
             document.createElement("span");

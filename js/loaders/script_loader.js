@@ -2,7 +2,7 @@
   "use strict";
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.21.99-global-operation-state-machine";
+    "1.22.4-core-clean-ux-timing";
 
   if (
     window.RMLScriptLoader?.version >= 47 &&
@@ -127,13 +127,13 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../ui/builder_replacement_dialog.js?v=1.21.99-global-operation-state-machine",
+          url: "../ui/builder_replacement_dialog.js?v=1.22.4-core-clean-ux-timing",
           ready: () =>
             window.RMLBuilderReplacementDialog
               ?.moduleId === SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../ui/builder_work_controller.js?v=1.21.99-global-operation-state-machine",
+          url: "../ui/builder_work_controller.js?v=1.22.4-core-clean-ux-timing",
           ready: () =>
             window.RMLBuilderWorkController
               ?.moduleId === SCRIPT_LOADER_MODULE_ID
@@ -143,7 +143,7 @@
     "scanner-connection": Object.freeze({
       dependencies: Object.freeze([]),
       files: Object.freeze([Object.freeze({
-        url: "../graph/runtime_bridge.js?v=1.21.99-global-operation-state-machine&status-runtime=4",
+        url: "../graph/runtime_bridge.js?v=1.22.4-core-clean-ux-timing&status-runtime=4",
         ready: () => window.RMLRuntimeBridge?.version >= 14 &&
           typeof window.RMLRuntimeBridge?.connect === "function"
       })])
@@ -187,7 +187,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.21.99-global-operation-state-machine&status-catalog=4",
+          url: "../catalog/catalog_loader.js?v=1.22.4-core-clean-ux-timing&status-catalog=4",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -239,7 +239,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.21.99-global-operation-state-machine",
+          url: "../graph/node_graph_codegen.js?v=1.22.4-core-clean-ux-timing",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -256,7 +256,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.99-global-operation-state-machine",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.22.4-core-clean-ux-timing",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -265,13 +265,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.21.99-global-operation-state-machine",
+          url: "../graph/node_graph_composites.js?v=1.22.4-core-clean-ux-timing",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.21.99-global-operation-state-machine",
+          url: "../graph/node_graph_custom_csharp.js?v=1.22.4-core-clean-ux-timing",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -280,13 +280,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.21.99-global-operation-state-machine&status-readiness=4",
+          url: "../graph/node_graph_view.js?v=1.22.4-core-clean-ux-timing&status-readiness=4",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.21.99-global-operation-state-machine",
+          url: "../graph/node_graph_bootstrap.js?v=1.22.4-core-clean-ux-timing",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -295,13 +295,15 @@
         })
       ]),
       settle: async () => {
-        await waitFor(
-          () =>
-            window.RMLDynamicGraphHost?.moduleId ===
-              SCRIPT_LOADER_MODULE_ID &&
-            window.RMLDynamicGraphHost?.isReady?.() === true,
-          window.RMLI18n.t("ui.literal.0d5beb2090e5")
-        );
+        // Script readiness is established by the module load/identity contract.
+        // Runtime presentation readiness is project-owned and event driven;
+        // waiting for isReady() here can deadlock before a project epoch exists.
+        if (
+          window.RMLDynamicGraphHost?.moduleId !== SCRIPT_LOADER_MODULE_ID ||
+          typeof window.RMLDynamicGraphHost?.isReady !== "function"
+        ) {
+          throw new Error(window.RMLI18n.t("ui.literal.0d5beb2090e5"));
+        }
       }
     }),
     "runtime-view": Object.freeze({
@@ -310,7 +312,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=1.21.99-global-operation-state-machine",
+          url: "../graph/graph_gpu_renderer.js?v=1.22.4-core-clean-ux-timing",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })
@@ -492,31 +494,6 @@
     return typed("unknown", {}, {});
   }
 
-  function waitFor(
-    predicate,
-    failureMessage,
-    timeout = 120000
-  ) {
-    const started = performance.now();
-    return new Promise((resolve, reject) => {
-      const inspect = () => {
-        let ready = false;
-        try {
-          ready = predicate() === true;
-        } catch {}
-        if (ready) {
-          resolve(true);
-          return;
-        }
-        if (performance.now() - started >= timeout) {
-          reject(new Error(failureMessage));
-          return;
-        }
-        window.setTimeout(inspect, 16);
-      };
-      inspect();
-    });
-  }
 
   function fileState(url) {
     const absolute = new URL(url, baseUrl).href;
@@ -946,7 +923,6 @@
           detail:
             window.RMLI18n.t("ui.literal.48b127d6c93e"),
           progress: 12,
-          timeout: 120000
         }) || 0;
       const continuation = (async () => {
         await startRuntimeViewPreparation();

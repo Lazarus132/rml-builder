@@ -676,7 +676,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.21.99-global-operation-state-machine";
+    "1.22.4-core-clean-ux-timing";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -692,12 +692,6 @@ const savedApiCompositeSearchTextCache =
 
   const SAVED_API_COMPOSITE_COMPARE_MAX_IN_FLIGHT_PAGES =
     4;
-
-  const SAVED_API_COMPOSITE_COMPARE_SENDER_SLICE_MS =
-    0.25;
-
-  const SAVED_API_COMPOSITE_COMPARE_IDLE_RESERVE_MS =
-    1.5;
 
   const SAVED_API_COMPOSITE_COMPARE_PAGE_TOKEN =
     Object.freeze({
@@ -824,7 +818,6 @@ const savedApiCompositeSearchTextCache =
   ) {
     for (const pending of
       savedApiCompositeComparePendingRequests.values()) {
-      window.clearTimeout(pending.timer);
       pending.reject(reason);
     }
     savedApiCompositeComparePendingRequests.clear();
@@ -876,29 +869,13 @@ const savedApiCompositeSearchTextCache =
   ) {
     return new Promise((resolve, reject) => {
       const requestId = request.requestId;
-      const timer = window.setTimeout(() => {
-        const pending =
-          savedApiCompositeComparePendingRequests.get(
-            requestId
-          );
-        if (!pending) return;
-        savedApiCompositeComparePendingRequests.delete(
-          requestId
-        );
-        reject(
-          new Error(
-            window.RMLI18n.t("ui.literal.c9bb1007cf70")
-          )
-        );
-      }, 90 * 1000);
       savedApiCompositeComparePendingRequests.set(
         requestId,
-        { resolve, reject, timer }
+        { resolve, reject }
       );
       try {
         worker.postMessage(request, transfer);
       } catch (error) {
-        window.clearTimeout(timer);
         savedApiCompositeComparePendingRequests.delete(
           requestId
         );
@@ -934,7 +911,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.21.99-global-operation-state-machine&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.22.4-core-clean-ux-timing&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -1003,7 +980,6 @@ const savedApiCompositeSearchTextCache =
         const error = new Error(
           window.RMLI18n.t("ui.literal.1c85a77d3bbb")
         );
-        window.clearTimeout(pending.timer);
         savedApiCompositeComparePendingRequests.delete(
           result.requestId
         );
@@ -1013,7 +989,6 @@ const savedApiCompositeSearchTextCache =
         }
         return;
       }
-      window.clearTimeout(pending.timer);
       savedApiCompositeComparePendingRequests.delete(
         result.requestId
       );
@@ -1145,26 +1120,7 @@ const savedApiCompositeSearchTextCache =
           "function"
       ) {
 
-        const waitForFrameBudget = () =>
-          window.requestAnimationFrame(() => {
-            window.requestIdleCallback(deadline => {
-
-              if (
-                !deadline.didTimeout &&
-                deadline.timeRemaining() >= Math.max(
-                  2,
-                  SAVED_API_COMPOSITE_COMPARE_IDLE_RESERVE_MS +
-                    SAVED_API_COMPOSITE_COMPARE_SENDER_SLICE_MS +
-                    0.5
-                )
-              ) {
-                resolve(deadline);
-                return;
-              }
-              waitForFrameBudget();
-            }, { timeout: 250 });
-          });
-        waitForFrameBudget();
+        window.requestAnimationFrame(() => resolve(null));
         return;
       }
       if (
@@ -1175,14 +1131,14 @@ const savedApiCompositeSearchTextCache =
       ) {
         window.requestAnimationFrame(() => {
 
-          window.setTimeout(
+          window.RMLScheduleTask(
             () => resolve(null),
             0
           );
         });
         return;
       }
-      window.setTimeout(
+      window.RMLScheduleTask(
         () => resolve(null),
         0
       );
@@ -2170,21 +2126,10 @@ const savedApiCompositeSearchTextCache =
           }
 
           if (
-            (
-              (sliceTokens & 7) === 0 ||
-              lastTokenCharacters >=
-                SAVED_API_COMPOSITE_COMPARE_STRING_PART_CHARACTERS ||
-              !currentPage
-            ) &&
-            (
-              performance.now() - sliceStarted >=
-                SAVED_API_COMPOSITE_COMPARE_SENDER_SLICE_MS ||
-              (
-                idleDeadline &&
-                idleDeadline.timeRemaining() <=
-                  SAVED_API_COMPOSITE_COMPARE_IDLE_RESERVE_MS
-              )
-            )
+            (sliceTokens & 31) === 0 ||
+            lastTokenCharacters >=
+              SAVED_API_COMPOSITE_COMPARE_STRING_PART_CHARACTERS ||
+            !currentPage
           ) {
             break;
           }
@@ -2770,7 +2715,7 @@ const savedApiCompositeSearchTextCache =
         if (isCurrent()) {
           state.status = "error";
           state.error = error;
-          state.failedAt = Date.now();
+          state.failedAt = 1;
           state.promise = null;
         }
         throw error;
@@ -2859,12 +2804,7 @@ const savedApiCompositeSearchTextCache =
         previous.acceptGeneration ===
           acceptGeneration
       ) &&
-      (
-        previous.status !== "error" ||
-        Date.now() -
-          Number(previous.failedAt || 0) <
-          5000
-      )
+      previous.status !== "error"
     ) {
       return previous;
     }
@@ -2983,7 +2923,7 @@ const savedApiCompositeSearchTextCache =
       if (!isCurrent()) return;
       state.status = "error";
       state.error = error;
-      state.failedAt = Date.now();
+      state.failedAt = 1;
       scheduleSavedApiCompositeCompareUiRefresh();
       if (!savedApiCompositeCompareUnavailableWarningShown) {
         savedApiCompositeCompareUnavailableWarningShown =
@@ -17033,7 +16973,7 @@ function setSavedApiCompositeIcon(
     const namespace =
       "http://www.w3.org/2000/svg";
     const href =
-      `assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-${normalizedIconName}`;
+      `assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-${normalizedIconName}`;
     const existingSvg =
       element.firstElementChild;
     const existingUse =
@@ -17626,7 +17566,7 @@ function createSavedApiCompositePaletteItem(
     const add =
       document.createElement("small");
     if (!compatibilityIssue && !currentOpen && savedCompositeAvailable) {
-      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-add"></use></svg>`;
+      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg>`;
     } else {
       add.textContent = compatibilityIssue ? "!" : currentOpen ? window.RMLI18n.t("composite.library.status_open") : "·";
     }
@@ -17657,8 +17597,7 @@ function createSavedApiCompositePaletteItem(
             button
           ) ||
           suppressed ||
-          performance.now() <
-            paletteDragSuppressClickUntil
+          paletteDragSuppressClickUntil === 1
         ) {
           event.preventDefault();
           event.stopImmediatePropagation();
@@ -17691,7 +17630,7 @@ function createSavedApiCompositePaletteItem(
     const exportButton =
       document.createElement("button");
     exportButton.type = "button";
-    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-download"></use></svg>`;
+    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-download"></use></svg>`;
     exportButton.title =
       window.RMLI18n.format("composite.actions.export_title", { name: record.name });
     exportButton.addEventListener(
@@ -17750,7 +17689,7 @@ function createSavedApiCompositePaletteItem(
     const deleteButton =
       document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-close"></use></svg>`;
+    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-close"></use></svg>`;
     deleteButton.title =
       window.RMLI18n.format("composite.actions.delete_title", { name: record.name });
     deleteButton.addEventListener(
@@ -17779,7 +17718,7 @@ function createSavedApiCompositePaletteItem(
     const menuTrigger = document.createElement("button");
     menuTrigger.type = "button";
     menuTrigger.className = "rml-saved-api-composite-menu-trigger";
-    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-more"></use></svg>`;
+    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-more"></use></svg>`;
     menuTrigger.setAttribute("aria-haspopup", "menu");
     menuTrigger.setAttribute("aria-expanded", "false");
     menuTrigger.setAttribute(
@@ -17885,7 +17824,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.21.99-global-operation-state-machine",
+      "1.22.4-core-clean-ux-timing",
     writable: false,
     enumerable: true,
     configurable: true

@@ -261,7 +261,6 @@
       const finish = error => {
         if (settled) return;
         settled = true;
-        popup.clearTimeout(timeoutId);
         stylesheet.removeEventListener(
           "load",
           handleLoad
@@ -281,14 +280,6 @@
         new Error(
           window.RMLI18n.t("ui.literal.87c93d291d45")
         )
-      );
-      const timeoutId = popup.setTimeout(
-        () => finish(
-          new Error(
-            window.RMLI18n.t("ui.literal.994c93807dc1")
-          )
-        ),
-        30000
       );
       stylesheet.addEventListener(
         "load",
@@ -468,7 +459,7 @@
     heading.textContent = String(options.tabTitle || window.RMLI18n.t("ui.text.ba090b5e07cf"));
     const headerActions = popupDocument.createElement("div");
     headerActions.className = "editor-header-actions";
-    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.21.99-global-operation-state-machine", window.location.href).href;
+    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing", window.location.href).href;
     const createHeaderButton = (label, iconName) => {
       const button = popupDocument.createElement("button");
       button.type = "button";

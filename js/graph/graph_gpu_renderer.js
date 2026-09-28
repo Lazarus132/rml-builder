@@ -171,53 +171,21 @@
   let rendererBackendPreference =
     storedRendererBackend();
   let activeRendererBackend = "none";
-  const RENDERER_BACKEND_RETRY_BASE_MILLISECONDS = 750;
-  const RENDERER_BACKEND_RETRY_MAX_MILLISECONDS = 8000;
-
   const rendererBackendSubmissionFailures = new Map();
 
   function markRendererBackendSubmissionFailure(
     backendKind
   ) {
-    const now = performance.now();
-    const previous =
-      rendererBackendSubmissionFailures.get(
-        backendKind
-      );
-    const attempts = previous &&
-      now - previous.failedAt < 60000
-        ? previous.attempts + 1
-        : 1;
-    const retryDelay = Math.min(
-      RENDERER_BACKEND_RETRY_MAX_MILLISECONDS,
-      RENDERER_BACKEND_RETRY_BASE_MILLISECONDS *
-        2 ** Math.min(3, attempts - 1)
-    );
-    rendererBackendSubmissionFailures.set(
-      backendKind,
-      {
-        attempts,
-        failedAt: now,
-        retryAt: now + retryDelay
-      }
-    );
+    const previous = rendererBackendSubmissionFailures.get(backendKind);
+    rendererBackendSubmissionFailures.set(backendKind, {
+      attempts: (previous?.attempts || 0) + 1
+    });
   }
 
   function rendererBackendTemporarilyUnavailable(
     backendKind
   ) {
-    const failure =
-      rendererBackendSubmissionFailures.get(
-        backendKind
-      );
-    if (!failure) return false;
-    if (performance.now() >= failure.retryAt) {
-      rendererBackendSubmissionFailures.delete(
-        backendKind
-      );
-      return false;
-    }
-    return true;
+    return rendererBackendSubmissionFailures.has(backendKind);
   }
 
   function clearRendererBackendSubmissionFailure(
@@ -5994,8 +5962,7 @@
           return;
         }
         globalThis.requestAnimationFrame(() => {
-          const started = performance.now();
-          callback({ timeRemaining: () => Math.max(0, 4 - (performance.now() - started)) });
+          callback(null);
         });
       };
       const runBatch = deadline => {
@@ -6040,10 +6007,7 @@
           let processed = 0;
           while (
             task.position < batchEnd &&
-            (
-              processed < 64 ||
-              deadline.timeRemaining() > 1
-            )
+            processed < 256
           ) {
             const record = records[task.position];
             if (isWire) {
@@ -6100,10 +6064,7 @@
         let committed = 0;
         while (
           task.commitPosition < commitEnd &&
-          (
-            committed < 64 ||
-            deadline.timeRemaining() > 1
-          )
+          committed < 256
         ) {
           const index = task.commitPosition;
           if (isWire) {

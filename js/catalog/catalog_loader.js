@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.99-global-operation-state-machine";
+    "1.22.4-core-clean-ux-timing";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -11,8 +11,6 @@
     "/rml-scanner-catalog";
   const BUILDER_SCANNER_DEMAND_PATH =
     "/rml-scanner-demand";
-  const SCANNER_HEALTH_SWEEP_TIMEOUT_MS = 1500;
-  const CATALOG_TRANSFER_TIMEOUT_MS = 120000;
   const CACHE_DATABASE_NAME =
     "rml-resonite-api-catalog";
   const CACHE_DATABASE_VERSION = 3;
@@ -20,10 +18,6 @@
   const STREAM_DEMAND_OPERATOR_OWNER_INDEX =
     "stream-demand-operator-owner";
   const CACHE_RECORD_KEY = "latest-live";
-  const CACHE_OPEN_TIMEOUT_MS = 3000;
-  const CACHE_REQUEST_TIMEOUT_MS = 5000;
-  const CACHE_TRANSACTION_TIMEOUT_MS = 10000;
-  const CACHE_LOCK_ACQUIRE_TIMEOUT_MS = 1000;
   const KNOWN_SCANNER_URL_STORAGE_KEY =
     "rml-resonite-api-last-scanner-url";
   const REQUIRED_CATALOG_SCHEMA_VERSION = 8;
@@ -146,11 +140,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.21.99-global-operation-state-machine",
+    "../compiler/visual_csharp.js?v=1.22.4-core-clean-ux-timing",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.99-global-operation-state-machine",
+    "api_nodes.js?v=1.22.4-core-clean-ux-timing",
     scriptUrl
   ).href;
 
@@ -1753,13 +1747,11 @@
     });
   }
 
-  async function fetchJson(url, timeoutMs, signal = null) {
+  async function fetchJson(url, signal = null) {
     const controller = new AbortController();
     const abort = () => controller.abort();
     if (signal?.aborted) abort();
     else signal?.addEventListener("abort", abort, { once: true });
-    const timeout = Number(timeoutMs) > 0
-      ? window.setTimeout(abort, Number(timeoutMs)) : 0;
     try {
       const requestUrl = new URL(
         url,
@@ -1781,7 +1773,6 @@
       return value;
     } finally {
       signal?.removeEventListener("abort", abort);
-      if (timeout) window.clearTimeout(timeout);
     }
   }
 
@@ -1826,7 +1817,6 @@
     const fetched = live?.raw ||
       await fetchJson(
         live.catalogFetchUrl || live.url,
-        CATALOG_TRANSFER_TIMEOUT_MS,
         live.signal
       );
     const raw =
@@ -1890,19 +1880,9 @@
             return;
           }
           settled = true;
-          window.clearTimeout(timeout);
-          callback(value);
+            callback(value);
         };
-        const timeout = window.setTimeout(
-          () => finish(
-            reject,
-            new Error(
-              "The local catalog cache did not open in time; the Builder will continue without waiting for it."
-            )
-          ),
-          CACHE_OPEN_TIMEOUT_MS
-        );
-
+  
         request.onupgradeneeded =
           () => {
             const database =
@@ -2021,8 +2001,7 @@
         const finish = (callback, value) => {
           if (settled) return;
           settled = true;
-          window.clearTimeout(timeout);
-          callback(value);
+            callback(value);
         };
         const fail = error => finish(
           reject,
@@ -2031,15 +2010,7 @@
             window.RMLI18n.t("ui.literal.0e2d6d316dae")
           )
         );
-        const timeout = window.setTimeout(() => {
-          try {
-            transaction.abort();
-          } catch {}
-          fail(new Error(
-            "The local catalog cache did not answer in time; the Builder will continue without waiting for it."
-          ));
-        }, CACHE_REQUEST_TIMEOUT_MS);
-        request.onsuccess = () =>
+          request.onsuccess = () =>
           finish(resolve, request.result || null);
         request.onerror = () =>
           fail(request.error);
@@ -2055,9 +2026,7 @@
     transaction,
     {
       errorMessage,
-      abortMessage,
-      timeoutMessage,
-      timeoutMs = CACHE_TRANSACTION_TIMEOUT_MS
+      abortMessage
     }
   ) {
     return new Promise((resolve, reject) => {
@@ -2065,22 +2034,8 @@
       const finish = (callback, value) => {
         if (settled) return;
         settled = true;
-        window.clearTimeout(timeout);
         callback(value);
       };
-      const timeout = window.setTimeout(() => {
-        try {
-          transaction.abort();
-        } catch {}
-        finish(
-          reject,
-          new Error(timeoutMessage)
-        );
-      }, Math.max(
-        1,
-        Number(timeoutMs) ||
-          CACHE_TRANSACTION_TIMEOUT_MS
-      ));
       transaction.oncomplete = () =>
         finish(resolve, true);
       transaction.onerror = () =>
@@ -2386,7 +2341,6 @@
       const finish = (callback, value) => {
         if (settled) return;
         settled = true;
-        window.clearTimeout(timeout);
         callback(value);
       };
       const fail = error => finish(
@@ -2396,14 +2350,6 @@
             "The streamed catalog cache prefix batch failed."
           )
       );
-      const timeout = window.setTimeout(() => {
-        try {
-          transaction.abort();
-        } catch {}
-        fail(new Error(
-          "The streamed catalog cache prefix batch stopped responding."
-        ));
-      }, CACHE_TRANSACTION_TIMEOUT_MS);
       request.onsuccess = () => {
         const cursor = request.result;
         if (!cursor) return;
@@ -2462,7 +2408,6 @@
       const finish = (callback, value) => {
         if (settled) return;
         settled = true;
-        window.clearTimeout(timeout);
         callback(value);
       };
       const fail = error => finish(
@@ -2472,14 +2417,6 @@
             "The streamed catalog cache cursor failed."
           )
       );
-      const timeout = window.setTimeout(() => {
-        try {
-          transaction.abort();
-        } catch {}
-        fail(new Error(
-          "The streamed catalog cache cursor stopped responding."
-        ));
-      }, CACHE_TRANSACTION_TIMEOUT_MS);
       request.onsuccess = () => {
         const cursor = request.result;
         if (!cursor) return;
@@ -2553,7 +2490,6 @@
       const finish = (callback, value) => {
         if (settled) return;
         settled = true;
-        window.clearTimeout(timeout);
         callback(value);
       };
       const fail = error => finish(
@@ -2563,14 +2499,6 @@
             "The streamed catalog cache index batch read failed."
           )
       );
-      const timeout = window.setTimeout(() => {
-        try {
-          transaction.abort();
-        } catch {}
-        fail(new Error(
-          "The streamed catalog cache index batch read stopped responding."
-        ));
-      }, CACHE_TRANSACTION_TIMEOUT_MS);
       for (const key of uniqueKeys) {
         const request = index.getKey(key);
         request.onsuccess = () => {
@@ -2634,7 +2562,6 @@
       const finish = (callback, value) => {
         if (settled) return;
         settled = true;
-        window.clearTimeout(timeout);
         callback(value);
       };
       const fail = error => finish(
@@ -2644,14 +2571,6 @@
             "The streamed catalog cache index cursor failed."
           )
       );
-      const timeout = window.setTimeout(() => {
-        try {
-          transaction.abort();
-        } catch {}
-        fail(new Error(
-          "The streamed catalog cache index cursor stopped responding."
-        ));
-      }, CACHE_TRANSACTION_TIMEOUT_MS);
       request.onsuccess = () => {
         const cursor = request.result;
         if (!cursor) return;
@@ -2881,7 +2800,6 @@
       const finish = (callback, value) => {
         if (settled) return;
         settled = true;
-        window.clearTimeout(timeout);
         callback(value);
       };
       const fail = error => finish(
@@ -2891,14 +2809,6 @@
             "The streamed catalog cache batch read failed."
           )
       );
-      const timeout = window.setTimeout(() => {
-        try {
-          transaction.abort();
-        } catch {}
-        fail(new Error(
-          "The streamed catalog cache batch read stopped responding."
-        ));
-      }, CACHE_TRANSACTION_TIMEOUT_MS);
       for (const key of uniqueKeys) {
         const request = store.get(key);
         request.onsuccess = () => {
@@ -6680,8 +6590,7 @@
         const finish = (callback, value) => {
           if (settled) return;
           settled = true;
-          window.clearTimeout(timeout);
-          callback(value);
+            callback(value);
         };
         const fail = request =>
           finish(
@@ -6692,18 +6601,7 @@
               window.RMLI18n.t("ui.literal.cbfab94cc829")
             )
           );
-        const timeout = window.setTimeout(() => {
-          try {
-            transaction.abort();
-          } catch {}
-          finish(
-            reject,
-            new Error(
-              "A local catalog cache chunk did not answer in time; the cache will be ignored instead of blocking the Builder."
-            )
-          );
-        }, CACHE_REQUEST_TIMEOUT_MS);
-        chunkRequest.onsuccess = () => {
+          chunkRequest.onsuccess = () => {
           finish(
             resolve,
             chunkRequest.result || null
@@ -7011,7 +6909,7 @@
       );
     }
     return new Promise(resolve => {
-      window.window.RMLScheduleTask(resolve);
+      window.RMLScheduleTask(resolve);
     });
   }
 
@@ -11094,13 +10992,6 @@
           database,
           CACHE_STAGING_RECORD_KEY
         );
-      const staleAge =
-        Date.now() - Date.parse(
-          String(
-            staleStaging?.updatedAtUtc ||
-            staleStaging?.createdAtUtc || ""
-          )
-        );
       if (staleStaging?.generation) {
         const staleGeneration = String(
           staleStaging.generation
@@ -11117,13 +11008,7 @@
             database,
             staleGeneration
           );
-        } else if (
-          exclusiveLockHeld ||
-          (
-            Number.isFinite(staleAge) &&
-            staleAge > 10 * 60 * 1000
-          )
-        ) {
+        } else if (exclusiveLockHeld) {
           await removeCatalogCacheGeneration(
             database,
             staleGeneration,
@@ -11249,7 +11134,6 @@
     ) {
       let lockRequestStarted = false;
       let lockRequestAccepted = true;
-      let timeout = 0;
       try {
         const request = locks.request(
           CACHE_WRITE_LOCK_NAME,
@@ -11259,8 +11143,7 @@
           },
           lock => {
             lockRequestStarted = true;
-            window.clearTimeout(timeout);
-            if (!lockRequestAccepted) {
+                if (!lockRequestAccepted) {
               return false;
             }
             if (!lock) {
@@ -11277,26 +11160,8 @@
             );
           }
         );
-        const boundedRequest = new Promise(
-          (resolve, reject) => {
-            timeout = window.setTimeout(() => {
-              if (lockRequestStarted) return;
-              lockRequestAccepted = false;
-              reject(new Error(
-                "The catalog cache write lock did not answer in time; the verified in-memory catalog remains active."
-              ));
-            }, CACHE_LOCK_ACQUIRE_TIMEOUT_MS);
-            Promise.resolve(request).then(
-              resolve,
-              reject
-            );
-          }
-        );
-        return boundedRequest.finally(() => {
-          window.clearTimeout(timeout);
-        });
+        return Promise.resolve(request);
       } catch (error) {
-        window.clearTimeout(timeout);
         throw error;
       }
     }
@@ -12434,8 +12299,6 @@
             diagnostics.selectedPort,
           candidateCount:
             diagnostics.candidateCount,
-          timeoutMs:
-            diagnostics.timeoutMs,
           summary: diagnostics.summary,
           probes: diagnostics.probes.map(
             probe => ({
@@ -12486,7 +12349,6 @@
       try {
         const health = await fetchJson(
           `http://127.0.0.1:${port}/health`,
-          SCANNER_HEALTH_SWEEP_TIMEOUT_MS,
           signal
         );
         outcome = Object.freeze({
@@ -12543,8 +12405,6 @@
           : selected?.port || 0,
       candidateCount:
         selected ? 1 : 0,
-      timeoutMs:
-        SCANNER_HEALTH_SWEEP_TIMEOUT_MS,
       probes: outcomes
     });
     if (signal?.aborted === true) {
@@ -12642,7 +12502,6 @@
           // Scanner/catalog work is progress-driven and may legitimately run
           // for an arbitrary amount of time. A zero timeout explicitly disables
           // the Builder Work watchdog; lifecycle cancellation remains available.
-          timeout: 0
         }) || 0;
     }
     return scannerCheckWorkSession;
@@ -13134,7 +12993,6 @@
           ensureScannerCheckWork(
             {
               ...options,
-              timeout: 0
             },
             sessionKey
           );
@@ -13664,7 +13522,7 @@
             Boolean(fallbackCatalog);
           updateStatus();
           if (options.silent !== true) {
-            window.setTimeout(() => {
+            window.RMLScheduleTask(() => {
               void window.RMLBuilderDialog?.notice?.({
                 tone: "danger",
                 kicker: window.RMLI18n.t("ui.auto.9fc587f7a4db"),

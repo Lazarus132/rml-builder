@@ -28,11 +28,9 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.21.99-global-operation-state-machine";
+  "1.22.4-core-clean-ux-timing";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
-
-let alwaysClickableButtonFeedbackTimer = 0;
 let alwaysClickableButtonFeedbackOwner = null;
 
 function showAlwaysClickableButtonFeedback(
@@ -60,15 +58,6 @@ function showAlwaysClickableButtonFeedback(
   feedback.hidden = false;
   alwaysClickableButtonFeedbackOwner =
     owner;
-  window.clearTimeout(
-    alwaysClickableButtonFeedbackTimer
-  );
-  alwaysClickableButtonFeedbackTimer =
-    window.setTimeout(() => {
-      feedback.hidden = true;
-      alwaysClickableButtonFeedbackOwner =
-        null;
-    }, 3600);
 }
 
 function setAlwaysClickableButtonAvailability(
@@ -110,10 +99,6 @@ function setAlwaysClickableButtonAvailability(
         document.getElementById(
           "rml-button-action-feedback"
         );
-      window.clearTimeout(
-        alwaysClickableButtonFeedbackTimer
-      );
-      alwaysClickableButtonFeedbackTimer = 0;
       alwaysClickableButtonFeedbackOwner = null;
       if (feedback) {
         feedback.hidden = true;
@@ -361,7 +346,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -843,9 +828,7 @@ let dragHorizontalPlaceholderAuthorityHost = null;
 let dragHorizontalPlaceholderAnchorX = null;
 let dragHorizontalPlaceholderAnchorY = null;
 let dragHorizontalPlaceholderContractBroken = false;
-let dragHorizontalPlaceholderLastPointerMoveAt = 0;
 const DRAG_PLACEHOLDER_POINTER_THRESHOLD = 5;
-const DRAG_PLACEHOLDER_STATIONARY_DELAY = 120;
 let dragScrollFrame = null;
 let dragScrollLastTimestamp = 0;
 let dragScrollOriginX = 0;
@@ -856,7 +839,6 @@ window.__RMLPreviewTrace = window.__RMLPreviewTrace || [];
 let settingsPreviewPulseCounts = {};
 let settingsPreviewColorSession = null;
 const settingsPreviewLiveValueBackups = new Map();
-let settingsPreviewStatusTimer = null;
 let settingsPreviewRenderDeferred = false;
 let settingsPreviewLabelFitFrame = 0;
 let outlineInspectorRenderDeferred = false;
@@ -1769,14 +1751,9 @@ function waitForExportGraphSettlement(
   expectedKey = ""
 ) {
   return new Promise((resolve, reject) => {
-    let recheckTimer = 0;
     const cleanup = () => {
       document.removeEventListener("rml-builder:graph-codegen-settled", settled);
       request.controller.signal.removeEventListener("abort", cancelled);
-      if (recheckTimer) {
-        clearTimeout(recheckTimer);
-        recheckTimer = 0;
-      }
     };
     const matches = detail => {
       if (
@@ -1807,14 +1784,6 @@ function waitForExportGraphSettlement(
       complete(graphCodegenLastSettlement);
       return;
     }
-    recheckTimer = setTimeout(
-      () => complete({
-        recheck: true,
-        revision:
-          graphCodegenSettlementRevision
-      }),
-      GRAPH_CODEGEN_SETTLEMENT_RECHECK_MS
-    );
   });
 }
 
@@ -2703,9 +2672,6 @@ const LARGE_GRAPH_BACKGROUND_CODEGEN_CONNECTION_THRESHOLD =
   2000;
 let graphCodegenWorker = null;
 let graphCodegenWorkerCatalogKey = "";
-let graphCodegenWorkerIdleTimer = 0;
-const GRAPH_CODEGEN_WORKER_IDLE_RELEASE_MS =
-  10000;
 let graphCodegenWorkerSequence = 1;
 let graphCodegenWorkerRunning = false;
 let graphCodegenWorkerQueuedBuild = null;
@@ -2720,16 +2686,11 @@ const GRAPH_CODEGEN_MAX_TRANSIENT_RETRIES =
   2;
 let graphCodegenSettlementRevision = 0;
 let graphCodegenLastSettlement = null;
-let graphCodegenWorkerStallTimer = 0;
-const GRAPH_CODEGEN_SETTLEMENT_RECHECK_MS =
-  1000;
-const GRAPH_CODEGEN_WORKER_STALL_TIMEOUT_MS =
-  120000;
+// Codegen settlement is event driven; no wall-clock recheck/stall deadline.
 
 let pendingImportedGraphAnalysisCertificate = null;
 let graphCodegenProjectEpoch = 1;
 
-const GRAPH_CODEGEN_STREAM_SLICE_MS = 1.25;
 const GRAPH_CODEGEN_STREAM_MAX_TOKENS = 512;
 const GRAPH_CODEGEN_STREAM_MAX_CHARACTERS = 48 * 1024;
 const GRAPH_CODEGEN_STREAM_STRING_PART_CHARACTERS = 16 * 1024;
@@ -3357,8 +3318,7 @@ async function postGraphCodegenTokenStream(
       }
       if (
         (tokenCount & 31) === 0 &&
-        performance.now() - started >=
-          GRAPH_CODEGEN_STREAM_SLICE_MS
+        false
       ) {
         break;
       }
@@ -3917,8 +3877,7 @@ async function graphCodegenFindCatalogMember(
     }
     if (
       (index & 63) === 0 &&
-      performance.now() - sliceStarted >=
-        GRAPH_CODEGEN_STREAM_SLICE_MS
+      false
     ) {
       await yieldBuilderTask();
       sliceStarted = performance.now();
@@ -4011,8 +3970,7 @@ async function graphCodegenCatalogProjection(
     ) {
       if (
         (requirementIndex & 63) === 0 &&
-        performance.now() - sliceStarted >=
-          GRAPH_CODEGEN_STREAM_SLICE_MS
+        false
       ) {
         await yieldBuilderTask();
         sliceStarted = performance.now();
@@ -4083,8 +4041,7 @@ async function graphCodegenCatalogProjection(
     }
     if (
       (requirementIndex & 63) === 0 &&
-      performance.now() - sliceStarted >=
-        GRAPH_CODEGEN_STREAM_SLICE_MS
+      false
     ) {
       await yieldBuilderTask();
       sliceStarted = performance.now();
@@ -4108,8 +4065,7 @@ async function graphCodegenCatalogProjection(
     }
     if (
       (queueIndex & 63) === 0 &&
-      performance.now() - sliceStarted >=
-        GRAPH_CODEGEN_STREAM_SLICE_MS
+      false
     ) {
       await yieldBuilderTask();
       sliceStarted = performance.now();
@@ -4168,8 +4124,7 @@ async function graphCodegenCatalogProjection(
     });
     if (
       (selectedIndex & 127) === 0 &&
-      performance.now() - sliceStarted >=
-        GRAPH_CODEGEN_STREAM_SLICE_MS
+      false
     ) {
       await yieldBuilderTask();
       sliceStarted = performance.now();
@@ -4304,36 +4259,13 @@ Object.defineProperty(
 );
 
 function terminateGraphCodegenWorker() {
-  if (graphCodegenWorkerStallTimer) {
-    clearTimeout(
-      graphCodegenWorkerStallTimer
-    );
-    graphCodegenWorkerStallTimer = 0;
-  }
-  if (graphCodegenWorkerIdleTimer) {
-    clearTimeout(
-      graphCodegenWorkerIdleTimer
-    );
-    graphCodegenWorkerIdleTimer = 0;
-  }
   graphCodegenWorker?.terminate?.();
   graphCodegenWorker = null;
   graphCodegenWorkerCatalogKey = "";
 }
 
 function scheduleGraphCodegenWorkerIdleRelease() {
-  if (graphCodegenWorkerIdleTimer) {
-    clearTimeout(
-      graphCodegenWorkerIdleTimer
-    );
-  }
-  graphCodegenWorkerIdleTimer = setTimeout(
-    () => {
-      graphCodegenWorkerIdleTimer = 0;
-      releaseIdleGraphCodegenWorker();
-    },
-    GRAPH_CODEGEN_WORKER_IDLE_RELEASE_MS
-  );
+  releaseIdleGraphCodegenWorker();
 }
 
 function releaseIdleGraphCodegenWorker() {
@@ -4417,7 +4349,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.21.99-global-operation-state-machine",
+      "../workers/graph_codegen_worker.js?v=1.22.4-core-clean-ux-timing",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -4471,27 +4403,7 @@ function ensureGraphCodegenWorker() {
     void pumpGraphCodegenWorkerQueue();
   };
   const refreshWorkerStallWatchdog = () => {
-    if (
-      worker !== graphCodegenWorker ||
-      !graphCodegenWorkerActiveBuild
-    ) {
-      return;
-    }
-    if (graphCodegenWorkerStallTimer) {
-      clearTimeout(
-        graphCodegenWorkerStallTimer
-      );
-    }
-    graphCodegenWorkerStallTimer =
-      setTimeout(
-        () => {
-          graphCodegenWorkerStallTimer = 0;
-          retireWorkerForFailure(
-            "The background graph code generator stopped responding."
-          );
-        },
-        GRAPH_CODEGEN_WORKER_STALL_TIMEOUT_MS
-      );
+    // Worker completion/error/message events own settlement. No elapsed-time failure.
   };
   Object.defineProperty(
     worker,
@@ -4571,13 +4483,6 @@ function ensureGraphCodegenWorker() {
             }
           };
         }
-      }
-
-      if (graphCodegenWorkerStallTimer) {
-        clearTimeout(
-          graphCodegenWorkerStallTimer
-        );
-        graphCodegenWorkerStallTimer = 0;
       }
       graphCodegenWorkerActiveBuild = null;
 
@@ -4915,12 +4820,6 @@ function requestLargeGraphCodegen(
   extensionState,
   key
 ) {
-  if (graphCodegenWorkerIdleTimer) {
-    clearTimeout(
-      graphCodegenWorkerIdleTimer
-    );
-    graphCodegenWorkerIdleTimer = 0;
-  }
   if (
     graphCodegenWorkerActiveBuild?.key ===
       key
@@ -13045,17 +12944,8 @@ function persist(immediate = false) {
 
   if (immediate) {
     enqueue();
-  } else if (
-    typeof requestIdleCallback ===
-      "function"
-  ) {
-    projectDraftPersistIdleHandle =
-      requestIdleCallback(
-        enqueue,
-        { timeout: 1500 }
-      );
   } else {
-    queueMicrotask(() => {
+    window.RMLScheduleTask(() => {
       if (
         schedule ===
           projectDraftPersistSchedule
@@ -13664,7 +13554,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -13679,7 +13569,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -13698,7 +13588,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -14035,7 +13925,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -14066,7 +13956,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -14364,8 +14254,6 @@ function breakHorizontalPlaceholderContractIfPointerMoved(
       nextX;
     dragHorizontalPlaceholderAnchorY =
       nextY;
-    dragHorizontalPlaceholderLastPointerMoveAt =
-      performance.now();
     return false;
   }
 
@@ -14385,15 +14273,13 @@ function breakHorizontalPlaceholderContractIfPointerMoved(
     return false;
   }
 
-  dragHorizontalPlaceholderLastPointerMoveAt =
-    performance.now();
-
   const nodeInsertDragActive =
     nodePointerDragActive ||
     palettePointerDragActive;
 
-  dragHorizontalPlaceholderContractBroken =
-    true;
+  dragHorizontalPlaceholderContractBroken = false;
+  dragHorizontalPlaceholderAnchorX = nextX;
+  dragHorizontalPlaceholderAnchorY = nextY;
   dragHorizontalPlaceholderAuthorityHost =
     null;
   dragHorizontalScrollHost = null;
@@ -14419,32 +14305,6 @@ function breakHorizontalPlaceholderContractIfPointerMoved(
 }
 
 function placeholderPointerIsStationary() {
-  if (
-    !dragHorizontalPlaceholderContractBroken
-  ) {
-    return true;
-  }
-
-  const stationaryFor =
-    performance.now() -
-    dragHorizontalPlaceholderLastPointerMoveAt;
-
-  if (
-    stationaryFor <
-    DRAG_PLACEHOLDER_STATIONARY_DELAY
-  ) {
-    return false;
-  }
-
-  dragHorizontalPlaceholderContractBroken =
-    false;
-  dragHorizontalPlaceholderAnchorX =
-    dragPointerX;
-  dragHorizontalPlaceholderAnchorY =
-    dragPointerY;
-
-  
-
   return true;
 }
 
@@ -14477,8 +14337,6 @@ function beginDragScrolling(event) {
       Number.isFinite(event?.clientY)
         ? event.clientY
         : null;
-    dragHorizontalPlaceholderLastPointerMoveAt =
-      performance.now();
   }
   
 
@@ -15563,7 +15421,6 @@ function stopDragScrolling() {
   dragHorizontalPlaceholderAnchorX = null;
   dragHorizontalPlaceholderAnchorY = null;
   dragHorizontalPlaceholderContractBroken = false;
-  dragHorizontalPlaceholderLastPointerMoveAt = 0;
   dragScrollLastTimestamp = 0;
   clearNodeWheelScrollScope();
 
@@ -17438,8 +17295,7 @@ function consumePalettePointerClick(
   const suppressed =
     button ===
       suppressPaletteClickButton &&
-    performance.now() <=
-      suppressPaletteClickUntil;
+    suppressPaletteClickUntil === 1;
 
   if (!suppressed) {
     return false;
@@ -18512,8 +18368,7 @@ function finishPalettePointerDrag(
 
   suppressPaletteClickButton =
     sourceButton;
-  suppressPaletteClickUntil =
-    performance.now() + 350;
+  suppressPaletteClickUntil = 1;
 
   palettePointerPayload = null;
 
@@ -18946,8 +18801,7 @@ function finishNodePointerDrag(
   nodeWheelManualIndex = null;
 
   suppressNodeClickId = nodeId;
-  suppressNodeClickUntil =
-    performance.now() + 350;
+  suppressNodeClickUntil = 1;
 
   activeDraggedNodeId = null;
   activeDraggedOptionId = null;
@@ -20439,7 +20293,7 @@ function bindCanvasInteractions() {
 
       if (
         nodeId === suppressNodeClickId &&
-        performance.now() <= suppressNodeClickUntil
+        suppressNodeClickUntil === 1
       ) {
         event.preventDefault();
         suppressNodeClickId = null;
@@ -21633,7 +21487,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -24946,14 +24800,14 @@ function previewEnumEditorMarkup(
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -25028,7 +24882,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -25923,22 +25777,10 @@ function setSettingsPreviewStatus(
   message,
   tone = ""
 ) {
-  clearTimeout(
-    settingsPreviewStatusTimer
-  );
   elements.settingsPreviewStatus.textContent =
     message;
   elements.settingsPreviewStatus.dataset.tone =
     tone;
-
-  settingsPreviewStatusTimer =
-    window.setTimeout(
-      () => {
-        elements.settingsPreviewStatus.textContent = "";
-        elements.settingsPreviewStatus.dataset.tone = "";
-      },
-      2400
-    );
 }
 
 function renderSettingsPreviewFooter() {
@@ -28823,27 +28665,7 @@ async function copyText(text, button) {
     }
   }
 
-  window.setTimeout(() => {
-    if (iconOnlyCopyButton) {
-      button.classList.remove(
-        "is-copied",
-        "copy-failed"
-      );
-
-      if (originalAriaLabel) {
-        button.setAttribute(
-          "aria-label",
-          originalAriaLabel
-        );
-      } else {
-        button.removeAttribute(
-          "aria-label"
-        );
-      }
-    } else {
-      button.textContent = originalText;
-    }
-  }, 1400);
+  0;
 }
 
 async function copyGeneratedCodeForCurrentView(button) {
@@ -28920,12 +28742,7 @@ function downloadBlob(blob, filename) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  window.setTimeout(
-    () => URL.revokeObjectURL(
-      objectUrl
-    ),
-    60000
-  );
+  0;
 }
 
 Object.defineProperty(
@@ -29041,11 +28858,6 @@ function finishBuilderWork(session) {
     .finish(session);
 }
 
-function clearBuilderWorkDeadline(session) {
-  return requireBuilderWorkController()
-    .clearDeadline(session);
-}
-
 function completeBuilderWork(
   session,
   options = {}
@@ -29125,7 +28937,6 @@ function beginStartupStatus(
     detail:
       window.RMLI18n.t("ui.literal.deb232cf6219"),
     progress: 0,
-    timeout: 120000
   });
   let finished = false;
 
@@ -30519,34 +30330,6 @@ function runtimeGraphPortablePreservationSignature(
   );
 }
 
-function promiseWithBuilderTimeout(
-  promise,
-  timeout,
-  message
-) {
-  return new Promise(
-    (resolve, reject) => {
-      let settled = false;
-      const finish = callback => value => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timer);
-        callback(value);
-      };
-      const timer = window.setTimeout(
-        finish(reject),
-        timeout,
-        new Error(message)
-      );
-
-      Promise.resolve(promise).then(
-        finish(resolve),
-        finish(reject)
-      );
-    }
-  );
-}
-
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
     String(
@@ -31096,11 +30879,7 @@ async function ensureProjectRuntimePrerequisites(
     );
   }
 
-  await promiseWithBuilderTimeout(
-    modulesReady,
-    60000,
-    window.RMLI18n.t("ui.literal.0b79bdfce7f2")
-  );
+  await modulesReady;
 
   const legacyMigration =
     window.RMLDynamicGraphHost
@@ -33154,7 +32933,6 @@ async function resolveSavedApiCompositeGraph(
       detail:
         window.RMLI18n.t("ui.literal.9bacfb101044"),
       progress: 4,
-      timeout: 120000
     });
   const compositeProgressRange =
     importedSavedComposite &&
@@ -33719,7 +33497,6 @@ function waitForGraphCodegenSettlement(
 ) {
   return new Promise((resolve, reject) => {
     let settled = false;
-    let recheckTimer = 0;
 
     const finish = (
       callback,
@@ -33735,10 +33512,6 @@ function waitForGraphCodegenSettlement(
         "rml-builder:project-replacement",
         handleReplacement
       );
-      if (recheckTimer) {
-        clearTimeout(recheckTimer);
-        recheckTimer = 0;
-      }
       callback(value);
     };
     const matchesSettlement = detail => {
@@ -33801,14 +33574,6 @@ function waitForGraphCodegenSettlement(
       );
       return;
     }
-    recheckTimer = setTimeout(
-      () => finish(resolve, {
-        recheck: true,
-        revision:
-          graphCodegenSettlementRevision
-      }),
-      GRAPH_CODEGEN_SETTLEMENT_RECHECK_MS
-    );
   });
 }
 
@@ -33995,7 +33760,6 @@ Object.defineProperty(
 function waitForImportedGraphUi(
   expectedNodes,
   expectedConnections,
-  timeout = 120000,
   {
     strict = false,
     projectEpoch =
@@ -34019,7 +33783,6 @@ function waitForImportedGraphUi(
   ) {
     return Promise.resolve({
       ready: true,
-      timedOut: false,
       modelReady: true,
       presentationFailed: false,
       presentationError: ""
@@ -34028,25 +33791,15 @@ function waitForImportedGraphUi(
 
   return new Promise((resolve, reject) => {
     let settled = false;
-    let timer = 0;
     const expectedProjectEpoch =
       Number(projectEpoch) || 0;
-    const effectiveTimeout =
-      Number.isFinite(Number(timeout)) &&
-      Number(timeout) > 0
-        ? Number(timeout)
-        : 120000;
 
     const finish = (
-      timedOut,
       error = null,
       presentation = null
     ) => {
       if (settled) return;
       settled = true;
-      if (timer) {
-        window.clearTimeout(timer);
-      }
       document.removeEventListener(
         "rml-graph:presentation-complete",
         handleComplete
@@ -34069,9 +33822,7 @@ function waitForImportedGraphUi(
       );
       resolve({
         ready:
-          !timedOut &&
           presentation?.failed !== true,
-        timedOut,
         modelReady:
           presentation?.modelReady !== false,
         presentationFailed:
@@ -34156,7 +33907,7 @@ function waitForImportedGraphUi(
         const message =
           `The Runtime Graph presentation could not be prepared: ${current.viewError || (current.renderBlocked ? "the active renderer reported a terminal blocked state" : window.RMLI18n.t("ui.literal.e5fd9aa24c94"))}.`;
         console.error(message);
-        finish(false, new Error(message));
+        finish(new Error(message));
         return true;
       }
       if (
@@ -34167,7 +33918,7 @@ function waitForImportedGraphUi(
         !current.viewFailed &&
         !current.renderBlocked
       ) {
-        finish(false);
+        finish();
         return true;
       }
       return false;
@@ -34197,7 +33948,6 @@ function waitForImportedGraphUi(
           !current.matches
         ) {
           finish(
-            false,
             new Error(
               `The Runtime Graph initialized a different project state: expected ${Number(expectedNodes).toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${Number(expectedConnections).toLocaleString(window.RMLI18n?.language || undefined)} connections for project epoch ${expectedProjectEpoch}, but received ${Number(current.nodeCount).toLocaleString(window.RMLI18n?.language || undefined)} and ${Number(current.connectionCount).toLocaleString(window.RMLI18n?.language || undefined)} for epoch ${Number(current.hostProjectEpoch) || 0}. The JSON was not loaded.`
             )
@@ -34235,25 +33985,11 @@ function waitForImportedGraphUi(
         return;
       }
       finish(
-        false,
         new Error(
           `The project changed while the Runtime Graph was initializing.${strict ? ` ${window.RMLI18n.t("ui.literal.12b43c510af7")}` : ""}`
         )
       );
     };
-
-    timer = window.setTimeout(() => {
-      const current = hostStateMatches();
-      const message =
-        `The Runtime Graph presentation did not become usable within ${Math.round(effectiveTimeout / 1000)} seconds.`;
-      console.error(message);
-      finish(
-        true,
-        new Error(
-          `${message} Model identity matched: ${String(current.matches)}.`
-        )
-      );
-    }, effectiveTimeout);
 
     document.addEventListener(
       "rml-graph:presentation-complete",
@@ -34332,7 +34068,6 @@ function waitForImportedGraphUi(
         `The Runtime Graph presentation module could not be prepared: ${error instanceof Error ? error.message : String(error)}.`;
       console.error(message);
       finish(
-        false,
         new Error(
           `${message} Model identity matched: ${String(current.matches)}.`
         )
@@ -34361,7 +34096,6 @@ async function applyLoadedProjectWithFeedback(
       detail:
         window.RMLI18n.t("ui.literal.48926a56d5e6"),
       progress: 0,
-      timeout: 120000
     });
   let previousProject = null;
   let projectApplicationStarted = false;
@@ -34585,7 +34319,6 @@ async function applyLoadedProjectWithFeedback(
       waitForImportedGraphUi(
         expectedNodes,
         expectedConnections,
-        null,
         {
           strict: true,
           projectEpoch:
@@ -35160,7 +34893,6 @@ const RML_EDITOR_APPEARANCE_DEFAULTS = Object.freeze({ workbench:"#181818", back
 const RML_EDITOR_APPEARANCE_LABELS = Object.freeze({ background:window.RMLI18n.t("ui.literal.45d591e5793a"), gutter:window.RMLI18n.t("ui.literal.8fc5e232d010"), workbench:window.RMLI18n.t("ui.literal.cc7ae3d130f5"), panel:window.RMLI18n.t("ui.literal.ed80dd65b4f2"), overlay:window.RMLI18n.t("ui.literal.c7f22ee034db"), status:window.RMLI18n.t("ui.literal.0fd8272072d2"), selection:window.RMLI18n.t("ui.literal.ad228a8a102b"), text:window.RMLI18n.t("ui.literal.633bcc03c942"), uiText:window.RMLI18n.t("ui.literal.8c058e4faec6"), gutterText:window.RMLI18n.t("ui.literal.361b9d89d650"), statusText:window.RMLI18n.t("ui.literal.9df5b884aaf8"), accent:window.RMLI18n.t("ui.auto.f07c6656e719"), caret:window.RMLI18n.t("ui.literal.2239943c8d0a") });
 let rmlPersonalSettings = { ...RML_PERSONAL_SETTINGS_DEFAULTS };
 let rmlEditorPersonalSettings = { appearance:{...RML_EDITOR_APPEARANCE_DEFAULTS}, diagnosticSource:window.RMLI18n.t("index.text.b5e50a2e9087") };
-let rmlPersonalSettingsApplyTimer = 0;
 function clampRmlPersonalSetting(value, minimum, maximum, fallback) { const number=Number(value); return Number.isFinite(number)?Math.min(maximum,Math.max(minimum,number)):fallback; }
 function normalizeRmlEditorAppearance(value={}) { const result={}; for(const [key,fallback] of Object.entries(RML_EDITOR_APPEARANCE_DEFAULTS)){const candidate=String(value?.[key]||"").trim();result[key]=/^#[0-9a-f]{6}$/i.test(candidate)?candidate.toLowerCase():fallback;}return result; }
 function loadRmlPersonalSettings() { let stored=null; try { stored=JSON.parse(localStorage.getItem(RML_PERSONAL_SETTINGS_STORAGE_KEY)||localStorage.getItem("rml-builder-personal-settings-v2")||localStorage.getItem("rml-builder-personal-settings-v1")||"null"); } catch {} rmlPersonalSettings={ nodeScrollbars:stored?.nodeScrollbars===true, nodeTextScale:clampRmlPersonalSetting(stored?.nodeTextScale,90,115,100), uxTextScale:clampRmlPersonalSetting(stored?.uxTextScale,90,110,100) }; rmlEditorPersonalSettings={appearance:normalizeRmlEditorAppearance(stored?.editorAppearance),diagnosticSource:[window.RMLI18n.t("index.text.ec0abfff4432"),window.RMLI18n.t("index.text.b5e50a2e9087")].includes(stored?.editorDiagnosticSource)?stored.editorDiagnosticSource:window.RMLI18n.t("index.text.b5e50a2e9087")}; }
@@ -35168,7 +34900,7 @@ function saveRmlPersonalSettings() { try { localStorage.setItem(RML_PERSONAL_SET
 function publishRmlEditorPersonalSettings(){window.RMLBuilderEditorPersonalSettings=Object.freeze({appearance:{...rmlEditorPersonalSettings.appearance},diagnosticSource:rmlEditorPersonalSettings.diagnosticSource});}
 function refreshRmlGraphPresentationAfterSettings() { document.dispatchEvent(new CustomEvent("rml-builder:presentation-settings-changed",{detail:{nodeScrollbars:rmlPersonalSettings.nodeScrollbars,nodeTextScale:rmlPersonalSettings.nodeTextScale}})); window.dispatchEvent(new Event("resize")); requestAnimationFrame(()=>{ window.dispatchEvent(new Event("resize")); try { window.RMLGraphHybridRenderer?.invalidate?.(); } catch {} }); }
 function applyRmlPersonalSettings() { document.documentElement.dataset.rmlNodeScrollbars=rmlPersonalSettings.nodeScrollbars?"visible":"hidden"; const nodeScale=rmlPersonalSettings.nodeTextScale/100; document.documentElement.style.setProperty("--rml-node-symbol-font-size",`${10*nodeScale}px`); document.documentElement.style.setProperty("--rml-node-title-font-size",`${11*nodeScale}px`); document.documentElement.style.setProperty("--rml-node-subtitle-font-size",`${8*nodeScale}px`); document.documentElement.style.setProperty("--rml-node-port-title-font-size",`${9*nodeScale}px`); document.documentElement.style.setProperty("--rml-node-port-meta-font-size",`${7*nodeScale}px`); document.documentElement.style.setProperty("--rml-ux-text-scale",String(rmlPersonalSettings.uxTextScale/100)); document.documentElement.style.fontSize=`${rmlPersonalSettings.uxTextScale}%`; publishRmlEditorPersonalSettings(); refreshRmlGraphPresentationAfterSettings(); }
-function scheduleRmlPersonalSettingsApply() { if (rmlPersonalSettingsApplyTimer) { clearTimeout(rmlPersonalSettingsApplyTimer); rmlPersonalSettingsApplyTimer=0; } const token=++scheduleRmlPersonalSettingsApply.sequence; window.RMLScheduleTask(()=>{ if(token!==scheduleRmlPersonalSettingsApply.sequence)return; applyRmlPersonalSettings(); }); } scheduleRmlPersonalSettingsApply.sequence=0;
+function scheduleRmlPersonalSettingsApply() { const token=++scheduleRmlPersonalSettingsApply.sequence; window.RMLScheduleTask(()=>{ if(token!==scheduleRmlPersonalSettingsApply.sequence)return; applyRmlPersonalSettings(); }); } scheduleRmlPersonalSettingsApply.sequence=0;
 function synchronizeRmlPersonalSettingsControls() { const scrollbars=document.getElementById("builder-settings-node-scrollbars"),nodeText=document.getElementById("builder-settings-node-text"),uxText=document.getElementById("builder-settings-ux-text"); if(scrollbars)scrollbars.checked=rmlPersonalSettings.nodeScrollbars;if(nodeText)nodeText.value=String(rmlPersonalSettings.nodeTextScale);if(uxText)uxText.value=String(rmlPersonalSettings.uxTextScale);const no=document.getElementById("builder-settings-node-text-output"),uo=document.getElementById("builder-settings-ux-text-output");if(no)no.value=`${rmlPersonalSettings.nodeTextScale}%`;if(uo)uo.value=`${rmlPersonalSettings.uxTextScale}%`; }
 function currentRmlEditorSettings(){return window.RMLCustomCSharpDetachedEditor?.getActiveSettings?.()||rmlEditorPersonalSettings;}
 let rmlEditorDashboardColorPicker = null;
@@ -35765,11 +35497,7 @@ async function loadProjectJsonFile(
           detail:
             "The loading screen remains visible until the Saved Composite is stored or the import reports an error.",
           progress: 4,
-          timeout: 120000
         });
-      clearBuilderWorkDeadline(
-        compositeImportWorkSession
-      );
       const handleSavedCompositeImportProgress = event => {
         const progressDetail =
           event?.detail || {};
@@ -36169,7 +35897,6 @@ async function loadProjectJsonFile(
         detail:
           window.RMLI18n.t("ui.literal.8242f7ce08d0"),
         progress: 0,
-        timeout: 120000
       });
 
     try {
@@ -39700,7 +39427,15 @@ async function downloadSelectedExport() {
           ? error.message
           : String(error);
     } else {
-      setExportValidationFailure(error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error ?? "Export validation failed.");
+      setExportReadiness(
+        "error",
+        { diagnostics: [message] },
+        getDiagnostics()
+      );
     }
   } finally {
     if (finishExportDelivery(job)) {
@@ -40438,8 +40173,6 @@ function renderInformationOutlineNodeReference() {
 
   host.replaceChildren(fragment);
 }
-
-let delayedButtonHelpTimer = 0;
 let delayedButtonHelpTarget = null;
 let delayedButtonHelpBubble = null;
 
@@ -40530,8 +40263,7 @@ function builderHelpKicker(target) {
 }
 
 function hideDelayedButtonHelp() {
-  window.clearTimeout(delayedButtonHelpTimer);
-  delayedButtonHelpTimer = 0;
+  window.RMLUxTiming?.cancel("button-help");
   delayedButtonHelpTarget = null;
   delayedButtonHelpBubble?.remove();
   delayedButtonHelpBubble = null;
@@ -40617,8 +40349,12 @@ function showDelayedButtonHelp(target) {
 function scheduleDelayedButtonHelp(target, delay = 620) {
   hideDelayedButtonHelp();
   delayedButtonHelpTarget = target;
-  delayedButtonHelpTimer = window.setTimeout(() => {
-    if (delayedButtonHelpTarget === target) {
+  if (!window.RMLUxTiming) {
+    showDelayedButtonHelp(target);
+    return;
+  }
+  window.RMLUxTiming.schedule("button-help", () => {
+    if (delayedButtonHelpTarget === target && target?.isConnected) {
       showDelayedButtonHelp(target);
     }
   }, delay);
@@ -40905,7 +40641,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.21.99-global-operation-state-machine"
+    "../../templates/help_template.html?v=1.22.4-core-clean-ux-timing"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -41280,10 +41016,9 @@ function cacheElements() {
   });
 }
 
-const DOUBLE_ACTIVATION_MAX_DELAY = 420;
 const DOUBLE_ACTIVATION_MAX_DISTANCE = 24;
 
-let lastActivationTime = 0;
+let lastActivationWasDouble = false;
 let lastActivationX = 0;
 let lastActivationY = 0;
 let lastActivationTarget = null;
@@ -41419,9 +41154,6 @@ function preventGlobalDoubleSelection() {
         return;
       }
 
-      const now =
-        performance.now();
-
       const distance =
         Math.hypot(
           event.clientX -
@@ -41435,10 +41167,8 @@ function preventGlobalDoubleSelection() {
         lastActivationTarget;
 
       const isDoubleActivation =
+        event.detail >= 2 &&
         sameTarget &&
-        now -
-          lastActivationTime <=
-          DOUBLE_ACTIVATION_MAX_DELAY &&
         distance <=
           DOUBLE_ACTIVATION_MAX_DISTANCE;
 
@@ -41468,12 +41198,12 @@ function preventGlobalDoubleSelection() {
             ?.removeAllRanges();
         }
 
-        lastActivationTime = 0;
+        lastActivationWasDouble = true;
         lastActivationTarget = null;
         return;
       }
 
-      lastActivationTime = now;
+      lastActivationWasDouble = false;
       lastActivationX =
         event.clientX;
       lastActivationY =
@@ -41520,9 +41250,7 @@ function preventGlobalDoubleSelection() {
       }
 
       const recentDoubleActivation =
-        performance.now() -
-          lastActivationTime <=
-          DOUBLE_ACTIVATION_MAX_DELAY;
+        lastActivationWasDouble === true;
 
       if (
         recentDoubleActivation &&
@@ -41532,6 +41260,7 @@ function preventGlobalDoubleSelection() {
         collapseEditableSelection(
           active
         );
+        lastActivationWasDouble = false;
       }
     }
   );
@@ -42088,7 +41817,6 @@ function installUniversalScrollLayerSelector() {
       }) || null;
   let visualFrame = 0;
   let visualFollowFrame = 0;
-  let indicatorTimer = 0;
   let outline = null;
   let indicator = null;
   const embeddedLayersByWindow =
@@ -43711,11 +43439,6 @@ function installUniversalScrollLayerSelector() {
   const hideIndicator = (
     immediate = false
   ) => {
-    window.clearTimeout(
-      indicatorTimer
-    );
-    indicatorTimer = 0;
-
     if (!indicator) {
       return;
     }
@@ -43728,16 +43451,6 @@ function installUniversalScrollLayerSelector() {
       indicator.hidden = true;
       return;
     }
-
-    indicatorTimer =
-      window.setTimeout(
-        () => {
-          if (indicator) {
-            indicator.hidden = true;
-          }
-        },
-        180
-      );
   };
 
   const showIndicator = (
@@ -44056,8 +43769,7 @@ function installUniversalScrollLayerSelector() {
         lastTop = rectangle.top;
 
         if (
-          stableFrames < 4 &&
-          performance.now() - startedAt < 1600
+          stableFrames < 4
         ) {
           visualFollowFrame =
             requestAnimationFrame(tick);
@@ -46718,7 +46430,7 @@ async function initialize() {
       message:
         window.RMLI18n.t("ui.auto.23f4bfd57160"),
       detail:
-        startupGraphResult.timedOut
+        false
           ? window.RMLI18n.t("ui.literal.ad4a3aa8c7c7")
           : window.RMLI18n.t("ui.literal.1d0f8c614529")
     });
@@ -47665,7 +47377,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -47683,7 +47395,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -48518,7 +48230,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.99-global-operation-state-machine#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.4-core-clean-ux-timing#icon-copy"></use></svg>
   `;
 }
 
