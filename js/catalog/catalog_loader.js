@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.86-reflection-numeric-parity";
+    "1.21.87-scanner-demand-no-deadline";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -95,8 +95,6 @@
     5_000_000;
   const STREAM_DEMAND_MAX_JSON_DEPTH = 32;
   const STREAM_DEMAND_MAX_JSON_NODES = 250_000;
-  const STREAM_DEMAND_TRANSFER_TIMEOUT_MS =
-    10 * 60 * 1000;
   const STREAM_DEMAND_BATCH_RECORDS = 256;
   const STREAM_DEMAND_INGEST_BATCH_RECORDS =
     1024;
@@ -148,11 +146,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.21.86-reflection-numeric-parity",
+    "../compiler/visual_csharp.js?v=1.21.87-scanner-demand-no-deadline",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.86-reflection-numeric-parity",
+    "api_nodes.js?v=1.21.87-scanner-demand-no-deadline",
     scriptUrl
   ).href;
 
@@ -1726,12 +1724,11 @@
         callback(value);
       };
       const onAbort = () => {
-        pending.catch(error => {
-          console.error(
-            `[RML BUILDER INTERNAL FAILURE] ${String(label)} failed after it was cancelled.`,
-            error
-          );
-        });
+        // The underlying promise may reject after its AbortSignal has fired.
+        // That rejection is an expected consequence of lifecycle cancellation,
+        // not an internal Builder failure. Observe it to prevent an unhandled
+        // rejection without producing a false failure report.
+        pending.catch(() => {});
         finish(
           reject,
           catalogAbortError(signal, label)
@@ -5028,10 +5025,6 @@
         abort,
         { once: true }
       );
-      const timeout = window.setTimeout(
-        abort,
-        STREAM_DEMAND_TRANSFER_TIMEOUT_MS
-      );
       let database;
       let reader = null;
       let generationCommitted = false;
@@ -6528,13 +6521,9 @@
           try {
             const cancellation =
               reader?.cancel?.();
-            Promise.resolve(cancellation)
-              .catch(error => {
-                console.error(
-                  "[RML BUILDER INTERNAL FAILURE] The cancelled scanner stream reader failed to close.",
-                  error
-                );
-              });
+            // reader.cancel() is best-effort after abort. Browsers are allowed
+            // to reject it when the stream has already been torn down.
+            Promise.resolve(cancellation).catch(() => {});
           } catch {}
         }
         if (database && !generationCommitted) {
@@ -6552,7 +6541,6 @@
           "abort",
           abort
         );
-        window.clearTimeout(timeout);
         diagnosticTimings.elapsedMs =
           catalogDemandDiagnosticTime() -
           diagnosticStartedAt;
@@ -12649,12 +12637,10 @@
           detail:
             window.RMLI18n.t("ui.auto.112240abb0c0"),
           progress: 1,
-          timeout: 120000,
-          onTimeout:
-            typeof options.onTimeout ===
-              "function"
-              ? options.onTimeout
-              : undefined
+          // Scanner/catalog work is progress-driven and may legitimately run
+          // for an arbitrary amount of time. A zero timeout explicitly disables
+          // the Builder Work watchdog; lifecycle cancellation remains available.
+          timeout: 0
         }) || 0;
     }
     return scannerCheckWorkSession;
@@ -13146,10 +13132,7 @@
           ensureScannerCheckWork(
             {
               ...options,
-              onTimeout: error =>
-                checkController.abort(
-                  error
-                )
+              timeout: 0
             },
             sessionKey
           );

@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.86-reflection-numeric-parity";
+    "1.21.87-scanner-demand-no-deadline";
   let installedController = null;
 
   if (
@@ -609,11 +609,25 @@
         });
       }
     
-      const timeout = clamp(
-        Number(options.timeout) || 30000,
-        1000,
-        120000
-      );
+      const requestedTimeout = Number(options.timeout);
+      const timeoutDisabled =
+        options.timeout === 0 ||
+        options.timeout === false ||
+        options.timeout === null;
+      const timeout = timeoutDisabled
+        ? 0
+        : clamp(
+            Number.isFinite(requestedTimeout) && requestedTimeout > 0
+              ? requestedTimeout
+              : 30000,
+            1000,
+            120000
+          );
+      if (timeoutDisabled) {
+        // Long-running, progress-driven work (notably scanner catalog ingestion)
+        // has no artificial completion deadline. Its owner controls cancellation.
+        return session;
+      }
       const watchdog =
         window.setTimeout(() => {
           if (
