@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.98-terminal-catalog-state";
+    "1.21.99-global-operation-state-machine";
   let installedController = null;
 
   if (

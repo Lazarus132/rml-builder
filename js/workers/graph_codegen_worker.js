@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.21.98-terminal-catalog-state";
+  "1.21.99-global-operation-state-machine";
 
 self.window = self;
 
@@ -777,10 +777,10 @@ async function ensureRuntime(
       "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=1.21.98-terminal-catalog-state"
+      "../compiler/visual_csharp.js?v=1.21.99-global-operation-state-machine"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.98-terminal-catalog-state"
+      "../catalog/api_nodes.js?v=1.21.99-global-operation-state-machine"
     );
 
     if (
@@ -805,7 +805,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.21.98-terminal-catalog-state"
+      "../graph/node_graph_codegen.js?v=1.21.99-global-operation-state-machine"
     );
 
     if (

@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.98-terminal-catalog-state";
+  "1.21.99-global-operation-state-machine";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

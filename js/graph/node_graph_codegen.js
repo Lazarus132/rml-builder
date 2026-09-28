@@ -8633,7 +8633,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.98-terminal-catalog-state",
+        "1.21.99-global-operation-state-machine",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8666,7 +8666,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.98-terminal-catalog-state" &&
+        "1.21.99-global-operation-state-machine" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -18443,7 +18443,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.98-terminal-catalog-state",
+          "1.21.99-global-operation-state-machine",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

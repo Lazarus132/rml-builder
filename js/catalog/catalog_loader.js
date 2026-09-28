@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.98-terminal-catalog-state";
+    "1.21.99-global-operation-state-machine";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -146,11 +146,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.21.98-terminal-catalog-state",
+    "../compiler/visual_csharp.js?v=1.21.99-global-operation-state-machine",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.98-terminal-catalog-state",
+    "api_nodes.js?v=1.21.99-global-operation-state-machine",
     scriptUrl
   ).href;
 
