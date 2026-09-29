@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.22.7-unified-operation-status";
+    "1.24.0-expression-source-factoring";
 
   if (
     window.RMLBuilderReplacementDialog
@@ -357,7 +357,7 @@
                     ? "!"
                     : "·";
           if (status === "selected") {
-            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-check"></use></svg>`;
+            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-check"></use></svg>`;
           }
           const name =
             document.createElement("span");

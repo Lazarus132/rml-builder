@@ -28,9 +28,84 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.22.7-unified-operation-status";
+  "1.24.0-expression-source-factoring";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
+
+// EXTREME reload/import instrumentation. This is observational only: it does
+// not schedule work, delay work, poll state, or change readiness semantics.
+const RML_EXTREME_TRACE = (() => {
+  const origin = performance.timeOrigin;
+  const start = performance.now();
+  const records = [];
+  const counts = new Map();
+  const stamp = (name, detail = null) => {
+    const now = performance.now();
+    const record = Object.freeze({
+      name: String(name),
+      ms: Number((now - start).toFixed(3)),
+      absoluteMs: Number(now.toFixed(3)),
+      detail
+    });
+    records.push(record);
+    counts.set(record.name, (counts.get(record.name) || 0) + 1);
+    console.debug(`[RML TRACE +${record.ms.toFixed(3)}ms] ${record.name}`, detail ?? "");
+    return record;
+  };
+  const begin = (name, detail = null) => {
+    const begun = performance.now();
+    stamp(`${name}:begin`, detail);
+    return (endDetail = null) => {
+      const ended = performance.now();
+      return stamp(`${name}:end`, {
+        durationMs: Number((ended - begun).toFixed(3)),
+        ...(endDetail && typeof endDetail === "object" ? endDetail : { value: endDetail })
+      });
+    };
+  };
+  const summary = () => {
+    const copy = records.slice();
+    const durations = copy
+      .filter(r => r.name.endsWith(":end") && Number.isFinite(r.detail?.durationMs))
+      .sort((a,b) => b.detail.durationMs - a.detail.durationMs);
+    console.group("[RML EXTREME RELOAD TRACE] SUMMARY");
+    console.table(copy.map(r => ({ ms:r.ms, event:r.name, durationMs:r.detail?.durationMs ?? "", detail:r.detail ? JSON.stringify(r.detail).slice(0,500) : "" })));
+    console.table(durations.slice(0,40).map(r => ({ phase:r.name.slice(0,-4), durationMs:r.detail.durationMs, atMs:r.ms })));
+    console.log("Event counts", Object.fromEntries(counts));
+    console.groupEnd();
+    return Object.freeze({ origin, start, records: copy, durations });
+  };
+  try {
+    new PerformanceObserver(list => {
+      for (const e of list.getEntries()) {
+        stamp("performance:longtask", { startTime:e.startTime, durationMs:e.duration, name:e.name });
+      }
+    }).observe({ type:"longtask", buffered:true });
+  } catch {}
+  try {
+    new PerformanceObserver(list => {
+      for (const e of list.getEntries()) {
+        if (e.initiatorType === "script" || e.initiatorType === "fetch" || e.initiatorType === "xmlhttprequest") {
+          stamp("performance:resource", { name:e.name, initiatorType:e.initiatorType, startTime:e.startTime, durationMs:e.duration, transferSize:e.transferSize });
+        }
+      }
+    }).observe({ type:"resource", buffered:true });
+  } catch {}
+  document.addEventListener("DOMContentLoaded", () => stamp("lifecycle:DOMContentLoaded"), { once:true });
+  window.addEventListener("load", () => stamp("lifecycle:load"), { once:true });
+  for (const eventName of [
+    "rml-builder:rendered",
+    "rml-builder:graph-codegen-settled",
+    "rml-builder:project-replacement",
+    "rml-scanner-connection"
+  ]) {
+    document.addEventListener(eventName, event => stamp(`event:${eventName}`, event?.detail || null));
+    window.addEventListener(eventName, event => stamp(`window-event:${eventName}`, event?.detail || null));
+  }
+  stamp("trace:installed", { build:RML_BUILDER_BUILD_ID, readyState:document.readyState });
+  return Object.freeze({ stamp, begin, summary, records });
+})();
+Object.defineProperty(window, "RMLReloadTrace", { value:RML_EXTREME_TRACE, configurable:true });
 let alwaysClickableButtonFeedbackOwner = null;
 
 function showAlwaysClickableButtonFeedback(
@@ -326,7 +401,9 @@ window.addEventListener("rml-language-changed", () => {
   window.RMLI18n.relocalize(OUTLINE_STRUCTURE_REFERENCE);
   DEFAULT_LAYOUT_ROW_DESCRIPTION = window.RMLI18n.relocalizeValue(DEFAULT_LAYOUT_ROW_DESCRIPTION);
   if (elements.paletteContent) {
+    RML_EXTREME_TRACE.stamp("import:render-palette-begin");
     renderPalette();
+    RML_EXTREME_TRACE.stamp("import:render-palette-end");
   }
 });
 
@@ -346,7 +423,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -2389,7 +2466,6 @@ function currentTypedRuntimeGraphIsLarge() {
 }
 
 let generatedOutputRefreshPendingBeforeDom = false;
-let generatedOutputDeferredImportEpoch = 0;
 
 function generatedOutputDomReady() {
   return Boolean(
@@ -2422,13 +2498,6 @@ function requestGeneratedOutputUpdate() {
   generatedOutputRefreshPendingBeforeDom = false;
   if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
   if (
-    Number(generatedOutputDeferredImportEpoch) > 0 &&
-    Number(generatedOutputDeferredImportEpoch) ===
-      Number(projectApplicationEpoch)
-  ) {
-    return;
-  }
-  if (
     currentTypedRuntimeGraphIsLarge() &&
     elements.generatedCode
   ) {
@@ -2447,11 +2516,7 @@ function requestGeneratedOutputUpdate() {
 }
 
 function scheduleTypedNodeGraphOutputRefresh() {
-  requestAnimationFrame(() => {
-    if (elements.generatedCode) {
-      updateGeneratedOutput();
-    }
-  });
+  requestGeneratedOutputUpdate();
 }
 
 function beginTypedNodeGraphModulesTracking() {
@@ -4338,7 +4403,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.22.7-unified-operation-status",
+      "../workers/graph_codegen_worker.js?v=1.24.0-expression-source-factoring",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -13524,7 +13589,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -13539,7 +13604,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -13558,7 +13623,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -13895,7 +13960,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -13926,7 +13991,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -21457,7 +21522,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -24138,6 +24203,7 @@ function populateGeneratedArtifactSelect(
 }
 
 function updateGeneratedOutput() {
+  const __traceEnd = RML_EXTREME_TRACE.begin("generated:update", { projectEpoch: projectApplicationEpoch });
   if (deferGeneratedOutputUntilDomReady()) return;
   generatedOutputRefreshPendingBeforeDom = false;
   if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
@@ -24157,8 +24223,10 @@ function updateGeneratedOutput() {
       return;
     }
     errors = getDiagnostics();
+    RML_EXTREME_TRACE.stamp("generated:before-build", { projectEpoch: projectApplicationEpoch });
     output =
       generatedCodeForCurrentView();
+    RML_EXTREME_TRACE.stamp("generated:after-build", { projectEpoch: projectApplicationEpoch, artifactCount: output?.artifacts?.length ?? output?.catalog?.artifacts?.length ?? null });
     const frozenCatalog =
       freezeGeneratedArtifactCatalog(
         output.catalog
@@ -24248,6 +24316,7 @@ function updateGeneratedOutput() {
     return;
   }
   const commitValidatedOutput = () => {
+    const __commitEnd = RML_EXTREME_TRACE.begin("generated:preview-dom-commit", { projectEpoch: projectApplicationEpoch });
     elements.generatedCode.removeAttribute("aria-busy");
     const code = output.code;
     const selected =
@@ -24306,6 +24375,8 @@ function updateGeneratedOutput() {
     if (elements.exportDialog?.open) {
       updateExportDialog();
     }
+    __commitEnd({ artifactCount: output.artifacts.length, codeChars: code.length });
+    RML_EXTREME_TRACE.stamp("generated:preview-visible", { artifactCount: output.artifacts.length, selected: selected?.relativePath || null });
   };
 
   const validationSequence =
@@ -24356,14 +24427,9 @@ function updateGeneratedOutput() {
               "generated.validation.failed"
             )}`
           ];
-      elements.generatedCode.textContent = "";
       elements.generatedCode.removeAttribute(
         "aria-busy"
       );
-      elements.codeSummary.textContent =
-        window.RMLI18n.t(
-          "generated.validation.rejected_preview"
-        );
       setExportReadiness(
         "error",
         {
@@ -24402,6 +24468,11 @@ function updateGeneratedOutput() {
     return;
   }
 
+  // Generated artifacts are already a deterministic product of the committed
+  // project snapshot. Publish the preview/artifact selector immediately; compiler
+  // validation gates export readiness only and must not gate presentation.
+  commitValidatedOutput();
+
   const compiler = window.RMLCompile;
   const inspected =
     compiler?.inspect?.(files);
@@ -24413,22 +24484,20 @@ function updateGeneratedOutput() {
     return;
   }
 
-  elements.generatedCode.textContent = "";
-  elements.generatedCode.setAttribute(
-    "aria-busy",
-    "true"
+  // Keep the generated preview and artifact selector usable while validation
+  // proceeds independently. Export readiness below remains fail-closed.
+  elements.generatedCode.removeAttribute(
+    "aria-busy"
   );
-  elements.codeSummary.textContent =
-    window.RMLI18n.t(
-      "generated.validation.in_progress"
-    );
   setExportReadiness(
     "checking",
     { fileCount: files.length },
     errors
   );
+  RML_EXTREME_TRACE.stamp("compiler:bundle-request", { fileCount: files.length });
   ensureLazyScriptBundle("compiler")
     .then(() => {
+      RML_EXTREME_TRACE.stamp("compiler:bundle-ready", { fileCount: files.length });
       if (
         validationSequence !==
           generatedOutputValidationSequence
@@ -24447,9 +24516,11 @@ function updateGeneratedOutput() {
           )
         );
       }
+      RML_EXTREME_TRACE.stamp("compiler:validation-begin", { fileCount: files.length });
       return activeCompiler.validate(files);
     })
     .then(result => {
+      RML_EXTREME_TRACE.stamp("compiler:validation-end", { phase: result?.phase || null, fileCount: files.length });
       if (result) {
         commitIfCurrent(result);
       }
@@ -24469,14 +24540,9 @@ function updateGeneratedOutput() {
           : String(error)
       }`;
       validatedGeneratedPublication = null;
-      elements.generatedCode.textContent = "";
       elements.generatedCode.removeAttribute(
         "aria-busy"
       );
-      elements.codeSummary.textContent =
-        window.RMLI18n.t(
-          "generated.validation.rejected_preview"
-        );
       setExportReadiness(
         "error",
         {
@@ -24767,14 +24833,14 @@ function previewEnumEditorMarkup(
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -24849,7 +24915,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -33547,6 +33613,7 @@ function queueImportedCodegen(
     return;
   }
   try {
+    RML_EXTREME_TRACE.stamp("import:queue-codegen", { projectEpoch });
     updateGeneratedOutput();
   } catch (error) {
     console.error(
@@ -34318,6 +34385,7 @@ async function applyLoadedProjectWithFeedback(
           7
         ) /
         7;
+    RML_EXTREME_TRACE.stamp("import:apply-project-begin", { expectedImportedProjectEpoch, expectedNodes, expectedConnections, requestedPage });
     const importedProjectEpoch =
       applyLoadedProject(
         project,
@@ -34327,6 +34395,7 @@ async function applyLoadedProjectWithFeedback(
             !forceConfigurationPage
         }
       );
+    RML_EXTREME_TRACE.stamp("import:apply-project-end", { importedProjectEpoch });
     if (
       importedProjectEpoch !==
         expectedImportedProjectEpoch
@@ -34348,8 +34417,9 @@ async function applyLoadedProjectWithFeedback(
       }
     );
     await yieldBuilderTask();
-    generatedOutputDeferredImportEpoch =
-      importedProjectEpoch;
+    pendingImportedGraphAnalysisCertificate =
+      prerequisites.analysisCertificate ||
+      null;
     updateBuilderWork(
       session,
       {
@@ -34359,10 +34429,6 @@ async function applyLoadedProjectWithFeedback(
           applicationStageProgress(2)
       }
     );
-    await yieldBuilderTask();
-    pendingImportedGraphAnalysisCertificate =
-      prerequisites.analysisCertificate ||
-      null;
     updateBuilderWork(
       session,
       {
@@ -34379,17 +34445,28 @@ async function applyLoadedProjectWithFeedback(
         prerequisites.graph
       );
     }
+
+    // Code generation depends on the committed project snapshot, its analysis
+    // certificate and graph identity — not on DOM/graph presentation readiness.
+    // Start it now so generated code, preview state and artifact selection can
+    // settle in parallel with metadata/palette/runtime-graph presentation.
+    queueImportedCodegen(
+      importedProjectEpoch
+    );
+
     updateBuilderWork(
       session,
       {
         detail:
-          "4 / 7 interface construction stages completed: graph document identity matches.",
+          "4 / 7 interface construction stages completed: graph document identity matches; generated output is running in parallel.",
         progress:
           applicationStageProgress(4)
       }
     );
     await yieldBuilderTask();
+    RML_EXTREME_TRACE.stamp("import:render-metadata-begin");
     renderMetadata();
+    RML_EXTREME_TRACE.stamp("import:render-metadata-end");
     updateBuilderWork(
       session,
       {
@@ -34433,7 +34510,9 @@ async function applyLoadedProjectWithFeedback(
       importedPresentationWork
     );
 
+    RML_EXTREME_TRACE.stamp("import:render-all-begin", { expectedNodes, expectedConnections });
     renderAll();
+    RML_EXTREME_TRACE.stamp("import:render-all-end", { expectedNodes, expectedConnections });
     updateBuilderWork(
       session,
       {
@@ -34445,8 +34524,10 @@ async function applyLoadedProjectWithFeedback(
     );
     await yieldBuilderTask();
 
+    RML_EXTREME_TRACE.stamp("import:graph-ui-wait-begin", { expectedNodes, expectedConnections });
     const graphResult =
       await graphUiReady;
+    RML_EXTREME_TRACE.stamp("import:graph-ui-wait-end", { expectedNodes, expectedConnections, graphResult });
     const verificationProgress =
       completed =>
         applyProgress[2] +
@@ -34550,11 +34631,6 @@ async function applyLoadedProjectWithFeedback(
         progress:
           verificationProgress(4)
       }
-    );
-
-    generatedOutputDeferredImportEpoch = 0;
-    queueImportedCodegen(
-      importedProjectEpoch
     );
 
     updateBuilderWork(
@@ -34759,7 +34835,6 @@ async function applyLoadedProjectWithFeedback(
     return graphResult;
   } catch (error) {
     if (projectApplicationStarted) {
-      generatedOutputDeferredImportEpoch = 0;
       let rollbackError = null;
       try {
         portableRegistryTransaction
@@ -40616,7 +40691,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.22.7-unified-operation-status"
+    "../../templates/help_template.html?v=1.24.0-expression-source-factoring"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -47358,7 +47433,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -47376,7 +47451,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -48211,7 +48286,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.22.7-unified-operation-status#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-copy"></use></svg>
   `;
 }
 

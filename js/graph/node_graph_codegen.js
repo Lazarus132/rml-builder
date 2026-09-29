@@ -1241,10 +1241,29 @@ function validateNumericVectorValue(
     };
   }
 
+function configurableTypesForDefinition(definition) {
+    const declared = Array.isArray(definition?.configurableTypes)
+      ? definition.configurableTypes
+      : VALUE_TYPES;
+
+    if (definition?.allowRegisteredTypes !== true) {
+      return declared;
+    }
+
+    return [...new Set([
+      ...declared,
+      ...Object.entries(TYPE_INFO)
+        .filter(([, information]) =>
+          information?.valueType === true &&
+          information?.catalogGenerated === true
+        )
+        .map(([type]) => type)
+    ])];
+  }
+
 function fallbackTypeForDefinition(definition) {
     const allowed =
-      definition?.configurableTypes ||
-      VALUE_TYPES;
+      configurableTypesForDefinition(definition);
     const fallback =
       definition?.autoFallbackType ||
       (definition?.defaultType &&
@@ -1427,8 +1446,7 @@ function normalizeNodeParametersObject(
 
     if (definition.configurableTypeVar) {
       const allowed =
-        definition.configurableTypes ||
-        VALUE_TYPES;
+        configurableTypesForDefinition(definition);
       const candidate = parameters.valueType;
 
       if (
@@ -1436,7 +1454,14 @@ function normalizeNodeParametersObject(
         definitionAllowsAutoType(definition)
       ) {
         parameters.valueType = "auto";
-      } else if (!allowed.includes(candidate)) {
+      } else if (
+        candidate === undefined ||
+        candidate === null ||
+        String(candidate).trim() === ""
+      ) {
+        // A missing selection is an unconfigured/new node and may receive the
+        // declared default. An explicit persisted selection is semantic graph
+        // state and must never be silently rewritten to another type.
         parameters.valueType =
           definition.defaultType === "auto" &&
           definitionAllowsAutoType(definition)
@@ -6269,28 +6294,6 @@ function sanitizeGraphState(
             ]
           : null;
 
-      if (
-        definition?.configurableTypeVar
-      ) {
-        const allowed =
-          definition.configurableTypes ||
-          VALUE_TYPES;
-        const candidate = parameters.valueType;
-
-        if (
-          candidate === "auto" &&
-          definitionAllowsAutoType(definition)
-        ) {
-          parameters.valueType = "auto";
-        } else if (!allowed.includes(candidate)) {
-          parameters.valueType =
-            definition.defaultType === "auto" &&
-            definitionAllowsAutoType(definition)
-              ? "auto"
-              : fallbackTypeForDefinition(definition);
-        }
-      }
-
       normalizePortLayoutParameter(
         parameters,
         definition,
@@ -7731,14 +7734,65 @@ function variadicInputIds(node) {
     return (definition?.inputs || []).map(spec => spec.id);
   }
 
-function variadicReduceCode(node, input, helperName, csType) {
+function graphCsScalarBinaryExpression(type, operation, left, right) {
+    const descriptor = graphNumericScalarDescriptor(type);
+    if (!descriptor) return null;
+    const csType = descriptor.csType;
+    const l = `(${left})`;
+    const r = `(${right})`;
+    switch (operation) {
+      case "add": return `((${csType})(${l} + ${r}))`;
+      case "subtract": return `((${csType})(${l} - ${r}))`;
+      case "multiply": return `((${csType})(${l} * ${r}))`;
+      case "divide": return `((${csType})(${l} / ${r}))`;
+      case "modulo": return `((${csType})(${l} % ${r}))`;
+      case "minimum": return `(${l} <= ${r} ? ${l} : ${r})`;
+      case "maximum": return `(${l} >= ${r} ? ${l} : ${r})`;
+      default: return null;
+    }
+  }
+
+function graphCsScalarUnaryExpression(type, operation, value) {
+    const descriptor = graphNumericScalarDescriptor(type);
+    if (!descriptor) return null;
+    const csType = descriptor.csType;
+    const v = `(${value})`;
+    if (operation === "absolute") {
+      switch (csType) {
+        case "System.Single": return `global::System.MathF.Abs(${v})`;
+        case "System.Half": return `(global::System.Half)global::System.MathF.Abs((global::System.Single)${v})`;
+        case "System.Byte":
+        case "System.UInt16":
+        case "System.UInt32":
+        case "System.UInt64": return v;
+        default: return `global::System.Math.Abs(${v})`;
+      }
+    }
+    if (operation === "negate") {
+      if (!descriptor.signed && !descriptor.floating && !descriptor.decimal) return null;
+      return `((${csType})(-${v}))`;
+    }
+    return null;
+  }
+
+function graphCsScalarClampExpression(type, value, minimum, maximum) {
+    if (!graphNumericScalarDescriptor(type)) return null;
+    const v = `(${value})`;
+    const lo = `(${minimum})`;
+    const hi = `(${maximum})`;
+    return `(${v} < ${lo} ? ${lo} : (${v} > ${hi} ? ${hi} : ${v}))`;
+  }
+
+function variadicReduceCode(node, input, helperName, csType, scalarOperation = null) {
     const ids = variadicInputIds(node);
     if (ids.length === 0) {
       return graphCsDefault("float");
     }
     let code = input(ids[0]).code;
     for (let index = 1; index < ids.length; index += 1) {
-      code = `${helperName}<${csType}>(${code}, ${input(ids[index]).code})`;
+      const right = input(ids[index]).code;
+      code = (scalarOperation && graphCsScalarBinaryExpression(csType, scalarOperation, code, right)) ||
+        `${helperName}<${csType}>(${code}, ${right})`;
     }
     return code;
   }
@@ -8633,7 +8687,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.22.7-unified-operation-status",
+        "1.24.0-expression-source-factoring",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8666,7 +8720,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.22.7-unified-operation-status" &&
+        "1.24.0-expression-source-factoring" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -8795,6 +8849,7 @@ function graphAnalysisFromCertificate(
             Array.isArray(
               definition.configurableTypes
             ) &&
+            definition.allowRegisteredTypes !== true &&
             !definition.configurableTypes.includes(
               type
             )
@@ -8927,7 +8982,7 @@ function analyzeConnectionsCore(
         const configurable =
           definition?.configurableTypeVar === typeVar;
         const allowed = configurable
-          ? definition.configurableTypes || VALUE_TYPES
+          ? configurableTypesForDefinition(definition)
           : concreteTypes;
         const configured = configurable
           ? canonicalGraphType(
@@ -8943,6 +8998,20 @@ function analyzeConnectionsCore(
           )
             ? configured
             : null;
+
+        if (
+          configurable &&
+          configured &&
+          configured !== "auto" &&
+          !explicitType
+        ) {
+          return {
+            valid: false,
+            reason:
+              `${definition?.title || "Node"} preserves the explicit type '${configured}', but that type is not currently registered/allowed. The Builder will not substitute another type.`,
+            bindings: new Map()
+          };
+        }
         const domainKey = [
           allowedTypeListId(allowed),
           explicitType || "",
@@ -11664,14 +11733,27 @@ function graphCsStaticFieldDeclaration(
 
 function graphCsNumberLiteralType(node, resolvedType) {
     const type = canonicalGraphType(resolvedType || "");
-    if (type && type !== "object") {
+
+    // A numeric constant can feed generic/any-value/object ports (for example
+    // reflection.writeMember.value). Those ports describe transport semantics,
+    // not the scalar literal type. Treating "anyValue" as the literal type
+    // makes graphCsNumberLiteral() fall through to its non-numeric default 0,
+    // silently changing explicit values such as TimeIntDriver.Repeat = 96.
+    // Only a resolved type that is itself a numeric scalar may override the
+    // constant's persisted valueType.
+    if (type && graphNumericScalarDescriptor(type)) {
       return type;
     }
 
     const configured = canonicalGraphType(
       node?.parameters?.valueType || ""
     );
-    if (configured && configured !== "auto" && configured !== "object") {
+    if (
+      configured &&
+      configured !== "auto" &&
+      configured !== "object" &&
+      graphNumericScalarDescriptor(configured)
+    ) {
       return configured;
     }
 
@@ -11697,7 +11779,7 @@ function graphCsNumberLiteral(
     const descriptor =
       graphNumericScalarDescriptor(type);
     if (!descriptor) {
-      return "0";
+      throw new Error(`Numeric literal type '${String(type || "")}' is not a registered scalar numeric type.`);
     }
 
     const result = validateNumericValue(
@@ -11705,9 +11787,10 @@ function graphCsNumberLiteral(
       type,
       { coerce: false }
     );
-    const text = result.valid
-      ? result.value
-      : "0";
+    if (!result.valid) {
+      throw new Error(`Numeric literal '${String(value ?? "")}' is invalid for ${descriptor.csType}.`);
+    }
+    const text = result.value;
 
     switch (descriptor.family) {
       case "sbyte":
@@ -11738,7 +11821,7 @@ function graphCsNumberLiteral(
       case "decimal":
         return `${text}m`;
       default:
-        return "0";
+        throw new Error(`Numeric literal family '${String(descriptor.family || "")}' is not supported.`);
     }
   }
 
@@ -15019,6 +15102,28 @@ function buildTypedNodeGraphCSharpContribution(
       new Map();
     const expressionStack =
       new Set();
+    // Source factoring pass: long output expressions are emitted once as
+    // typed helper methods and referenced by call. This is deliberately
+    // NOT value memoization/CSE: every use still executes the expression,
+    // preserving evaluation count, ordering, exceptions and live reads.
+    const factoredExpressionMethods =
+      new Map();
+    const FACTORED_EXPRESSION_MIN_CHARS = 192;
+    const canFactorGeneratedExpression = (code, csType) => {
+      const source = String(code || "");
+      const type = String(csType || "").trim();
+      if (
+        source.length < FACTORED_EXPRESSION_MIN_CHARS ||
+        !type ||
+        type === "void" ||
+        source.includes("=>")
+      ) {
+        return false;
+      }
+      // These names are method-local implementation details of action/API
+      // emitters. A factored class-level helper must never capture them.
+      return !/\b(?:apiTarget|apiArguments|apiMethod|prepared|exception|scope)\b/.test(source);
+    };
 
     const inputExpression = (
       node,
@@ -15739,45 +15844,47 @@ function buildTypedNodeGraphCSharpContribution(
             break;
 
           case "math.add":
-            code = variadicReduceCode(node, input, "GraphAdd", csType);
+            code = variadicReduceCode(node, input, "GraphAdd", csType, "add");
             break;
 
           case "math.subtract":
-            code =
+            code = graphCsScalarBinaryExpression(csType, "subtract", input("a").code, input("b").code) ||
               `GraphSubtract<${csType}>(${input("a").code}, ${input("b").code})`;
             break;
 
           case "math.multiply":
-            code = variadicReduceCode(node, input, "GraphMultiply", csType);
+            code = variadicReduceCode(node, input, "GraphMultiply", csType, "multiply");
             break;
 
           case "math.divide":
-            code =
+            code = graphCsScalarBinaryExpression(csType, "divide", input("a").code, input("b").code) ||
               `GraphDivide<${csType}>(${input("a").code}, ${input("b").code})`;
             break;
 
           case "math.minimum":
-            code = variadicReduceCode(node, input, "GraphMinimum", csType);
+            code = variadicReduceCode(node, input, "GraphMinimum", csType, "minimum");
             break;
 
           case "math.maximum":
-            code = variadicReduceCode(node, input, "GraphMaximum", csType);
+            code = variadicReduceCode(node, input, "GraphMaximum", csType, "maximum");
             break;
 
           case "math.clamp":
-            code =
+            code = graphCsScalarClampExpression(csType, input("value").code, input("min").code, input("max").code) ||
               `GraphClamp<${csType}>(${input("value").code}, ${input("min").code}, ${input("max").code})`;
             break;
 
           case "math.negate":
-            code =
+            code = graphCsScalarUnaryExpression(csType, "negate", input("value").code) ||
               `GraphNegate<${csType}>(${input("value").code})`;
             break;
 
-          case "math.absolute":
-            code =
-              `GraphAbsolute<${csType}>(${input("value").code})`;
+          case "math.absolute": {
+            const valueCode = input("value").code;
+            code = graphCsScalarUnaryExpression(csType, "absolute", valueCode) ||
+              `GraphAbsolute<${csType}>(${valueCode})`;
             break;
+          }
 
           case "math.lerp":
             code =
@@ -15943,6 +16050,22 @@ function buildTypedNodeGraphCSharpContribution(
           diagnostics.push(message);
         }
         code = graphCsDefault(type);
+      }
+      if (
+        node &&
+        outputSpec &&
+        canFactorGeneratedExpression(code, csType)
+      ) {
+        const helperName =
+          `Expr${graphCsMethodToken(node.id, portId)}`;
+        if (!factoredExpressionMethods.has(helperName)) {
+          factoredExpressionMethods.set(
+            helperName,
+`    private static ${csType} ${helperName}() =>
+        ${code};`
+          );
+        }
+        code = `${helperName}()`;
       }
       if (node && definition && outputSpec) {
         code = `${generatedNodeOriginMarker(
@@ -17550,9 +17673,13 @@ item.backing]);
             });
     }`
         : "";
+    const factoredExpressionMethodsCode =
+      [...factoredExpressionMethods.values()]
+        .join("\n\n");
     const generatedRuntimeMembersCode =
       [
         runtimeColorBridgeMembersCode,
+        factoredExpressionMethodsCode,
         extensionMembersCode
       ]
         .filter(Boolean)
@@ -18441,7 +18568,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.22.7-unified-operation-status",
+          "1.24.0-expression-source-factoring",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

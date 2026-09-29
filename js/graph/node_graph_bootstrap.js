@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.22.7-unified-operation-status";
+  "1.24.0-expression-source-factoring";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

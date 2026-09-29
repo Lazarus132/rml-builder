@@ -4260,7 +4260,31 @@ failureSource]);
     outputs: [port("type", window.RMLI18n.t("ui.auto.c9b8f9dc7b1e"), "type")],
     codegenExpression(api) {
       ensureReflectionRuntime(api);
-      return `FindType(${api.input("name").code})!`;
+      const nameCode = String(api.input("name").code || "").trim();
+      // Preserve compile-time type identity whenever the graph supplies a literal
+      // CLR type name. This is especially important for Resonite generic
+      // components: the node path must generate the same closed System.Type
+      // that direct C# typeof(T) would produce, rather than relying on a later
+      // assembly-name lookup.
+      const literalMatch = nameCode.match(/^"((?:\\.|[^"\\])*)"$/);
+      if (literalMatch) {
+        const literal = literalMatch[1]
+          .replace(/\\"/g, '"')
+          .replace(/\\\\/g, "\\");
+        const directTypes = new Map([
+          ["FrooxEngine.UIX.RectTransform", "FrooxEngine.UIX.RectTransform"],
+          ["FrooxEngine.UIX.Image", "FrooxEngine.UIX.Image"],
+          ["FrooxEngine.UI_UnlitMaterial", "FrooxEngine.UI_UnlitMaterial"],
+          ["FrooxEngine.TimeIntDriver", "FrooxEngine.TimeIntDriver"],
+          ["FrooxEngine.ValueMultiDriver`1[[Elements.Core.float2, Elements.Core]], FrooxEngine", "FrooxEngine.ValueMultiDriver<Elements.Core.float2>"],
+          ["FrooxEngine.ValueMultiplexer`1[[Elements.Core.float2, Elements.Core]], FrooxEngine", "FrooxEngine.ValueMultiplexer<Elements.Core.float2>"]
+        ]);
+        const direct = directTypes.get(literal);
+        if (direct) {
+          return `typeof(${direct})`;
+        }
+      }
+      return `FindType(${nameCode}) ?? throw new System.TypeLoadException(${nameCode})`;
     }
   });
 
@@ -4348,6 +4372,11 @@ failureSource]);
           "cancellationToken"
         ].includes(type)
     ),
+    // Reflection casts must preserve any concrete type already registered by
+    // the live/cache API catalog. Restricting this node to the startup-time
+    // COMMON_VALUE_TYPES caused imported API types to be silently rewritten
+    // to the default string type during normalization.
+    allowRegisteredTypes: true,
     defaultType: "string",
     inputs: [port("value", window.RMLI18n.t("ui.auto.70bd5b4088b4"), "object")],
     outputs: [
@@ -4418,7 +4447,7 @@ failureSource]);
         "success"
       )
         ? `${field} = ${call};`
-        : `${call};`;
+        : `if (!${call})\n        {\n            throw new System.InvalidOperationException("Reflection Write Member could not resolve or assign the requested member.");\n        }`;
       return `${write}${done ? `\n        ${done}();` : ""}`;
     }
   });
@@ -4491,18 +4520,14 @@ failureSource]);
       const resetLine = keepException
         ? `_invokeException${token} = null!;\n            `
         : "";
-      const catchClause = keepException
-        ? "catch (Exception exception)"
-        : "catch (Exception)";
-      const catchLines = [
-        keepException
-          ? `_invokeException${token} = exception;`
-          : "",
-        keepResult
-          ? `_invokeResult${token} = null;`
-          : ""
-      ].filter(Boolean).join("\n            ");
-      return `try\n        {\n            ${resetLine}${resultLine}\n        }\n        ${catchClause}\n        {${catchLines ? `\n            ${catchLines}\n        ` : ""}}${done ? `\n        ${done}();` : ""}`;
+      const catchClause = "catch (Exception exception)";
+      const catchLines = keepException
+        ? [
+            `_invokeException${token} = exception;`,
+            keepResult ? `_invokeResult${token} = null;` : ""
+          ].filter(Boolean).join("\n            ")
+        : "throw;";
+      return `try\n        {\n            ${resetLine}${resultLine}\n        }\n        ${catchClause}\n        {\n            ${catchLines}\n        }${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -7923,11 +7948,55 @@ private static string GetNormalTryParseError${token}(string? text)
   const runtimeFamilyVariadicIds = definition =>
     (definition?.inputs || []).map(specification => specification.id);
 
-  const runtimeFamilyReduce = (api, helper) => {
+  const runtimeScalarBinary = (type, operation, left, right) => {
+    const descriptor = graphNumericScalarDescriptor(type);
+    if (!descriptor) return null;
+    const csType = descriptor.csType;
+    const l = `(${left})`;
+    const r = `(${right})`;
+    switch (operation) {
+      case "add": return `((${csType})(${l} + ${r}))`;
+      case "subtract": return `((${csType})(${l} - ${r}))`;
+      case "multiply": return `((${csType})(${l} * ${r}))`;
+      case "divide": return `((${csType})(${l} / ${r}))`;
+      case "modulo": return `((${csType})(${l} % ${r}))`;
+      case "minimum": return `(${l} <= ${r} ? ${l} : ${r})`;
+      case "maximum": return `(${l} >= ${r} ? ${l} : ${r})`;
+      default: return null;
+    }
+  };
+
+  const runtimeScalarUnary = (type, operation, value) => {
+    const descriptor = graphNumericScalarDescriptor(type);
+    if (!descriptor) return null;
+    const csType = descriptor.csType;
+    const v = `(${value})`;
+    if (operation === "absolute") {
+      switch (csType) {
+        case "System.Single": return `global::System.MathF.Abs(${v})`;
+        case "System.Half": return `(global::System.Half)global::System.MathF.Abs((global::System.Single)${v})`;
+        case "System.Byte":
+        case "System.UInt16":
+        case "System.UInt32":
+        case "System.UInt64": return v;
+        default: return `global::System.Math.Abs(${v})`;
+      }
+    }
+    if (operation === "negate") {
+      if (!descriptor.signed && !descriptor.floating && !descriptor.decimal) return null;
+      return `((${csType})(-${v}))`;
+    }
+    return null;
+  };
+
+  const runtimeFamilyReduce = (api, helper, scalarOperation = null) => {
     const ids = runtimeFamilyVariadicIds(api.definition);
+    const type = api.csType(api.resolvedType(api.node, api.definition.outputs[0]) || "float");
     let expression = api.input(ids[0]).code;
     for (let index = 1; index < ids.length; index += 1) {
-      expression = `${helper}<${api.csType(api.resolvedType(api.node, api.definition.outputs[0]) || "float")}>(${expression}, ${api.input(ids[index]).code})`;
+      const right = api.input(ids[index]).code;
+      expression = (scalarOperation && runtimeScalarBinary(type, scalarOperation, expression, right)) ||
+        `${helper}<${type}>(${expression}, ${right})`;
     }
     return expression;
   };
@@ -7984,10 +8053,11 @@ private static string GetNormalTryParseError${token}(string? text)
     codegenExpression(api) {
       const operation = String(api.node.parameters?.operation || "add");
       if (operation === "power") return `Math.Pow(${api.input("a").code}, ${api.input("b").code})`;
-      if (operation === "modulo") return `(${api.input("a").code} % ${api.input("b").code})`;
-      if (operation === "subtract") return `GraphSubtract<${api.csType(api.resolvedType(api.node, api.definition.outputs[0]) || "float")}>(${api.input("a").code}, ${api.input("b").code})`;
-      if (operation === "divide") return `GraphDivide<${api.csType(api.resolvedType(api.node, api.definition.outputs[0]) || "float")}>(${api.input("a").code}, ${api.input("b").code})`;
-      return runtimeFamilyReduce(api, { add: window.RMLI18n.t("ui.literal.22e565ba78e0"), multiply: window.RMLI18n.t("ui.literal.ed798eb4ed83"), minimum: window.RMLI18n.t("ui.literal.b6c728c15171"), maximum: window.RMLI18n.t("ui.literal.d3ec433b7de8") }[operation] || window.RMLI18n.t("ui.literal.22e565ba78e0"));
+      const type = api.csType(api.resolvedType(api.node, api.definition.outputs[0]) || "float");
+      if (operation === "modulo") return runtimeScalarBinary(type, "modulo", api.input("a").code, api.input("b").code) || `(${api.input("a").code} % ${api.input("b").code})`;
+      if (operation === "subtract") return runtimeScalarBinary(type, "subtract", api.input("a").code, api.input("b").code) || `GraphSubtract<${type}>(${api.input("a").code}, ${api.input("b").code})`;
+      if (operation === "divide") return runtimeScalarBinary(type, "divide", api.input("a").code, api.input("b").code) || `GraphDivide<${type}>(${api.input("a").code}, ${api.input("b").code})`;
+      return runtimeFamilyReduce(api, { add: window.RMLI18n.t("ui.literal.22e565ba78e0"), multiply: window.RMLI18n.t("ui.literal.ed798eb4ed83"), minimum: window.RMLI18n.t("ui.literal.b6c728c15171"), maximum: window.RMLI18n.t("ui.literal.d3ec433b7de8") }[operation] || window.RMLI18n.t("ui.literal.22e565ba78e0"), operation);
     },
     previewEvaluate({ node, definition, type, input, known, unknown }) {
       const operation = String(node.parameters?.operation || "add");
@@ -8031,7 +8101,10 @@ private static string GetNormalTryParseError${token}(string? text)
         return `Math.${{ squareRoot: window.RMLI18n.t("ui.literal.6bbb118b3601"), round: window.RMLI18n.t("ui.literal.ec7b59833520"), floor: window.RMLI18n.t("ui.literal.7db82f74092f"), ceiling: window.RMLI18n.t("ui.literal.e29db923e25b") }[operation]}(${value})`;
       }
       const type = api.csType(api.resolvedType(api.node, api.definition.outputs[0]) || "float");
-      return `${operation === "absolute" ? window.RMLI18n.t("ui.literal.31dcac50081c") : window.RMLI18n.t("ui.literal.16ae669e1905")}<${type}>(${value})`;
+      if (operation === "absolute") {
+        return runtimeScalarUnary(type, "absolute", value) || `GraphAbsolute<${type}>(${value})`;
+      }
+      return runtimeScalarUnary(type, "negate", value) || `${window.RMLI18n.t("ui.literal.16ae669e1905")}<${type}>(${value})`;
     },
     previewEvaluate({ node, type, input, known, unknown }) {
       const value = input("value");

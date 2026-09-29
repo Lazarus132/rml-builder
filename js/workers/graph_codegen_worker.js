@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.22.7-unified-operation-status";
+  "1.24.0-expression-source-factoring";
 
 self.window = self;
 
@@ -777,10 +777,10 @@ async function ensureRuntime(
       "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=1.22.7-unified-operation-status"
+      "../compiler/visual_csharp.js?v=1.24.0-expression-source-factoring"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.22.7-unified-operation-status"
+      "../catalog/api_nodes.js?v=1.24.0-expression-source-factoring"
     );
 
     if (
@@ -805,7 +805,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.22.7-unified-operation-status"
+      "../graph/node_graph_codegen.js?v=1.24.0-expression-source-factoring"
     );
 
     if (

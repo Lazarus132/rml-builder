@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.22.7-unified-operation-status";
+    "1.24.0-expression-source-factoring";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -140,11 +140,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.22.7-unified-operation-status",
+    "../compiler/visual_csharp.js?v=1.24.0-expression-source-factoring",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.22.7-unified-operation-status",
+    "api_nodes.js?v=1.24.0-expression-source-factoring",
     scriptUrl
   ).href;
 
