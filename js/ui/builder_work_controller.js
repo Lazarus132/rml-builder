@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.24.0-expression-source-factoring";
+    "1.24.31-compile-only-on-zip";
   let installedController = null;
 
   if (
@@ -58,7 +58,7 @@
       ) {
         return yieldBuilderTask();
       }
-    
+
       return new Promise(resolve => {
         let settled = false;
         const finish = () => {
@@ -71,7 +71,7 @@
         window.requestAnimationFrame(finish);
       });
     }
-    
+
     function yieldBuilderTask() {
       if (
         typeof globalThis.scheduler?.yield ===
@@ -79,7 +79,7 @@
       ) {
         return globalThis.scheduler.yield();
       }
-    
+
       if (typeof MessageChannel === "function") {
         return new Promise(resolve => {
           const channel =
@@ -92,19 +92,18 @@
           channel.port2.postMessage(0);
         });
       }
-    
+
       return Promise.resolve();
     }
-    
+
     async function paintBuilderUi() {
       await nextBuilderVisualFrame();
       await nextBuilderVisualFrame();
       await yieldBuilderTask();
     }
-    
-    
+
     let builderWorkVisibleProgress = 0;
-    
+
     function advanceBuilderWorkProgress(
       requestedProgress,
       currentProgress = builderWorkVisibleProgress
@@ -115,13 +114,13 @@
       ) {
         return currentProgress;
       }
-    
+
       return Math.max(
         currentProgress,
         clamp(requestedProgress, 0, 100)
       );
     }
-    
+
     function renderBuilderWorkProgress() {
       if (
         !elements.builderWorkOverlay ||
@@ -129,7 +128,7 @@
       ) {
         return false;
       }
-    
+
       const rootState = builderWorkStates.get(
         activeBuilderWorkEpisode.rootSession
       );
@@ -155,12 +154,12 @@
       );
       return true;
     }
-    
+
     function renderBuilderWorkState(state) {
       if (!state || !elements.builderWorkOverlay) {
         return false;
       }
-    
+
       elements.builderWorkKicker.textContent =
         state.kicker;
       elements.builderWorkTitle.textContent =
@@ -171,7 +170,7 @@
         state.detail;
       return renderBuilderWorkProgress();
     }
-    
+
     function updateBuilderWork(
       session,
       {
@@ -187,7 +186,7 @@
       if (!state || !elements.builderWorkOverlay) {
         return false;
       }
-    
+
       if (kicker !== undefined) {
         state.kicker = String(kicker);
       }
@@ -200,7 +199,7 @@
       if (detail !== undefined) {
         state.detail = String(detail);
       }
-    
+
       if (
         progress !== undefined &&
         typeof progress === "number" &&
@@ -223,7 +222,7 @@
           progress >= 100 && !finalProgressAllowed
             ? 99
             : progress;
-    
+
         if (activeRoot || state.episodeId === 0) {
           state.reportedProgress =
             advanceBuilderWorkProgress(
@@ -242,7 +241,7 @@
           }
         }
       }
-    
+
       if (session === activeBuilderWorkSession) {
         renderBuilderWorkState(state);
       } else if (
@@ -251,11 +250,10 @@
       ) {
         renderBuilderWorkProgress();
       }
-    
+
       return true;
     }
-    
-    
+
     function resetBuilderReplacementUi() {
       return builderReplacementDialog
         ?.reset();
@@ -269,7 +267,7 @@
       ) {
         return false;
       }
-    
+
       const sessions = [
         ...builderWorkQueuedSessions
       ].filter(session =>
@@ -279,14 +277,14 @@
       if (sessions.length === 0) {
         return false;
       }
-    
+
       sessions.sort((left, right) =>
         left - right
       );
       for (const session of sessions) {
         builderWorkQueuedSessions.delete(session);
       }
-    
+
       const episode = {
         id: ++builderWorkEpisodeSequence,
         sessions: new Set(sessions),
@@ -300,7 +298,7 @@
       activeBuilderWorkSession =
         sessions[sessions.length - 1];
       builderWorkVisibleProgress = 0;
-    
+
       for (const session of sessions) {
         const state = builderWorkStates.get(session);
         if (!state) continue;
@@ -313,7 +311,7 @@
         state.resolveActivation?.(true);
         state.resolveActivation = null;
       }
-    
+
       elements.builderWorkProgress.dataset
         .rmlLoadProgress = "0%";
       elements.builderWorkProgress.setAttribute(
@@ -330,7 +328,7 @@
           activeBuilderWorkSession
         )
       );
-    
+
       episode.zeroPaintPromise =
         paintBuilderUi()
           .then(() => {
@@ -373,14 +371,14 @@
           });
       return true;
     }
-    
+
     function joinActiveBuilderWorkEpisode(session) {
       const episode = activeBuilderWorkEpisode;
       const state = builderWorkStates.get(session);
       if (!episode || !state) {
         return false;
       }
-    
+
       episode.sessions.add(session);
       episode.revision += 1;
       state.episodeId = episode.id;
@@ -395,7 +393,7 @@
       renderBuilderWorkState(state);
       return true;
     }
-    
+
     function closeBuilderWorkEpisode(episode) {
       if (
         activeBuilderWorkEpisode !== episode ||
@@ -404,7 +402,7 @@
         return builderWorkEpisodeClosePromise ||
           Promise.resolve(false);
       }
-    
+
       activeBuilderWorkEpisode = null;
       activeBuilderWorkSession = 0;
       builderWorkEpisodeClosing = true;
@@ -413,7 +411,7 @@
       document.body.classList.remove(
         "rml-builder-work-active"
       );
-    
+
       const closePromise = (async () => {
         let painted = true;
         try {
@@ -439,7 +437,7 @@
       builderWorkEpisodeClosePromise = closePromise;
       return closePromise;
     }
-    
+
     function releaseBuilderWorkSession(session) {
       const state = builderWorkStates.get(session);
       if (
@@ -452,11 +450,11 @@
           closePromise: null
         };
       }
-    
+
       builderWorkSessions.delete(session);
       builderWorkStates.delete(session);
       builderWorkQueuedSessions.delete(session);
-    
+
       if (state.episodeId === 0) {
         state.resolveActivation?.(false);
         state.resolveActivation = null;
@@ -465,7 +463,7 @@
           closePromise: null
         };
       }
-    
+
       const episode = activeBuilderWorkEpisode;
       if (
         !episode ||
@@ -477,7 +475,7 @@
           closePromise: null
         };
       }
-    
+
       episode.sessions.delete(session);
       episode.revision += 1;
       if (episode.sessions.size === 0) {
@@ -487,7 +485,7 @@
             closeBuilderWorkEpisode(episode)
         };
       }
-    
+
       if (episode.rootSession === session) {
         episode.rootSession = Math.min(
           ...episode.sessions
@@ -525,7 +523,7 @@
         closePromise: null
       };
     }
-    
+
     function beginBuilderWork(options = {}) {
       const session =
         ++builderWorkSessionSequence;
@@ -568,7 +566,7 @@
       };
       builderWorkSessions.add(session);
       builderWorkStates.set(session, state);
-    
+
       if (
         activeBuilderWorkEpisode &&
         ![
@@ -583,24 +581,22 @@
         builderWorkQueuedSessions.add(session);
         activateQueuedBuilderWorkEpisode();
       }
-    
+
       if (options.progress !== undefined) {
         updateBuilderWork(session, {
           progress: options.progress
         });
       }
-    
-      // Completion is exclusively owner/event driven. There is deliberately
-      // no wall-clock completion watchdog for Builder operations.
+
       return session;
     }
-    
+
     function finishBuilderWork(session) {
       return releaseBuilderWorkSession(
         session
       ).released;
     }
-    
+
     async function completeBuilderWork(
       session,
       options = {}
@@ -612,7 +608,7 @@
       if (state.completionPromise) {
         return state.completionPromise;
       }
-    
+
       const { progress, ...copy } = options;
       updateBuilderWork(session, copy);
       state.completionPromise = (async () => {
@@ -626,7 +622,7 @@
             return false;
           }
         }
-    
+
         let episode = activeBuilderWorkEpisode;
         if (
           !episode ||
@@ -643,7 +639,7 @@
             session
           ).released;
         }
-    
+
         await episode.zeroPaintPromise;
         episode = activeBuilderWorkEpisode;
         if (
@@ -658,7 +654,7 @@
               ).released
             : false;
         }
-    
+
         episode.phase = "settling";
         const settlementRevision =
           episode.revision;
@@ -678,7 +674,7 @@
               ).released
             : false;
         }
-    
+
         episode.phase = "final-paint";
         updateBuilderWork(
           session,
@@ -701,8 +697,7 @@
       })();
       return state.completionPromise;
     }
-    
-    
+
     builderReplacementDialog =
       replacementFactory.create({
         elements,

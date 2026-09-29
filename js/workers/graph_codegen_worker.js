@@ -1,12 +1,9 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.24.0-expression-source-factoring";
+  "1.24.31-compile-only-on-zip";
 
 self.window = self;
-
-
-
 
 const __rmlWorkerI18nState = { fallback: Object.create(null), hydrated: false, error: null };
 function __rmlWorkerI18nLookup(value) {
@@ -777,10 +774,10 @@ async function ensureRuntime(
       "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=1.24.0-expression-source-factoring"
+      "../compiler/visual_csharp.js?v=1.24.31-compile-only-on-zip"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.24.0-expression-source-factoring"
+      "../catalog/api_nodes.js?v=1.24.31-compile-only-on-zip"
     );
 
     if (
@@ -805,7 +802,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.24.0-expression-source-factoring"
+      "../graph/node_graph_codegen.js?v=1.24.31-compile-only-on-zip"
     );
 
     if (

@@ -4261,11 +4261,7 @@ failureSource]);
     codegenExpression(api) {
       ensureReflectionRuntime(api);
       const nameCode = String(api.input("name").code || "").trim();
-      // Preserve compile-time type identity whenever the graph supplies a literal
-      // CLR type name. This is especially important for Resonite generic
-      // components: the node path must generate the same closed System.Type
-      // that direct C# typeof(T) would produce, rather than relying on a later
-      // assembly-name lookup.
+
       const literalMatch = nameCode.match(/^"((?:\\.|[^"\\])*)"$/);
       if (literalMatch) {
         const literal = literalMatch[1]
@@ -4372,10 +4368,7 @@ failureSource]);
           "cancellationToken"
         ].includes(type)
     ),
-    // Reflection casts must preserve any concrete type already registered by
-    // the live/cache API catalog. Restricting this node to the startup-time
-    // COMMON_VALUE_TYPES caused imported API types to be silently rewritten
-    // to the default string type during normalization.
+
     allowRegisteredTypes: true,
     defaultType: "string",
     inputs: [port("value", window.RMLI18n.t("ui.auto.70bd5b4088b4"), "object")],

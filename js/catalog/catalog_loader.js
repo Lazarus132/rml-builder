@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.24.0-expression-source-factoring";
+    "1.24.31-compile-only-on-zip";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -140,11 +140,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.24.0-expression-source-factoring",
+    "../compiler/visual_csharp.js?v=1.24.31-compile-only-on-zip",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.24.0-expression-source-factoring",
+    "api_nodes.js?v=1.24.31-compile-only-on-zip",
     scriptUrl
   ).href;
 
@@ -1878,7 +1878,7 @@
           settled = true;
             callback(value);
         };
-  
+
         request.onupgradeneeded =
           () => {
             const database =

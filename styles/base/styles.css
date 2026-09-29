@@ -532,7 +532,6 @@ fieldset legend {
   font-size: calc(15px * var(--rml-ux-text-scale, 1));
 }
 
-
 .structure {
   margin: 13px 11px;
   padding: 13px 0 0;
@@ -1475,6 +1474,9 @@ footer strong {
 .dialog-close {
   width: 36px;
   height: 36px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-raised);
@@ -2846,6 +2848,10 @@ body:has(.node-pointer-ghost) .builder-canvas {
 .rml-button-help-bubble {
   position: fixed;
   z-index: 10000;
+  inset: auto;
+  margin: 0;
+  left: var(--rml-attr-rml-popup-left, 8px);
+  top: var(--rml-attr-rml-popup-top, 8px);
   font-size: calc(10px * var(--rml-ux-text-scale, 1));
   font-weight: 650;
   line-height: 1.4;
@@ -3400,7 +3406,7 @@ dialog.builder-message-dialog::backdrop {
   align-items: start;
   gap: 9px;
   width: max-content;
-  max-width: min(360px, calc(100vw - 16px));
+  max-width: min(320px, calc(100vw - 16px));
   padding: 10px 11px;
   overflow: hidden;
   border: 1px solid rgba(164, 118, 255, 0.38);

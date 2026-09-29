@@ -1616,7 +1616,6 @@ button.rml-graph-navigation-level:disabled {
   cursor: pointer;
 }
 
-
 .rml-inline-icon {
   display: inline-block;
   width: 1.2em;
@@ -2129,7 +2128,6 @@ button.rml-graph-navigation-level:disabled {
   border-radius: 9px;
   background: rgba(8, 11, 17, 0.48);
 }
-
 
 .rml-visual-function-parameters {
   display: grid;
@@ -3524,7 +3522,6 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
   display: none;
 }
 
-
 .rml-graph-node.manually-sized-width .rml-graph-node-body {
   overflow-x: hidden;
 }
@@ -3589,7 +3586,6 @@ html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rm
 .rml-graph-node-title small { font-size: var(--rml-node-subtitle-font-size, 8px) !important; }
 .rml-graph-port-copy strong { font-size: var(--rml-node-port-title-font-size, 9px) !important; }
 .rml-graph-port-copy small { font-size: var(--rml-node-port-meta-font-size, 7px) !important; }
-
 
 .rml-graph-node-symbol .rml-node-symbol-svg,
 .rml-graph-palette .rml-node-symbol-svg,

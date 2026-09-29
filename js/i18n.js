@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "1.24.0-expression-source-factoring";
+  const VERSION = "1.24.31-compile-only-on-zip";
   const STORAGE_KEY = "rml-builder-language-v1";
   const state = { language: localStorage.getItem(STORAGE_KEY) || "en", fallback: {}, active: {}, previousCatalog: {}, manifest: null, ready: null, catalogs: new Map(), reverseCatalogs: new WeakMap() };
   const norm = value => String(value ?? "").replace(/\s+/g, " ").trim();
@@ -78,7 +78,7 @@
     const lead=(raw.match(/^\s*/) || [""])[0], tail=(raw.match(/\s*$/) || [""])[0];
     node.nodeValue=lead+String(translated)+tail;
   }
-  const ATTRS=["title","aria-label","placeholder","data-help"];
+  const ATTRS=["title","aria-label","placeholder","data-help","data-option-help-text"];
   function sourceAttr(el, attr) {
     let values=attrSources.get(el); if(!values){ values=new Map(); attrSources.set(el,values); }
     if(!values.has(attr)) values.set(attr,el.getAttribute(attr));

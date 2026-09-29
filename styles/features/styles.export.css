@@ -4,17 +4,53 @@
   padding: 19px;
 }
 
+.export-dialog-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.export-api-compatibility-indicator {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border: 1px solid rgba(255, 187, 84, 0.5);
+  border-radius: 8px;
+  background: rgba(255, 168, 54, 0.09);
+  color: #ffd28b;
+  cursor: pointer;
+  anchor-name: --export-api-compatibility-indicator;
+}
+
+.export-api-compatibility-indicator[hidden] { display: none !important; }
+.export-api-compatibility-indicator svg { width: 18px; height: 18px; fill: currentColor; }
+.export-api-compatibility-indicator:hover,
+.export-api-compatibility-indicator:focus-visible { background: rgba(255, 168, 54, 0.17); }
+
 .export-api-compatibility-warning {
-  display: grid;
-  gap: 6px;
+  position: fixed;
+  position-anchor: --export-api-compatibility-indicator;
+  inset: auto;
   margin: 0;
+  width: min(380px, calc(100vw - 24px));
+  max-width: 380px;
   padding: 13px 14px;
   border: 1px solid rgba(255, 187, 84, 0.5);
   border-radius: 9px;
-  background: rgba(255, 168, 54, 0.09);
+  background: #241d15;
   color: #ffd28b;
+  box-shadow: 0 14px 38px rgba(0,0,0,.42);
   font-size: calc(10px * var(--rml-ux-text-scale, 1));
   line-height: 1.55;
+}
+
+.export-api-compatibility-warning:popover-open {
+  display: grid;
+  gap: 6px;
+  position-area: block-end span-inline-end;
 }
 
 .export-api-compatibility-warning strong {
@@ -22,10 +58,7 @@
   font-size: calc(11px * var(--rml-ux-text-scale, 1));
 }
 
-.export-api-compatibility-warning p {
-  margin: 0;
-  color: #e8cfa6;
-}
+.export-api-compatibility-warning p { margin: 0; color: #e8cfa6; }
 
 .export-hint.error {
   color: var(--red);
@@ -97,25 +130,6 @@
   color: #ceb8ff;
 }
 
-.export-compatibility-hint {
-  margin: -7px 0 0;
-  padding: 10px 11px;
-  border: 1px solid rgba(255, 209, 129, 0.22);
-  border-radius: 7px;
-  background: rgba(255, 209, 129, 0.06);
-  color: #e2c992;
-  font-size: calc(9px * var(--rml-ux-text-scale, 1));
-  line-height: 1.55;
-}
-
-.export-compatibility-hint strong {
-  color: #f0dda9;
-}
-
-.export-compatibility-hint code {
-  color: #ceb8ff;
-}
-
 .export-selection {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -160,6 +174,20 @@
 }
 
 .export-option span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.export-selection > .export-option {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  contain: layout paint;
+}
+
+.export-selection > .export-option > span {
+  width: 100%;
   min-width: 0;
 }
 
@@ -594,10 +622,13 @@ dialog#export-dialog {
 
 #export-compiler-reference-status {
   box-sizing: border-box;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   min-width: 0;
-  padding: 9px 10px;
+  min-height: 112px;
+  padding: 18px 20px;
   border: 1px solid rgba(182, 121, 255, .35);
   border-radius: 9px;
   background: rgba(182, 121, 255, .08);
@@ -611,6 +642,17 @@ dialog#export-dialog {
     border-color 120ms ease,
     background-color 120ms ease,
     box-shadow 120ms ease;
+}
+
+#export-compiler-reference-status[data-state="missing"] {
+  border-style: dashed;
+  text-align: center;
+  font-weight: 650;
+}
+
+#export-compiler-reference-status[data-state="ready"] {
+  min-height: 56px;
+  justify-content: flex-start;
 }
 
 #export-compiler-reference-status.is-drag-active {
@@ -644,13 +686,6 @@ dialog#export-dialog {
 
 .export-compiler-reference-item strong,
 .export-compiler-reference-item small {
-  min-width: 0;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-#export-compiler-build-status {
-  display: block;
   min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -733,18 +768,16 @@ dialog#export-dialog > .export-dialog-body {
 .export-preflight-copy small { opacity: .78; line-height: 1.35; }
 .export-preflight-spinner[hidden] { display: none !important; }
 .export-preflight-spinner {
-  width: 16px; height: 16px; flex: 0 0 16px;
-  border: 2px solid rgba(255,255,255,.2);
-  border-top-color: currentColor; border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  box-sizing: border-box;
+  border: 2px solid rgba(255,255,255,.22);
+  border-top-color: currentColor;
+  border-radius: 50%;
   animation: rml-export-preflight-spin .7s linear infinite;
 }
 @keyframes rml-export-preflight-spin { to { transform: rotate(360deg); } }
-
-/* Unified export operation presentation: one state, one visible owner. */
-#export-compiler-reference-status,
-#export-compiler-build-status {
-  display: none !important;
-}
 .export-preflight-status {
   border-color: rgba(118, 198, 255, .36);
   background: linear-gradient(145deg, rgba(17, 31, 50, .96), rgba(8, 17, 30, .96));
@@ -762,12 +795,7 @@ dialog#export-dialog > .export-dialog-body {
 .export-preflight-status[data-state="error"] {
   border-color: rgba(255,120,120,.55);
 }
-.export-preflight-spinner {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  animation: none;
+dialog#export-dialog.export-presentation-pending {
+  visibility: hidden !important;
+  pointer-events: none !important;
 }

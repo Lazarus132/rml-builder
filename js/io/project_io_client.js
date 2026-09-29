@@ -31,7 +31,7 @@
   const PROJECT_GZIP_MAGIC_FIRST = 0x1f;
   const PROJECT_GZIP_MAGIC_SECOND = 0x8b;
   let projectGzipFallbackLoadPromise = null;
-  
+
   function projectGzipFallbackCodec() {
     if (
       typeof window.RMLGzipCodec
@@ -46,7 +46,7 @@
     if (projectGzipFallbackLoadPromise) {
       return projectGzipFallbackLoadPromise;
     }
-  
+
     projectGzipFallbackLoadPromise =
       new Promise((resolve, reject) => {
         const script =
@@ -94,10 +94,10 @@
           null;
         throw error;
       });
-  
+
     return projectGzipFallbackLoadPromise;
   }
-  
+
   async function readProjectBlobTextOnMainThread(
     blob,
     maximumBytes = PROJECT_FILE_MAX_BYTES
@@ -111,7 +111,7 @@
         PROJECT_GZIP_MAGIC_FIRST &&
       header[1] ===
         PROJECT_GZIP_MAGIC_SECOND;
-  
+
     if (!gzip) {
       if (blob.size > maximumBytes) {
         throw new RangeError(
@@ -124,7 +124,7 @@
         compression: "identity"
       };
     }
-  
+
     if (
       typeof DecompressionStream !==
         "function"
@@ -148,7 +148,7 @@
         compression: "gzip"
       };
     }
-  
+
     const reader = blob.stream()
       .pipeThrough(
         new DecompressionStream("gzip")
@@ -160,7 +160,7 @@
     );
     const parts = [];
     let uncompressedBytes = 0;
-  
+
     try {
       while (true) {
         const { done, value } =
@@ -220,7 +220,7 @@
     } finally {
       reader.releaseLock();
     }
-  
+
     const text = parts.join("");
     parts.length = 0;
     return {
@@ -229,7 +229,7 @@
       compression: "gzip"
     };
   }
-  
+
   async function compressProjectJsonOnMainThread(
     value
   ) {
@@ -261,13 +261,13 @@
         compression: "gzip"
       };
     }
-  
+
     const buffer = await new Response(
       source.stream().pipeThrough(
         new CompressionStream("gzip")
       )
     ).arrayBuffer();
-  
+
     return {
       buffer,
       jsonBytes: source.size,
@@ -275,16 +275,16 @@
       compression: "gzip"
     };
   }
-  
+
   function projectIoWorkerInstance() {
     if (projectIoWorker) {
       return projectIoWorker;
     }
-  
+
     if (typeof Worker !== "function") {
       return null;
     }
-  
+
     try {
       const worker = new Worker(
         new URL(
@@ -297,7 +297,7 @@
       );
       const workerGeneration =
         ++projectIoWorkerGeneration;
-  
+
       worker.addEventListener(
         "message",
         event => {
@@ -306,7 +306,7 @@
             projectIoPendingRequests.get(
               response.id
             );
-  
+
           if (
             !pending ||
             pending.worker !== worker ||
@@ -315,7 +315,7 @@
           ) {
             return;
           }
-  
+
           if (
             response.ok !== true &&
             pending.streamed === true &&
@@ -336,11 +336,11 @@
             );
             return;
           }
-  
+
           projectIoPendingRequests.delete(
             response.id
           );
-  
+
           if (response.ok === true) {
             if (
               pending.streamed === true &&
@@ -382,7 +382,7 @@
           }
         }
       );
-  
+
       worker.addEventListener(
         "error",
         event => {
@@ -394,7 +394,7 @@
           );
           error.name =
             event.error?.name || window.RMLI18n.t("ui.auto.c61dcc959d06");
-  
+
           retireFailedProjectIoWorker(
             worker,
             workerGeneration,
@@ -402,7 +402,7 @@
           );
         }
       );
-  
+
       worker.addEventListener(
         "messageerror",
         () => {
@@ -417,7 +417,7 @@
           );
         }
       );
-  
+
       projectIoWorker = worker;
       return projectIoWorker;
     } catch (error) {
@@ -428,7 +428,7 @@
       return null;
     }
   }
-  
+
   function completeProjectIoRequest(
     pending,
     completion,
@@ -458,7 +458,7 @@
               value
             };
           }
-  
+
           if (operation === "parseFile") {
             if (
               !payload.file ||
@@ -469,7 +469,7 @@
                 window.RMLI18n.t("ui.literal.7096289f5f79")
               );
             }
-  
+
             const decoded =
               await readProjectBlobTextOnMainThread(
                 payload.file,
@@ -514,7 +514,7 @@
                 decoded.compression
             };
           }
-  
+
           if (
             operation ===
               "stringifyGzip" ||
@@ -547,7 +547,7 @@
                   : "main-fallback"
             };
           }
-  
+
           if (operation === "stringify") {
             return {
               ok: true,
@@ -558,7 +558,7 @@
               )
             };
           }
-  
+
           throw new Error(
             `Unsupported project I/O operation '${operation}'.`
           );
@@ -566,7 +566,7 @@
       });
     });
   }
-  
+
   function dispatchProjectIoRequestOnMainThread(
     pending
   ) {
@@ -592,7 +592,7 @@
       }
     );
   }
-  
+
   function recoverProjectIoRequest(
     pending,
     error,
@@ -603,7 +603,7 @@
     if (pending.settled) {
       return;
     }
-  
+
     if (
       typeof pending.isCurrent ===
         "function" &&
@@ -621,15 +621,15 @@
       );
       return;
     }
-  
+
     if (pending.recoveryAttempted) {
-  
+
       dispatchProjectIoRequestOnMainThread(
         pending
       );
       return;
     }
-  
+
     pending.recoveryAttempted = true;
     if (preferMainThread) {
       dispatchProjectIoRequestOnMainThread(
@@ -637,17 +637,17 @@
       );
       return;
     }
-  
+
     dispatchProjectIoRequest(pending);
   }
-  
+
   function retireFailedProjectIoWorker(
     worker,
     workerGeneration,
     error
   ) {
     const ownedRequests = [];
-  
+
     for (const [id, pending] of
       projectIoPendingRequests) {
       if (
@@ -657,35 +657,35 @@
       ) {
         continue;
       }
-  
+
       projectIoPendingRequests.delete(id);
       ownedRequests.push(pending);
     }
-  
+
     worker.terminate();
     if (projectIoWorker === worker) {
       projectIoWorker = null;
     }
-  
+
     for (const pending of ownedRequests) {
       recoverProjectIoRequest(
         pending,
         error
       );
     }
-  
+
     if (ownedRequests.length === 0) {
       scheduleProjectIoWorkerIdleRelease();
     }
   }
-  
+
   function dispatchStreamedProjectIoRequest(
     pending
   ) {
     if (pending.settled) {
       return;
     }
-  
+
     if (
       typeof pending.isCurrent ===
         "function" &&
@@ -703,7 +703,7 @@
       );
       return;
     }
-  
+
     const worker = projectIoWorkerInstance();
     if (!worker) {
       dispatchProjectIoRequestOnMainThread(
@@ -711,7 +711,7 @@
       );
       return;
     }
-  
+
     const id = projectIoRequestSequence++;
     const workerGeneration =
       projectIoWorkerGeneration;
@@ -731,7 +731,7 @@
           "function" ||
         pending.isCurrent()
       );
-  
+
     pending.streamPromise =
       postGraphCodegenTokenStream(
         worker,
@@ -764,7 +764,7 @@
         ) {
           return;
         }
-  
+
         if (
           error?.code ===
             "RML_GRAPH_CODEGEN_STALE" ||
@@ -792,7 +792,7 @@
           );
           return;
         }
-  
+
         retireFailedProjectIoWorker(
           worker,
           workerGeneration,
@@ -800,19 +800,19 @@
         );
       });
   }
-  
+
   function dispatchProjectIoRequest(pending) {
     if (pending.settled) {
       return;
     }
-  
+
     if (pending.streamed === true) {
       dispatchStreamedProjectIoRequest(
         pending
       );
       return;
     }
-  
+
     const worker =
       projectIoWorkerInstance();
     if (!worker) {
@@ -821,12 +821,12 @@
       );
       return;
     }
-  
+
     const id =
       projectIoRequestSequence++;
     const workerGeneration =
       projectIoWorkerGeneration;
-  
+
     pending.worker = worker;
     pending.workerGeneration =
       workerGeneration;
@@ -847,7 +847,7 @@
       ) {
         return;
       }
-  
+
       if (error?.name === window.RMLI18n.t("ui.literal.c749561f3732")) {
         projectIoPendingRequests.delete(id);
         recoverProjectIoRequest(
@@ -857,7 +857,7 @@
         );
         return;
       }
-  
+
       retireFailedProjectIoWorker(
         worker,
         workerGeneration,
@@ -865,7 +865,7 @@
       );
     }
   }
-  
+
   function releaseProjectIoWorkerIfIdle() {
     if (
       !projectIoWorker ||
@@ -873,16 +873,16 @@
     ) {
       return false;
     }
-  
+
     projectIoWorker.terminate();
     projectIoWorker = null;
     return true;
   }
-  
+
   function scheduleProjectIoWorkerIdleRelease() {
     releaseProjectIoWorkerIfIdle();
   }
-  
+
   function projectIoRequest(
     operation,
     payload
@@ -905,7 +905,7 @@
       scheduleProjectIoWorkerIdleRelease();
     });
   }
-  
+
   function projectIoStreamedGzipRequest(
     value,
     {
@@ -944,7 +944,7 @@
       scheduleProjectIoWorkerIdleRelease();
     });
   }
-  
+
   async function createCompressedJsonBlob(
     value
   ) {
@@ -967,7 +967,7 @@
       compression: "gzip"
     };
   }
-  
+
   Object.defineProperty(
     window,
     window.RMLI18n.t("ui.literal.f3445f54a383"),

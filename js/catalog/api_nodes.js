@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.24.0-expression-source-factoring";
+    "1.24.31-compile-only-on-zip";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 2;
@@ -7240,10 +7240,6 @@
         ? failureLines
         : "    throw;";
 
-      // Never turn an API failure into a successful-looking continuation.
-      // If the graph explicitly consumes the exception output, preserve the
-      // exception as data. Otherwise rethrow so the graph entry's central
-      // runtime failure boundary reports and terminates the failed branch.
       return `try\n{\n${String(body || "").trimEnd()}${successLines ? `\n${successLines}` : ""}\n}\n${catchClause}\n{\n${failureBody}\n}`;
     }
 

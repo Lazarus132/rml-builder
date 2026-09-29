@@ -2,11 +2,9 @@
   "use strict";
 
   const MODULE_ID =
-    "1.24.0-expression-source-factoring";
+    "1.24.38-source-comment-cleanup";
   const GATE_VERSION = 1;
 
-  
-  
   if (typeof window.RMLScheduleTask !== "function") {
     const taskQueue = [];
     const channel = typeof MessageChannel === "function" ? new MessageChannel() : null;

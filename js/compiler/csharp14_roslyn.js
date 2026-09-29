@@ -35,7 +35,6 @@
       failure: null
     }
   };
-  // Worker operations settle only from worker result/error/cancellation events.
 
   let requestSequence = 0;
   const pending = new Map();

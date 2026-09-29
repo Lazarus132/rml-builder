@@ -28,84 +28,10 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.24.0-expression-source-factoring";
+  "1.24.38-source-comment-cleanup";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
-// EXTREME reload/import instrumentation. This is observational only: it does
-// not schedule work, delay work, poll state, or change readiness semantics.
-const RML_EXTREME_TRACE = (() => {
-  const origin = performance.timeOrigin;
-  const start = performance.now();
-  const records = [];
-  const counts = new Map();
-  const stamp = (name, detail = null) => {
-    const now = performance.now();
-    const record = Object.freeze({
-      name: String(name),
-      ms: Number((now - start).toFixed(3)),
-      absoluteMs: Number(now.toFixed(3)),
-      detail
-    });
-    records.push(record);
-    counts.set(record.name, (counts.get(record.name) || 0) + 1);
-    console.debug(`[RML TRACE +${record.ms.toFixed(3)}ms] ${record.name}`, detail ?? "");
-    return record;
-  };
-  const begin = (name, detail = null) => {
-    const begun = performance.now();
-    stamp(`${name}:begin`, detail);
-    return (endDetail = null) => {
-      const ended = performance.now();
-      return stamp(`${name}:end`, {
-        durationMs: Number((ended - begun).toFixed(3)),
-        ...(endDetail && typeof endDetail === "object" ? endDetail : { value: endDetail })
-      });
-    };
-  };
-  const summary = () => {
-    const copy = records.slice();
-    const durations = copy
-      .filter(r => r.name.endsWith(":end") && Number.isFinite(r.detail?.durationMs))
-      .sort((a,b) => b.detail.durationMs - a.detail.durationMs);
-    console.group("[RML EXTREME RELOAD TRACE] SUMMARY");
-    console.table(copy.map(r => ({ ms:r.ms, event:r.name, durationMs:r.detail?.durationMs ?? "", detail:r.detail ? JSON.stringify(r.detail).slice(0,500) : "" })));
-    console.table(durations.slice(0,40).map(r => ({ phase:r.name.slice(0,-4), durationMs:r.detail.durationMs, atMs:r.ms })));
-    console.log("Event counts", Object.fromEntries(counts));
-    console.groupEnd();
-    return Object.freeze({ origin, start, records: copy, durations });
-  };
-  try {
-    new PerformanceObserver(list => {
-      for (const e of list.getEntries()) {
-        stamp("performance:longtask", { startTime:e.startTime, durationMs:e.duration, name:e.name });
-      }
-    }).observe({ type:"longtask", buffered:true });
-  } catch {}
-  try {
-    new PerformanceObserver(list => {
-      for (const e of list.getEntries()) {
-        if (e.initiatorType === "script" || e.initiatorType === "fetch" || e.initiatorType === "xmlhttprequest") {
-          stamp("performance:resource", { name:e.name, initiatorType:e.initiatorType, startTime:e.startTime, durationMs:e.duration, transferSize:e.transferSize });
-        }
-      }
-    }).observe({ type:"resource", buffered:true });
-  } catch {}
-  document.addEventListener("DOMContentLoaded", () => stamp("lifecycle:DOMContentLoaded"), { once:true });
-  window.addEventListener("load", () => stamp("lifecycle:load"), { once:true });
-  for (const eventName of [
-    "rml-builder:rendered",
-    "rml-builder:graph-codegen-settled",
-    "rml-builder:project-replacement",
-    "rml-scanner-connection"
-  ]) {
-    document.addEventListener(eventName, event => stamp(`event:${eventName}`, event?.detail || null));
-    window.addEventListener(eventName, event => stamp(`window-event:${eventName}`, event?.detail || null));
-  }
-  stamp("trace:installed", { build:RML_BUILDER_BUILD_ID, readyState:document.readyState });
-  return Object.freeze({ stamp, begin, summary, records });
-})();
-Object.defineProperty(window, "RMLReloadTrace", { value:RML_EXTREME_TRACE, configurable:true });
 let alwaysClickableButtonFeedbackOwner = null;
 
 function showAlwaysClickableButtonFeedback(
@@ -401,10 +327,11 @@ window.addEventListener("rml-language-changed", () => {
   window.RMLI18n.relocalize(OUTLINE_STRUCTURE_REFERENCE);
   DEFAULT_LAYOUT_ROW_DESCRIPTION = window.RMLI18n.relocalizeValue(DEFAULT_LAYOUT_ROW_DESCRIPTION);
   if (elements.paletteContent) {
-    RML_EXTREME_TRACE.stamp("import:render-palette-begin");
     renderPalette();
-    RML_EXTREME_TRACE.stamp("import:render-palette-end");
   }
+  document.querySelectorAll("select").forEach(select => {
+    select._rmlUniversalCustomSelect?.refresh?.();
+  });
 });
 
 function outlineTypeFamilyForType(type) {
@@ -423,7 +350,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -1033,20 +960,71 @@ let browserCompilerReferencePaths = new WeakMap();
 let browserCompilerReferenceIdentityPromises = new WeakMap();
 let browserCompilerReferenceIdentityValues = new WeakMap();
 let browserCompilerReferenceSearchRunning = false;
+let browserCompilerBuildStatusText = "";
+let browserCompilerSelectionState = Object.freeze({
+  includeCompiled: false,
+  available: false,
+  missingCount: 0,
+  cacheReady: false,
+  building: false,
+  searching: false
+});
 let browserCompilerReferenceDragDepth = 0;
 let exportPreflightSequence = 0;
 let exportPreflightRequest = null;
 let exportPreflightStage = "";
 
+function exportDiagnosticOwnedByCompilerReferences(diagnostic) {
+  const text = String(diagnostic || "").trim().toLowerCase();
+  if (!text) return false;
+  return (
+    text.includes("missing dll") ||
+    text.includes("drop dll") ||
+    text.includes("resonite folder") ||
+    text.includes("0harmony") ||
+    text.includes("elements.core") ||
+    text.includes("frooxengine") ||
+    text.includes("renderite.shared") ||
+    text.includes("resonitemodloader")
+  );
+}
+
 function refreshUnifiedExportStatus() {
   if (!elements?.exportPreflightStatus) return;
 
   const dialogOpen = Boolean(elements.exportDialog?.open);
-  const active = Boolean(exportPreflightRequest);
-  const phase = exportPreflightStage ||
-    (exportReadiness.phase === "ready" ? "ready" : "idle");
 
-  elements.exportPreflightStatus.hidden = !dialogOpen;
+  const referenceWorkActive = Boolean(browserCompilerReferenceSearchRunning);
+  const active = Boolean(exportPreflightRequest) || referenceWorkActive;
+  const phase = referenceWorkActive
+    ? "references"
+    : exportPreflightStage ||
+      (exportReadiness.phase === "ready" ? "ready" : "idle");
+  const allDiagnostics = ["blocked", "error"].includes(exportReadiness.phase)
+    ? exportReadinessDiagnostics()
+        .map(diagnostic => String(diagnostic || "").trim())
+        .filter(Boolean)
+    : [];
+  const centralDiagnostics = allDiagnostics.filter(
+    diagnostic => !exportDiagnosticOwnedByCompilerReferences(diagnostic)
+  );
+  const compilerReferencesOwnFailure = Boolean(
+    elements.exportIncludeCompiled?.checked &&
+    allDiagnostics.length > 0 &&
+    centralDiagnostics.length === 0
+  );
+
+  const compilerSelectionPending = Boolean(
+    elements.exportIncludeCompiled?.checked &&
+    !active &&
+    (
+      browserCompilerSelectionState.missingCount > 0 ||
+      !browserCompilerSelectionState.cacheReady
+    )
+  );
+
+  elements.exportPreflightStatus.hidden =
+    !dialogOpen || (!active && compilerReferencesOwnFailure && !compilerSelectionPending);
   document.body.classList.toggle(
     "rml-export-status-owned",
     dialogOpen && active
@@ -1057,11 +1035,13 @@ function refreshUnifiedExportStatus() {
 
   const primaryKey = active
     ? `export.preflight.${phase || "prepare"}`
-    : exportReadiness.phase === "ready"
-      ? "export.preflight.ready"
-      : exportReadiness.phase === "error"
-        ? "export.preflight.error"
-        : "export.preflight.idle";
+    : compilerSelectionPending
+      ? "export.preflight.dll_pending"
+      : exportReadiness.phase === "ready"
+        ? "export.preflight.ready"
+        : exportReadiness.phase === "error"
+          ? "export.preflight.error"
+          : "export.preflight.idle";
 
   if (elements.exportPreflightStatusText) {
     elements.exportPreflightStatusText.textContent =
@@ -1072,30 +1052,31 @@ function refreshUnifiedExportStatus() {
     const details = [];
     const phaseDetailKey = `export.preflight.detail.${phase || "prepare"}`;
     const phaseDetail = window.RMLI18n.t(phaseDetailKey);
-    if (phaseDetail && phaseDetail !== phaseDetailKey) {
+    if (phaseDetail && phaseDetail !== phaseDetailKey && !compilerReferencesOwnFailure && !compilerSelectionPending) {
       details.push(phaseDetail);
     }
+
     if (elements.exportIncludeCompiled?.checked) {
-      const references = String(
-        elements.exportCompilerReferenceStatus?.textContent || ""
-      ).trim();
-      const build = String(
-        elements.exportCompilerBuildStatus?.textContent || ""
-      ).trim();
-      if (references) details.push(references);
-      if (build && build !== references) details.push(build);
+      const compilerBuildDetail = String(browserCompilerBuildStatusText || "").trim();
+      if (compilerBuildDetail) details.push(compilerBuildDetail);
+      else if (compilerSelectionPending && browserCompilerSelectionState.missingCount === 0) {
+        details.push(window.RMLI18n.t("export.preflight.detail.dll_pending"));
+      }
     } else {
       details.push(
         window.RMLI18n.t("export.preflight.dll_not_selected")
       );
     }
+    details.push(...centralDiagnostics);
     elements.exportPreflightStatusDetail.textContent =
       [...new Set(details)].join(" · ");
   }
 
   const stateName = active
     ? "working"
-    : exportReadiness.phase;
+    : compilerSelectionPending
+      ? "pending"
+      : exportReadiness.phase;
   elements.exportPreflightStatus.dataset.state = stateName;
   elements.exportPreflightStatus.dataset.phase = phase;
   elements.exportPreflightStatus.setAttribute(
@@ -1103,7 +1084,6 @@ function refreshUnifiedExportStatus() {
     String(active)
   );
 }
-
 function setExportPreflightStage(stage) {
   exportPreflightStage = String(stage || "");
   refreshUnifiedExportStatus();
@@ -1347,16 +1327,12 @@ function isGeneratedSourcePendingDiagnostic(
 function renderGeneratedDiagnostics(
   synchronousDiagnostics = getDiagnostics()
 ) {
+
   const diagnostics = [
     ...new Set(
-      [
-        ...(Array.isArray(
-          synchronousDiagnostics
-        )
-          ? synchronousDiagnostics
-          : []),
-        ...exportReadinessDiagnostics()
-      ]
+      (Array.isArray(synchronousDiagnostics)
+        ? synchronousDiagnostics
+        : [])
         .map(diagnostic =>
           String(diagnostic || "").trim()
         )
@@ -1407,14 +1383,16 @@ function applyPrimaryExportAvailability(synchronousDiagnostics = getDiagnostics(
   if (elements.copyCodeBottom) {
     elements.copyCodeBottom.setAttribute("aria-busy", "false");
   }
+
   setExportControlAvailability(
     elements.downloadCode,
-    !blocked
+    true
   );
   if (elements.downloadCode) {
     elements.downloadCode.setAttribute("aria-busy", "false");
   }
-  if (busy || blocked) {
+
+  if (busy) {
     setExportControlAvailability(elements.exportDownloadSelected, false);
   }
   const label = elements.downloadCode?.querySelector(".top-action-label");
@@ -2043,7 +2021,10 @@ function requestExportPreflight({
   const semanticRequired = requireSemantic === true;
 
   if (semanticRequired && !exportPreflightRequest) {
-    const cached = currentValidatedGeneratedPublication();
+
+    const cached = currentApiExportCompatibilityWarning() === null
+      ? currentValidatedGeneratedPublication()
+      : null;
     const semantic = validatedSemanticExportPublication;
     if (
       cached &&
@@ -2082,7 +2063,10 @@ function requestExportPreflight({
   }
 
   if (!semanticRequired && !exportPreflightRequest) {
-    const cached = currentValidatedGeneratedPublication();
+
+    const cached = currentApiExportCompatibilityWarning() === null
+      ? currentValidatedGeneratedPublication()
+      : null;
     if (cached) {
       const request = Object.freeze({
         id: exportPreflightSequence,
@@ -2409,22 +2393,11 @@ function requestExportPreflight({
   })().catch(error => {
     if (exportPreflightRequest === request) {
       if (["RML_EXPORT_CHANGED", "RML_EXPORT_CANCELLED"].includes(error?.code)) setExportReadiness("idle", {}, []);
-      else if (
-        request.requireSemantic &&
-        request.syntaxValidated
-      ) {
-        setExportReadiness(
-          "ready",
-          {
-            fingerprint:
-              request.sourceFingerprint,
-            fileCount:
-              request.sourceFileCount
-          },
-          []
-        );
-      }
-      else setExportReadiness("error", { diagnostics: [String(error?.message || error)] }, []);
+      else setExportReadiness(
+        "error",
+        { diagnostics: [String(error?.message || error)] },
+        []
+      );
     }
     throw error;
   }).finally(() => {
@@ -4403,7 +4376,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.24.0-expression-source-factoring",
+      "../workers/graph_codegen_worker.js?v=1.24.38-source-comment-cleanup",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -10097,10 +10070,6 @@ function isImportRecoveryExportOnlyDiagnostic(
     return false;
   }
 
-  
-  
-  
-  
   const recoveryDiagnostic =
     normalized.startsWith("import recovery:") ||
     normalized.startsWith("importwiederherstellung:") ||
@@ -10248,10 +10217,6 @@ function importDiagnosticsForCatalog(
       );
     };
 
-  
-  
-  
-  
   const importRelevant =
     values.filter(diagnostic =>
       !isUnavailableOperatorDiagnostic(
@@ -10837,10 +10802,6 @@ function recordPageState(
   if (pageStateTrace.length > 512) {
     pageStateTrace.shift();
   }
-  console.debug(
-    "[RML Page State]",
-    entry
-  );
   return entry;
 }
 
@@ -13589,7 +13550,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -13604,7 +13565,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -13623,7 +13584,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -13960,7 +13921,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -13991,7 +13952,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -14264,8 +14225,6 @@ function nodeWheelScrollScopeActive(
   return true;
 }
 
-
-
 function breakHorizontalPlaceholderContractIfPointerMoved(
   nextX,
   nextY
@@ -14328,9 +14287,6 @@ function breakHorizontalPlaceholderContractIfPointerMoved(
     nodeWheelDirection = 0;
   }
 
-  
-  
-  
   dragHorizontalPlaceholderAnchorX =
     nextX;
   dragHorizontalPlaceholderAnchorY =
@@ -14373,7 +14329,6 @@ function beginDragScrolling(event) {
         ? event.clientY
         : null;
   }
-  
 
   dragPointerX =
     Number.isFinite(event?.clientX)
@@ -14395,7 +14350,7 @@ function updateDragScrolling(event) {
   breakHorizontalPlaceholderContractIfPointerMoved(event.clientX, event.clientY);
   dragPointerX = event.clientX;
   dragPointerY = event.clientY;
-  
+
   requestDragPlaceholderVisibility();
 }
 
@@ -14452,9 +14407,6 @@ function dragViewportTop() {
         return;
       }
 
-      
-      
-      
       const rectangle =
         element.getBoundingClientRect();
 
@@ -14579,12 +14531,7 @@ function refreshPointerTargetAfterDragScroll() {
     !dragHorizontalPlaceholderContractBroken;
 
   if (manualPlaceholderModeActive) {
-    
-    
-    
-    
-    
-    
+
     if (
       (nodePointerDragActive || palettePointerDragActive) &&
       nodeWheelManualHost instanceof HTMLElement &&
@@ -14601,13 +14548,12 @@ function refreshPointerTargetAfterDragScroll() {
 
       positionNodeInsertPlaceholder(host, insertionIndex);
 
-      
     }
     return;
   }
 
   if (nodePointerDragActive) {
-    
+
     scheduleNodePointerTargetUpdate(
       nodePointerX,
       nodePointerY
@@ -14617,7 +14563,7 @@ function refreshPointerTargetAfterDragScroll() {
   }
 
   if (palettePointerDragActive) {
-    
+
     schedulePalettePointerTargetUpdate(
       palettePointerX,
       palettePointerY
@@ -14635,7 +14581,7 @@ function refreshPointerTargetAfterDragScroll() {
 }
 
 function requestDragPlaceholderVisibility() {
-  
+
   if (
     !dragScrollActive ||
     dragScrollFrame !== null
@@ -14648,9 +14594,8 @@ function requestDragPlaceholderVisibility() {
     window.requestAnimationFrame(
       runDragScrolling
     );
-  
-}
 
+}
 
 function dragPointerInsideScrollableHorizontalHost(
   host
@@ -14809,8 +14754,6 @@ function horizontalPlaceholderVisibilityDelta(
       visibleRight;
   }
 
-  
-
   return delta;
 }
 
@@ -14818,7 +14761,7 @@ function runHorizontalPlaceholderScrolling(
   timestamp
 ) {
   if (!placeholderPointerIsStationary()) {
-    
+
     return false;
   }
 
@@ -14829,7 +14772,7 @@ function runHorizontalPlaceholderScrolling(
   const host =
     horizontalDragScrollTarget();
   if (!host) {
-    
+
     return false;
   }
 
@@ -14848,13 +14791,11 @@ function runHorizontalPlaceholderScrolling(
       dragPointerX;
     dragHorizontalPlaceholderAnchorY =
       dragPointerY;
-    
+
   }
 
   if (Math.abs(delta) <= 0.5) {
-    
-    
-    
+
     const cardsAtHold =
       effectiveNodeInsertCards(host);
     const manualIndexAtHold =
@@ -14885,7 +14826,7 @@ function runHorizontalPlaceholderScrolling(
         host.scrollLeft;
       host.scrollLeft =
         boundaryTarget;
-      
+
       dragScrollLastTimestamp = timestamp;
       return (
         host.scrollLeft !==
@@ -14893,7 +14834,6 @@ function runHorizontalPlaceholderScrolling(
       );
     }
 
-    
     return false;
   }
 
@@ -14905,7 +14845,7 @@ function runHorizontalPlaceholderScrolling(
       host;
     dragHorizontalPlaceholderAnchorX = dragPointerX;
     dragHorizontalPlaceholderAnchorY = dragPointerY;
-    
+
   }
 
   const previousScrollLeft =
@@ -14953,8 +14893,6 @@ function runHorizontalPlaceholderScrolling(
     host.scrollLeft !==
       previousScrollLeft;
 
-  
-
   if (!changed) {
     if (forceRightEnd || forceLeftEnd) {
       dragScrollLastTimestamp = timestamp;
@@ -14965,16 +14903,13 @@ function runHorizontalPlaceholderScrolling(
       dragHorizontalPlaceholderAuthorityHost ===
       host
     ) {
-      
+
       dragHorizontalPlaceholderAuthorityHost =
         null;
     }
     return false;
   }
 
-  
-  
-  
   refreshPointerTargetAfterDragScroll();
 
   if (forceRightEnd || forceLeftEnd) {
@@ -14993,7 +14928,7 @@ function runHorizontalPlaceholderScrolling(
           dragHorizontalPlaceholderAuthorityHost ===
             host
         ) {
-          
+
           dragHorizontalPlaceholderAuthorityHost =
             null;
         }
@@ -15027,7 +14962,6 @@ function runHorizontalPlaceholderScrolling(
         );
       }
 
-      
     });
   }
 
@@ -15053,7 +14987,7 @@ function runHorizontalDragScrolling(
   const host =
     horizontalDragScrollTarget();
   if (!host) {
-    
+
     return false;
   }
 
@@ -15062,7 +14996,7 @@ function runHorizontalDragScrolling(
     dragHorizontalPlaceholderAuthorityHost ===
       host
   ) {
-    
+
     return false;
   }
 
@@ -15076,7 +15010,7 @@ function runHorizontalDragScrolling(
       rectangle
     )
   ) {
-    
+
     if (dragHorizontalScrollHost === host) {
       dragHorizontalScrollHost = null;
     }
@@ -15118,10 +15052,8 @@ function runHorizontalDragScrolling(
     );
   }
 
-  
-
   if (direction === 0) {
-    
+
     return false;
   }
 
@@ -15167,8 +15099,6 @@ function runHorizontalDragScrolling(
   host.scrollLeft =
     requestedScrollLeft;
 
-  
-
   if (
     host.scrollLeft ===
     previousScrollLeft
@@ -15188,41 +15118,28 @@ function runHorizontalDragScrolling(
         atRightBoundary
       );
 
-    
-
     dragScrollLastTimestamp =
       timestamp;
 
     if (blockedByBoundary) {
-      
-      
-      
-      
-      
-      
+
       return false;
     }
 
-    
     return true;
   }
 
   dragScrollLastTimestamp =
     timestamp;
 
-  
-  
-  
-  
-  
   if (nodePointerDragActive) {
-    
+
     scheduleNodePointerTargetUpdate(
       nodePointerX,
       nodePointerY
     );
   } else if (palettePointerDragActive) {
-    
+
     schedulePalettePointerTargetUpdate(
       palettePointerX,
       palettePointerY
@@ -15236,13 +15153,12 @@ function runHorizontalDragScrolling(
 
 function runDragScrolling(timestamp) {
   dragScrollFrame = null;
-  
 
   if (
     !dragScrollActive ||
     !Number.isFinite(dragPointerY)
   ) {
-    
+
     dragScrollLastTimestamp = 0;
     return;
   }
@@ -15253,12 +15169,12 @@ function runDragScrolling(timestamp) {
     );
 
   if (placeholderHorizontalScrolled) {
-    
+
     dragScrollFrame =
       window.requestAnimationFrame(
         runDragScrolling
       );
-    
+
     return;
   }
 
@@ -15271,7 +15187,7 @@ function runDragScrolling(timestamp) {
       window.requestAnimationFrame(
         runDragScrolling
       );
-    
+
     return;
   }
 
@@ -15680,9 +15596,6 @@ function nodeInsertionGeometry(
     top = hostRectangle.top + 7;
   }
 
-  
-  
-  
   const hostContentLeft =
     hostRectangle.left + host.clientLeft;
   const left =
@@ -18546,8 +18459,6 @@ function stepNodeInsertWithWheel(
       maximumIndex
     );
 
-  
-
   if (
     nextIndex === currentIndex
   ) {
@@ -18587,7 +18498,6 @@ function stepNodeInsertWithWheel(
     host.scrollLeft =
       maximumScrollLeft;
 
-    
     positionNodeInsertPlaceholder(
       host,
       nextIndex
@@ -18723,7 +18633,7 @@ function restoreCommittedInlineRowViewport(
     }
 
     if (!host) {
-      
+
       return;
     }
 
@@ -18745,7 +18655,6 @@ function restoreCommittedInlineRowViewport(
     host.scrollLeft =
       targetScrollLeft;
 
-    
   };
 
   restore("sync-after-render");
@@ -18965,10 +18874,6 @@ function startNodePointerDrag(
     dragHorizontalScrollHost =
       dragHorizontalSourceHost;
   }
-
-  
-
-  
 
   activeDraggedNodeId =
     card.dataset.nodeId;
@@ -21522,7 +21427,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -23088,6 +22993,7 @@ function ensureUniversalCustomSelect(select) {
     entries = [...select.options].map(option => ({
       value: option.value,
       text: option.textContent || option.label || option.value,
+      help: option.dataset.optionHelpText || "",
       disabled: option.disabled,
       group: option.parentElement instanceof HTMLOptGroupElement
         ? option.parentElement.label
@@ -23106,7 +23012,13 @@ function ensureUniversalCustomSelect(select) {
     const entry = selectedEntry();
     const text = entry?.text || window.RMLI18n.t("ui.literal.349ac8fb67f7");
     triggerText.textContent = text;
-    trigger.title = text;
+    const help = String(entry?.help || "").trim();
+    if (help) {
+      trigger.dataset.help = help;
+    } else {
+      trigger.removeAttribute("data-help");
+    }
+    trigger.removeAttribute("title");
     const hardDisabled =
       select.disabled ||
       select.getAttribute("aria-disabled") === "true";
@@ -23436,7 +23348,7 @@ function ensureUniversalCustomSelect(select) {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ["disabled", "label", "value", "selected"]
+    attributeFilter: ["disabled", "label", "value", "selected", "data-option-help-text"]
   });
 
   const api = {
@@ -24203,7 +24115,6 @@ function populateGeneratedArtifactSelect(
 }
 
 function updateGeneratedOutput() {
-  const __traceEnd = RML_EXTREME_TRACE.begin("generated:update", { projectEpoch: projectApplicationEpoch });
   if (deferGeneratedOutputUntilDomReady()) return;
   generatedOutputRefreshPendingBeforeDom = false;
   if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
@@ -24223,10 +24134,8 @@ function updateGeneratedOutput() {
       return;
     }
     errors = getDiagnostics();
-    RML_EXTREME_TRACE.stamp("generated:before-build", { projectEpoch: projectApplicationEpoch });
     output =
       generatedCodeForCurrentView();
-    RML_EXTREME_TRACE.stamp("generated:after-build", { projectEpoch: projectApplicationEpoch, artifactCount: output?.artifacts?.length ?? output?.catalog?.artifacts?.length ?? null });
     const frozenCatalog =
       freezeGeneratedArtifactCatalog(
         output.catalog
@@ -24316,7 +24225,6 @@ function updateGeneratedOutput() {
     return;
   }
   const commitValidatedOutput = () => {
-    const __commitEnd = RML_EXTREME_TRACE.begin("generated:preview-dom-commit", { projectEpoch: projectApplicationEpoch });
     elements.generatedCode.removeAttribute("aria-busy");
     const code = output.code;
     const selected =
@@ -24375,8 +24283,6 @@ function updateGeneratedOutput() {
     if (elements.exportDialog?.open) {
       updateExportDialog();
     }
-    __commitEnd({ artifactCount: output.artifacts.length, codeChars: code.length });
-    RML_EXTREME_TRACE.stamp("generated:preview-visible", { artifactCount: output.artifacts.length, selected: selected?.relativePath || null });
   };
 
   const validationSequence =
@@ -24468,9 +24374,6 @@ function updateGeneratedOutput() {
     return;
   }
 
-  // Generated artifacts are already a deterministic product of the committed
-  // project snapshot. Publish the preview/artifact selector immediately; compiler
-  // validation gates export readiness only and must not gate presentation.
   commitValidatedOutput();
 
   const compiler = window.RMLCompile;
@@ -24484,8 +24387,6 @@ function updateGeneratedOutput() {
     return;
   }
 
-  // Keep the generated preview and artifact selector usable while validation
-  // proceeds independently. Export readiness below remains fail-closed.
   elements.generatedCode.removeAttribute(
     "aria-busy"
   );
@@ -24494,10 +24395,8 @@ function updateGeneratedOutput() {
     { fileCount: files.length },
     errors
   );
-  RML_EXTREME_TRACE.stamp("compiler:bundle-request", { fileCount: files.length });
   ensureLazyScriptBundle("compiler")
     .then(() => {
-      RML_EXTREME_TRACE.stamp("compiler:bundle-ready", { fileCount: files.length });
       if (
         validationSequence !==
           generatedOutputValidationSequence
@@ -24516,11 +24415,9 @@ function updateGeneratedOutput() {
           )
         );
       }
-      RML_EXTREME_TRACE.stamp("compiler:validation-begin", { fileCount: files.length });
       return activeCompiler.validate(files);
     })
     .then(result => {
-      RML_EXTREME_TRACE.stamp("compiler:validation-end", { phase: result?.phase || null, fileCount: files.length });
       if (result) {
         commitIfCurrent(result);
       }
@@ -24833,14 +24730,14 @@ function previewEnumEditorMarkup(
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -24915,7 +24812,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -31438,10 +31335,6 @@ async function ensureProjectRuntimePrerequisites(
               window.RMLI18n.t("ui.literal.b436c9b292be")
             );
 
-            
-            
-            
-            
             removedUnavailableApiNodes = [];
             unresolvedRequirements =
               portableRequirements;
@@ -33613,7 +33506,6 @@ function queueImportedCodegen(
     return;
   }
   try {
-    RML_EXTREME_TRACE.stamp("import:queue-codegen", { projectEpoch });
     updateGeneratedOutput();
   } catch (error) {
     console.error(
@@ -34385,7 +34277,6 @@ async function applyLoadedProjectWithFeedback(
           7
         ) /
         7;
-    RML_EXTREME_TRACE.stamp("import:apply-project-begin", { expectedImportedProjectEpoch, expectedNodes, expectedConnections, requestedPage });
     const importedProjectEpoch =
       applyLoadedProject(
         project,
@@ -34395,7 +34286,6 @@ async function applyLoadedProjectWithFeedback(
             !forceConfigurationPage
         }
       );
-    RML_EXTREME_TRACE.stamp("import:apply-project-end", { importedProjectEpoch });
     if (
       importedProjectEpoch !==
         expectedImportedProjectEpoch
@@ -34446,10 +34336,6 @@ async function applyLoadedProjectWithFeedback(
       );
     }
 
-    // Code generation depends on the committed project snapshot, its analysis
-    // certificate and graph identity — not on DOM/graph presentation readiness.
-    // Start it now so generated code, preview state and artifact selection can
-    // settle in parallel with metadata/palette/runtime-graph presentation.
     queueImportedCodegen(
       importedProjectEpoch
     );
@@ -34464,9 +34350,7 @@ async function applyLoadedProjectWithFeedback(
       }
     );
     await yieldBuilderTask();
-    RML_EXTREME_TRACE.stamp("import:render-metadata-begin");
     renderMetadata();
-    RML_EXTREME_TRACE.stamp("import:render-metadata-end");
     updateBuilderWork(
       session,
       {
@@ -34509,10 +34393,7 @@ async function applyLoadedProjectWithFeedback(
     activateImportedGraphPresentationWork(
       importedPresentationWork
     );
-
-    RML_EXTREME_TRACE.stamp("import:render-all-begin", { expectedNodes, expectedConnections });
     renderAll();
-    RML_EXTREME_TRACE.stamp("import:render-all-end", { expectedNodes, expectedConnections });
     updateBuilderWork(
       session,
       {
@@ -34523,11 +34404,8 @@ async function applyLoadedProjectWithFeedback(
       }
     );
     await yieldBuilderTask();
-
-    RML_EXTREME_TRACE.stamp("import:graph-ui-wait-begin", { expectedNodes, expectedConnections });
     const graphResult =
       await graphUiReady;
-    RML_EXTREME_TRACE.stamp("import:graph-ui-wait-end", { expectedNodes, expectedConnections, graphResult });
     const verificationProgress =
       completed =>
         applyProgress[2] +
@@ -37265,8 +37143,12 @@ function renderBrowserCompilerReferenceList() {
 
   const references =
     selectedBrowserCompilerReferences();
-  host.hidden = references.length === 0;
-  if (references.length === 0) {
+  const hasReferences = references.length > 0;
+  host.hidden = !hasReferences;
+  if (elements.exportClearCompilerReferencesRow) {
+    elements.exportClearCompilerReferencesRow.hidden = !hasReferences;
+  }
+  if (!hasReferences) {
     host.replaceChildren();
     return;
   }
@@ -37416,10 +37298,8 @@ function missingAssembliesFromCompilerResult(
 }
 
 function setBrowserCompilerSearchStatus(message) {
-  if (elements.exportCompilerBuildStatus) {
-    elements.exportCompilerBuildStatus.textContent =
-      String(message || "");
-  }
+  browserCompilerBuildStatusText = String(message || "");
+  refreshUnifiedExportStatus();
 }
 
 function selectBrowserCompilerFiles(
@@ -38231,8 +38111,7 @@ function updateBrowserCompilerStatus(
   completeCatalog
 ) {
   if (
-    !elements.exportCompilerReferenceStatus ||
-    !elements.exportCompilerBuildStatus
+    !elements.exportCompilerReferenceStatus
   ) {
     return {
       available: false,
@@ -38265,13 +38144,14 @@ function updateBrowserCompilerStatus(
     );
 
   if (missing.length > 0) {
+    const missingSummary = window.RMLI18n.format(
+      missing.length === 1
+        ? "export.compiler_references.missing.one"
+        : "export.compiler_references.missing.other",
+      { count: missing.length, dlls: missing.join(", ") }
+    );
     elements.exportCompilerReferenceStatus.textContent =
-      window.RMLI18n.format(
-        missing.length === 1
-          ? "export.compiler_references.missing.one"
-          : "export.compiler_references.missing.other",
-        { count: missing.length, dlls: missing.join(", ") }
-      );
+      `${missingSummary} Drop DLLs or a Resonite folder here.`;
     elements.exportCompilerReferenceStatus.dataset.state =
       "missing";
   } else {
@@ -38288,35 +38168,27 @@ function updateBrowserCompilerStatus(
   renderBrowserCompilerReferenceList();
 
   if (browserCompilerReferenceSearchRunning) {
-    elements.exportCompilerBuildStatus.textContent =
+    browserCompilerBuildStatusText =
       window.RMLI18n.t("{{i18n:js.presentation.13b772bea046}}");
   } else if (!available) {
-    elements.exportCompilerBuildStatus.textContent =
+    browserCompilerBuildStatusText =
       window.RMLI18n.t("{{i18n:js.presentation.ab68393968dd}}");
   } else if (browserCompilerBuilding) {
-    elements.exportCompilerBuildStatus.textContent =
+    browserCompilerBuildStatusText =
       window.RMLI18n.t("{{i18n:js.presentation.19c59c5f8401}}");
   } else if (cacheReady) {
-    elements.exportCompilerBuildStatus.textContent =
+    browserCompilerBuildStatusText =
       `${browserCompilerBuildCache.outputs.length} DLL${browserCompilerBuildCache.outputs.length === 1 ? "" : "s"} ready for the ZIP.`;
   } else if (missing.length > 0) {
-    elements.exportCompilerBuildStatus.textContent =
+    browserCompilerBuildStatusText =
       browserCompilerDirectoryFileCount > 0
         ? `Folder checked: ${browserCompilerDirectoryFileCount.toLocaleString()} files · ${browserCompilerDirectoryMatchCount} required DLL${browserCompilerDirectoryMatchCount === 1 ? "" : "s"} found. Drop missing DLLs or another folder above.`
         : "";
   } else {
-    elements.exportCompilerBuildStatus.textContent =
+    browserCompilerBuildStatusText =
       window.RMLI18n.t("{{i18n:js.presentation.9cb7a5a88476}}");
   }
 
-  setExportControlAvailability(
-    elements.exportClearCompilerReferences,
-    (
-      references.length > 0 ||
-      browserCompilerDirectoryFiles.length > 0
-    ) &&
-      !browserCompilerBuilding
-  );
   const pickerDisabled =
     browserCompilerBuilding ||
     browserCompilerReferenceSearchRunning;
@@ -38325,6 +38197,14 @@ function updateBrowserCompilerStatus(
       pickerDisabled;
   }
 
+  browserCompilerSelectionState = Object.freeze({
+    includeCompiled: Boolean(elements.exportIncludeCompiled?.checked),
+    available,
+    missingCount: missing.length,
+    cacheReady,
+    building: Boolean(browserCompilerBuilding),
+    searching: Boolean(browserCompilerReferenceSearchRunning)
+  });
   refreshUnifiedExportStatus();
   return {
     available,
@@ -38576,19 +38456,19 @@ async function compileGeneratedBrowserDlls(
           onProgress(progress) {
             if (
               projectEpoch !==
-                projectApplicationEpoch ||
-              !elements.exportCompilerBuildStatus
+                projectApplicationEpoch
             ) {
               return;
             }
 
             if (progress?.phase === "references") {
-              elements.exportCompilerBuildStatus.textContent =
+              browserCompilerBuildStatusText =
                 `References ${progress.completed}/${progress.total}: ${progress.name}`;
             } else {
-              elements.exportCompilerBuildStatus.textContent =
+              browserCompilerBuildStatusText =
                 `Building ${progress.completed}/${progress.total}: ${progress.name}`;
             }
+            refreshUnifiedExportStatus();
           }
         }
       );
@@ -38791,120 +38671,62 @@ function clearBrowserCompilerReferences() {
   updateExportDialog();
 }
 
-function currentApiExportCompatibilityWarning() {
-  const graph =
-    state.extensions
-      ?.typedNodeGraph;
+function isExportCatalogLiveVerified() {
+  const report = window.RMLApiNodeFactoryReport;
+  return Boolean(
+    report &&
+    typeof report === "object" &&
+    report.catalogSource === "scanner" &&
+    report.liveCatalogVerified === true &&
+    report.verificationPassed === true
+  );
+}
 
+function currentApiExportCompatibilityWarning() {
+  const graph = state.extensions?.typedNodeGraph;
   if (
     !graph ||
-    !graph.configSnapshot ||
-    !Array.isArray(
-      graph.configSnapshot.nodes
-    ) ||
     !Array.isArray(graph.nodes)
   ) {
     return null;
   }
 
-  const apiNodes =
-    graph.nodes.filter(node =>
-      node?.kind === "operator" &&
-      String(
-        node.operatorId || ""
-      ).startsWith("api.")
-    );
-
+  const apiNodes = graph.nodes.filter(node =>
+    node?.kind === "operator" &&
+    String(node.operatorId || "").startsWith("api.")
+  );
   if (apiNodes.length === 0) {
     return null;
   }
 
-  const report =
-    window.RMLApiNodeFactoryReport;
-  const definitions =
-    window.RMLModNodeRegistry
-      ?.getNodeDefinitions?.() || {};
-  const liveFactoryVerified =
-    Boolean(
-      report &&
-      typeof report === "object" &&
-      report.liveCatalogVerified ===
-        true &&
-      report.catalogSource ===
-        "scanner" &&
-      report.verificationPassed ===
-        true
-    );
-  const contractsVerified =
-    liveFactoryVerified &&
-    apiNodes.every(node => {
-      const definition =
-        definitions[
-          node.operatorId
-        ];
-      const contract =
-        definition?.apiVerification;
-
-      return Boolean(
-        definition
-          ?.catalogGenerated === true &&
-        contract &&
-        typeof contract === "object" &&
-        String(contract.nodeId || "") ===
-          String(node.operatorId) &&
-        String(
-          contract.catalogFingerprint ||
-          ""
-        ) ===
-          String(
-            report.catalogFingerprint ||
-            ""
-          ) &&
-        String(
-          contract.engineVersion || ""
-        ) ===
-          String(
-            report.engineVersion || ""
-          ) &&
-        String(
-          contract.contractFingerprint ||
-          ""
-        ).trim()
-      );
-    });
-
-  if (contractsVerified) {
+  const report = window.RMLApiNodeFactoryReport;
+  if (isExportCatalogLiveVerified()) {
     return null;
   }
 
   return Object.freeze({
-    apiNodeCount:
-      apiNodes.length,
-    catalogSource:
-      String(
-        report?.catalogSource ||
-        "unavailable"
-      )
+    apiNodeCount: apiNodes.length,
+    catalogSource: String(report?.catalogSource || "unavailable")
   });
 }
 
 function renderExportApiCompatibilityWarning() {
-  const host =
-    elements.exportApiCompatibilityWarning;
-  const message =
-    elements.exportApiCompatibilityWarningMessage;
+  const indicator = elements.exportApiCompatibilityIndicator;
+  const host = elements.exportApiCompatibilityWarning;
+  const message = elements.exportApiCompatibilityWarningMessage;
 
-  if (!host || !message) {
-    return;
-  }
+  if (!indicator || !host || !message) return;
 
-  const warning =
-    currentApiExportCompatibilityWarning();
+  const warning = currentApiExportCompatibilityWarning();
+  const visible = Boolean(warning);
+  indicator.hidden = !visible;
+  host.hidden = !visible;
 
-  host.hidden = !warning;
-
-  if (!warning) {
+  if (!visible) {
     message.textContent = "";
+    if (typeof host.hidePopover === "function" && host.matches(":popover-open")) {
+      host.hidePopover();
+    }
     return;
   }
 
@@ -38918,17 +38740,31 @@ function renderExportApiCompatibilityWarning() {
   });
 }
 
+function brieflyRevealExportApiCompatibilityWarning() {
+  const host = elements.exportApiCompatibilityWarning;
+  const indicator = elements.exportApiCompatibilityIndicator;
+  if (!host || !indicator || indicator.hidden || host.hidden) return;
+  const sessionKey = "rml.export.apiCompatibilityNoticeSeen";
+  try {
+    if (sessionStorage.getItem(sessionKey) === "1") return;
+    sessionStorage.setItem(sessionKey, "1");
+  } catch {}
+  if (typeof host.showPopover !== "function") return;
+  try {
+    host.showPopover();
+    window.setTimeout(() => {
+      if (host.matches(":popover-open")) host.hidePopover();
+    }, 3500);
+  } catch {}
+}
+
 function updateExportDialog() {
   setExportPreflightStage(exportPreflightStage);
   setExportControlAvailability(
     elements.exportDownloadSelected,
     false
   );
-  const guidanceStatus = generatedGuidanceStatus();
-  if (guidanceStatus) {
-    elements.exportDownloadHint.textContent = guidanceStatus;
-    return;
-  }
+
   elements.exportDownloadHint.classList.remove("error");
   const platform =
     elements.exportPlatform.value;
@@ -38940,12 +38776,44 @@ function updateExportDialog() {
     elements.exportIncludeNodeIndex.checked;
   const includeCompiled =
     elements.exportIncludeCompiled.checked;
+
+  renderExportApiCompatibilityWarning();
   if (elements.exportCompilerDetails) {
     elements.exportCompilerDetails.hidden =
       !includeCompiled;
   }
+
+  if (elements.exportCompilerReferenceStatus) {
+    elements.exportCompilerReferenceStatus.hidden = false;
+  }
   const publication =
     currentValidatedGeneratedPublication();
+  if (["blocked", "error"].includes(exportReadiness.phase)) {
+
+    if (includeCompiled && publication?.catalog) {
+      const compilerStatus =
+        updateBrowserCompilerStatus(publication.catalog);
+      const canRetryCompiledExport =
+        !browserCompilerBuilding &&
+        !browserCompilerReferenceSearchRunning &&
+        !exportPreflightRequest &&
+        !exportDeliveryBusy;
+      setExportControlAvailability(
+        elements.exportDownloadSelected,
+        canRetryCompiledExport
+      );
+      if (canRetryCompiledExport) {
+        elements.exportDownloadSelected.textContent =
+          compilerStatus.cacheReady
+            ? window.RMLI18n.t("js.presentation.7bd0e4b0ebc2")
+            : window.RMLI18n.t("ui.literal.c9caa7143a49");
+      }
+    }
+
+    elements.exportDownloadHint.textContent = "";
+    elements.exportDownloadHint.classList.remove("error");
+    return;
+  }
   if (!publication) {
     elements.exportDownloadHint.textContent =
       window.RMLI18n.t(
@@ -39038,8 +38906,6 @@ function updateExportDialog() {
   const effectiveMultiProject =
     activeProjectCount > 1;
 
-  renderExportApiCompatibilityWarning();
-
   elements.exportCsFilename.textContent =
     `${sourceCount} generated source file${
       sourceCount === 1 ? "" : "s"
@@ -39067,36 +38933,18 @@ function updateExportDialog() {
     "aria-invalid",
     String(projectPathMissing)
   );
+  const zipActionAvailable =
+    hasSelection &&
+    !projectPathMissing &&
+    !exportPreflightRequest &&
+    !exportDeliveryBusy &&
+    !browserCompilerBuilding &&
+    !browserCompilerReferenceSearchRunning &&
+    (includeCompiled || exportReady);
   setExportControlAvailability(
     elements.exportDownloadSelected,
-    exportReady &&
-      hasSelection &&
-      !projectPathMissing &&
-      !compilerBlocked
+    zipActionAvailable
   );
-
-  const platformNotes = {
-    windows:
-      window.RMLI18n.t("ui.auto.42b6d7810a6b"),
-    linux:
-      window.RMLI18n.t("ui.auto.def8dd33ae0b"),
-    "linux-flatpak":
-      window.RMLI18n.t("ui.auto.133b130c8499"),
-    macos:
-      window.RMLI18n.t("ui.auto.c90d391a53e6"),
-    custom:
-      window.RMLI18n.t("ui.auto.27a195a8939b")
-  };
-
-  elements.exportCompatibilityHint.innerHTML =
-    platformNotes[platform] ||
-    platformNotes.custom;
-
-  if (exportReadiness.phase === "error" && exportReadiness.diagnostics.length) {
-    elements.exportDownloadHint.textContent = exportReadiness.diagnostics.join("\n");
-    elements.exportDownloadHint.classList.add("error");
-    return;
-  }
 
   if (!hasSelection) {
     elements.exportDownloadSelected.textContent =
@@ -39111,23 +38959,8 @@ function updateExportDialog() {
       compilerStatus.cacheReady
         ? window.RMLI18n.t("js.presentation.7bd0e4b0ebc2")
         : window.RMLI18n.t("ui.literal.c9caa7143a49");
-    elements.exportDownloadHint.textContent =
-      compilerStatus.missing.length > 0
-        ? browserCompilerDirectoryFileCount > 0
-          ? window.RMLI18n.format("export.compiler_references.still_missing", {
-              dlls: compilerStatus.missing.join(", ")
-            })
-          : window.RMLI18n.format("export.compiler_references.search_missing", {
-              dlls: compilerStatus.missing.join(", ")
-            })
-        : browserCompilerBuilding
-          ? window.RMLI18n.t("ui.literal.7dd3200524ef")
-          : window.RMLI18n.format(
-              compiledArtifacts.length === 1
-                ? "export.compiler_references.manifest.one"
-                : "export.compiler_references.manifest.other",
-              { count: compiledArtifacts.length }
-            );
+
+    elements.exportDownloadHint.textContent = "";
     return;
   }
 
@@ -39227,6 +39060,21 @@ function syncExportOptions() {
   return true;
 }
 
+async function handleExportOptionChange() {
+  const sequence = ++exportSelectionValidationSequence;
+  syncExportOptions();
+  if (!elements.exportDialog?.open) return;
+  await validateCurrentExportSelection();
+  if (
+    sequence !== exportSelectionValidationSequence ||
+    !elements.exportDialog?.open
+  ) return;
+  updateExportDialog();
+  refreshUnifiedExportStatus();
+  await settleExportDialogPresentation();
+  if (sequence !== exportSelectionValidationSequence) return;
+}
+
 function applyExportPlatformPreset() {
   const presetPath =
     EXPORT_PLATFORM_PRESETS[
@@ -39266,9 +39114,126 @@ function syncEditedResonitePath() {
 }
 
 let exportDialogOpenSequence = 0;
+let exportSelectionValidationSequence = 0;
 
-function openExportDialog() {
-  if (elements.exportDialog?.open) return Promise.resolve(true);
+async function settleExportDialogPresentation() {
+  await new Promise(resolve => requestAnimationFrame(() =>
+    requestAnimationFrame(resolve)
+  ));
+  updateAdaptiveUtilityDialog(elements.exportDialog);
+}
+
+function exportDialogPresentationSnapshot() {
+  const dialog = elements.exportDialog;
+  const nodeIndex = elements.exportIncludeNodeIndex;
+  const option = nodeIndex?.closest?.(".export-option") || null;
+  const selection = nodeIndex?.closest?.(".export-selection") || null;
+  const statusDetail = String(
+    elements.exportPreflightStatusDetail?.textContent || ""
+  ).trim();
+  const centralStatusVisible = Boolean(
+    elements.exportPreflightStatus && !elements.exportPreflightStatus.hidden
+  );
+  const compilerReferenceStatus = elements.exportCompilerReferenceStatus || null;
+  const compilerReferenceDetail = String(
+    compilerReferenceStatus?.textContent || ""
+  ).trim();
+  const compilerReferenceStatusVisible = Boolean(
+    elements.exportIncludeCompiled?.checked &&
+    compilerReferenceStatus &&
+    !compilerReferenceStatus.hidden &&
+    getComputedStyle(compilerReferenceStatus).display !== "none"
+  );
+  const failurePresentationOwned = Boolean(
+    !["blocked", "error"].includes(exportReadiness.phase) ||
+    (centralStatusVisible && statusDetail.length > 0) ||
+    (compilerReferenceStatusVisible && compilerReferenceDetail.length > 0)
+  );
+  const optionRect = option?.getBoundingClientRect?.() || null;
+  const selectionRect = selection?.getBoundingClientRect?.() || null;
+  const dialogRect = dialog?.getBoundingClientRect?.() || null;
+  const optionStyle = option ? getComputedStyle(option) : null;
+  const selectionStyle = selection ? getComputedStyle(selection) : null;
+  const valid = Boolean(
+    dialog?.open &&
+    option && selection &&
+    optionStyle?.display === "flex" &&
+    selectionStyle?.display === "grid" &&
+    optionRect && optionRect.width > 40 && optionRect.height > 20 &&
+    selectionRect && optionRect.left >= selectionRect.left - 1 &&
+    optionRect.right <= selectionRect.right + 1 &&
+    dialogRect && selectionRect.left >= dialogRect.left - 1 &&
+    selectionRect.right <= dialogRect.right + 1 &&
+    failurePresentationOwned
+  );
+  return Object.freeze({
+    valid,
+    phase: exportReadiness.phase,
+    diagnostics: exportReadinessDiagnostics(),
+    nodeIndexChecked: Boolean(nodeIndex?.checked),
+    nodeIndexText: String(elements.exportNodeIndexFilename?.textContent || "").trim(),
+    optionDisplay: optionStyle?.display || "",
+    selectionDisplay: selectionStyle?.display || "",
+    optionRect: optionRect ? { left: optionRect.left, right: optionRect.right, width: optionRect.width, height: optionRect.height } : null,
+    selectionRect: selectionRect ? { left: selectionRect.left, right: selectionRect.right, width: selectionRect.width, height: selectionRect.height } : null,
+    dialogRect: dialogRect ? { left: dialogRect.left, right: dialogRect.right, width: dialogRect.width, height: dialogRect.height } : null,
+    statusDetail,
+    centralStatusVisible,
+    compilerReferenceStatusVisible,
+    compilerReferenceDetail
+  });
+}
+
+async function commitExportDialogPresentation(sequence) {
+  const dialog = elements.exportDialog;
+
+  dialog.classList.add("export-presentation-pending");
+  try {
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+    refreshUnifiedExportStatus();
+    await settleExportDialogPresentation();
+    if (sequence !== exportDialogOpenSequence) return false;
+    const snapshot = exportDialogPresentationSnapshot();
+    if (!snapshot.valid) {
+      if (typeof dialog.close === "function") dialog.close();
+      else dialog.removeAttribute("open");
+      return false;
+    }
+    dialog.classList.remove("export-presentation-pending");
+    stabilizeDialogFocus(dialog);
+    return true;
+  } finally {
+    if (!dialog.open) {
+      dialog.classList.remove("export-presentation-pending");
+    }
+  }
+}
+
+async function validateCurrentExportSelection({ prepareStyles = false } = {}) {
+  cancelExportPreflight(
+    "Export selection changed; restarting validation."
+  );
+
+  try {
+    const checked = await requestExportPreflight({
+      prepareStyles,
+      requireSemantic: false
+    });
+    assertExportRequestCurrent(checked.request, true);
+    return true;
+  } catch (error) {
+    if (!expectedExportCancellation(error)) {
+    }
+    return false;
+  } finally {
+    updateExportDialog();
+    refreshUnifiedExportStatus();
+  }
+}
+
+async function openExportDialog() {
+  if (elements.exportDialog?.open) return true;
   if (exportDialogOpenPromise) return exportDialogOpenPromise;
   const sequence = ++exportDialogOpenSequence;
 
@@ -39279,41 +39244,36 @@ function openExportDialog() {
   elements.exportIncludeNodeIndex.checked = Boolean(state.exportOptions.includeNodeIndex);
   elements.exportIncludeCompiled.checked = Boolean(state.exportOptions.includeCompiled);
   elements.exportDialog.classList.remove("rml-dialog-loading");
-  updateExportDialog();
-  ensureUniversalCustomSelect(elements.exportPlatform)?.refresh?.();
-  if (typeof elements.exportDialog.showModal === "function") elements.exportDialog.showModal();
-  else elements.exportDialog.setAttribute("open", "");
-  stabilizeDialogFocus(elements.exportDialog);
-  requestAnimationFrame(() => {
-    if (sequence === exportDialogOpenSequence && elements.exportDialog.open) {
-      updateAdaptiveUtilityDialog(elements.exportDialog);
-    }
-  });
 
-  exportDialogOpenPromise = requestExportPreflight({
-    prepareStyles: true,
-    requireSemantic: false
-  }).then(checked => {
+  exportDialogOpenPromise = (async () => {
+
+    await ensureLazyStyleBundle("export");
     if (sequence !== exportDialogOpenSequence) return false;
-    assertExportRequestCurrent(checked.request, true);
+
+    await validateCurrentExportSelection({ prepareStyles: false });
+    if (sequence !== exportDialogOpenSequence) return false;
+
     updateExportDialog();
-    return true;
-  }).catch(error => {
-    if (
-      sequence === exportDialogOpenSequence &&
-      !expectedExportCancellation(error)
-    ) {
-      void showExportPreparationFailure(error);
+    ensureUniversalCustomSelect(elements.exportPlatform)?.refresh?.();
+    const presentationCommitted =
+      await commitExportDialogPresentation(sequence);
+    if (!presentationCommitted || sequence !== exportDialogOpenSequence) {
+      return false;
     }
+    brieflyRevealExportApiCompatibilityWarning();
+    return true;
+  })().catch(error => {
     return false;
   }).finally(() => {
     exportDialogOpenPromise = null;
   });
-  return Promise.resolve(true);
+
+  return exportDialogOpenPromise;
 }
 
 function closeExportDialog() {
   exportDialogOpenSequence += 1;
+  exportSelectionValidationSequence += 1;
   document.body.classList.remove("rml-export-status-owned");
   cancelExportPreflight();
   cancelExportDelivery();
@@ -39341,11 +39301,8 @@ async function downloadSelectedExport() {
     const missing = catalog
       ? missingBrowserCompilerReferences(catalog)
       : [];
-    if (
-      catalog &&
-      missing.length > 0 &&
-      browserCompilerDirectoryFiles.length === 0
-    ) {
+    if (catalog && missing.length > 0) {
+
       browserCompilerUserSelectionPromise =
         requestBrowserCompilerDirectoryFiles();
     }
@@ -39491,16 +39448,20 @@ async function downloadSelectedExport() {
     if (finishExportDelivery(job)) {
       elements.exportDownloadSelected.textContent =
         originalLabel;
+
+      if (nonBlockingCompilationFailure) {
+        setExportReadiness(
+          "error",
+          { diagnostics: [nonBlockingCompilationFailure] },
+          getDiagnostics()
+        );
+        elements.exportDownloadHint.textContent = "";
+        elements.exportDownloadHint.classList.remove("error");
+      }
+
       applyPrimaryExportAvailability([]);
       if (elements.exportDialog?.open) {
         updateExportDialog();
-        if (nonBlockingCompilationFailure) {
-          elements.exportDownloadHint.textContent =
-            nonBlockingCompilationFailure;
-          elements.exportDownloadHint.classList.add(
-            "error"
-          );
-        }
       }
     }
   }
@@ -40243,7 +40204,13 @@ function normalizeBuilderHelpTarget(target) {
 }
 
 function buttonHelpText(target) {
+  const selectedOptionHelp =
+    target instanceof HTMLSelectElement &&
+    target.hasAttribute("data-option-help")
+      ? target.selectedOptions?.[0]?.dataset?.optionHelpText
+      : "";
   return String(
+    selectedOptionHelp ||
     target?.dataset?.help ||
     target?.getAttribute?.("aria-label") ||
     target?.textContent ||
@@ -40333,6 +40300,8 @@ function showDelayedButtonHelp(target) {
     builderHelpTone(target);
   bubble.setAttribute("role", "tooltip");
 
+  bubble.setAttribute("popover", "manual");
+
   const icon = document.createElement("span");
   icon.className = "rml-help-bubble-icon";
   icon.setAttribute("aria-hidden", "true");
@@ -40357,34 +40326,35 @@ function showDelayedButtonHelp(target) {
 
   copy.append(kicker, content);
   bubble.append(icon, copy);
-  const helpHost =
-    target.closest("dialog[open]") ||
-    document.body;
-  helpHost.appendChild(bubble);
+
+  document.body.appendChild(bubble);
+  try {
+    bubble.showPopover();
+  } catch (_) {
+    // Older engines without Popover API still get the ordinary fixed overlay.
+  }
 
   const rect = target.getBoundingClientRect();
   const bubbleRect = bubble.getBoundingClientRect();
-  const hostRect =
-    helpHost === document.body
-      ? {
-          left: 0,
-          top: 0,
-          right: window.innerWidth,
-          bottom: window.innerHeight
-        }
-      : helpHost.getBoundingClientRect();
+  const viewport = {
+    left: 0,
+    top: 0,
+    right: window.innerWidth,
+    bottom: window.innerHeight
+  };
+  const edge = 8;
   const gap = 9;
   const left = Math.min(
-    hostRect.right - bubbleRect.width - 8,
+    viewport.right - bubbleRect.width - edge,
     Math.max(
-      hostRect.left + 8,
+      viewport.left + edge,
       rect.left + rect.width / 2 - bubbleRect.width / 2
     )
   );
   let top = rect.bottom + gap;
-  if (top + bubbleRect.height > hostRect.bottom - 8) {
+  if (top + bubbleRect.height > viewport.bottom - edge) {
     top = Math.max(
-      hostRect.top + 8,
+      viewport.top + edge,
       rect.top - bubbleRect.height - gap
     );
   }
@@ -40412,7 +40382,7 @@ function scheduleDelayedButtonHelp(target, delay = 620) {
 
 function installDelayedButtonHelp() {
   const targetSelector =
-    "button, [data-help], [title]";
+    "button, [data-help], [title], select[data-option-help]";
 
   document
     .querySelectorAll("[title]")
@@ -40691,7 +40661,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.24.0-expression-source-factoring"
+    "../../templates/help_template.html?v=1.24.38-source-comment-cleanup"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -41007,8 +40977,8 @@ function cacheElements() {
     exportResonitePath: document.getElementById(
       "export-resonite-path"
     ),
-    exportCompatibilityHint: document.getElementById(
-      "export-compatibility-hint"
+    exportApiCompatibilityIndicator: document.getElementById(
+      "export-api-compatibility-indicator"
     ),
     exportApiCompatibilityWarning: document.getElementById(
       "export-api-compatibility-warning"
@@ -41038,8 +41008,8 @@ function cacheElements() {
     exportCompilerReferenceList: document.getElementById(
       "export-compiler-reference-list"
     ),
-    exportCompilerBuildStatus: document.getElementById(
-      "export-compiler-build-status"
+    exportClearCompilerReferencesRow: document.getElementById(
+      "export-clear-compiler-references-row"
     ),
     exportClearCompilerReferences: document.getElementById(
       "export-clear-compiler-references"
@@ -45421,10 +45391,6 @@ async function initialize() {
       event.preventDefault();
       event.stopImmediatePropagation();
 
-      
-      
-      
-      
       breakHorizontalPlaceholderContractIfPointerMoved(
         event.clientX,
         event.clientY
@@ -45433,8 +45399,6 @@ async function initialize() {
         event.clientX;
       dragPointerY =
         event.clientY;
-
-      
 
       requestDragPlaceholderVisibility();
 
@@ -46356,19 +46320,19 @@ async function initialize() {
   });
   elements.exportIncludeCs.addEventListener(
     "change",
-    syncExportOptions
+    handleExportOptionChange
   );
   elements.exportIncludeCsproj.addEventListener(
     "change",
-    syncExportOptions
+    handleExportOptionChange
   );
   elements.exportIncludeNodeIndex.addEventListener(
     "change",
-    syncExportOptions
+    handleExportOptionChange
   );
   elements.exportIncludeCompiled.addEventListener(
     "change",
-    syncExportOptions
+    handleExportOptionChange
   );
   elements.exportClearCompilerReferences.addEventListener(
     "click",
@@ -47433,7 +47397,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -47451,7 +47415,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -48286,7 +48250,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.38-source-comment-cleanup#icon-copy"></use></svg>
   `;
 }
 

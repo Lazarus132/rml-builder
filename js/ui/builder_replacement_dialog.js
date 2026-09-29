@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.24.0-expression-source-factoring";
+    "1.24.31-compile-only-on-zip";
 
   if (
     window.RMLBuilderReplacementDialog
@@ -32,7 +32,7 @@
 
     function resetBuilderReplacementUi() {
       activeBuilderReplacementPrompt += 1;
-    
+
       if (elements.builderWorkReplacement) {
         elements.builderWorkReplacement.hidden =
           true;
@@ -76,10 +76,10 @@
       if (elements.builderWorkReplacementSkip) {
         elements.builderWorkReplacementSkip.onclick =
           null;
-    
+
         elements.builderWorkReplacementSkip.textContent =
           window.RMLI18n.t("{{i18n:js.presentation.6fc09607aee5}}");
-    
+
         elements.builderWorkReplacementSkip.hidden =
           false;
       }
@@ -112,7 +112,7 @@
         );
       }
     }
-    
+
     function assertReplacementDialogActuallyVisible(
       { operatorId = "", index = -1, total = 0, candidateCount = 0 } = {}
     ) {
@@ -134,13 +134,13 @@
         rect.width > 0 &&
         rect.height > 0
       );
-    
+
       if (!dialog || !confirm || !cancel || !skip) {
         throw new Error(
           `[HARD REPLACEMENT UI ERROR] Replacement ${Number(index) + 1} of ${Number(total)} for '${String(operatorId || "<unknown>")}' cannot be shown because required replacement-panel controls are missing. dialog=${Boolean(dialog)}, confirm=${Boolean(confirm)}, cancel=${Boolean(cancel)}, skip=${Boolean(skip)}, candidates=${Number(candidateCount) || 0}.`
         );
       }
-    
+
       if (!visible) {
         throw new Error(
           `[HARD REPLACEMENT UI ERROR] Replacement ${Number(index) + 1} of ${Number(total)} for '${String(operatorId || "<unknown>")}' was requested but the replacement panel is not visibly rendered. hidden=${String(dialog.hidden)}, display=${String(style?.display)}, visibility=${String(style?.visibility)}, opacity=${String(style?.opacity)}, rect=${Number(rect?.width || 0)}x${Number(rect?.height || 0)}, candidates=${Number(candidateCount) || 0}.`
@@ -148,7 +148,7 @@
       }
       return true;
     }
-    
+
     async function requestBuilderReplacementChoice(
       workSession,
       {
@@ -177,7 +177,7 @@
           window.RMLI18n.t("ui.literal.77d04046b037")
         );
       }
-    
+
       const values =
         Array.isArray(candidates)
           ? candidates.filter(candidate =>
@@ -188,8 +188,7 @@
               )
             )
           : [];
-    
-    
+
       const prompt =
         ++activeBuilderReplacementPrompt;
       const search =
@@ -236,7 +235,7 @@
             String(value || "").trim()
           )
           .filter(Boolean);
-    
+
       updateBuilderWork(
         workSession,
         {
@@ -291,7 +290,7 @@
                 )
         }
       );
-    
+
       elements.builderWorkOverlay.dataset.mode =
         "replacement";
       elements.builderWorkOverlay.setAttribute(
@@ -321,7 +320,7 @@
           ? String(initialOperatorId)
           : "";
       let visibleCandidates = [];
-    
+
       const renderReplacementQueue = () => {
         if (!queueHost) {
           return;
@@ -341,7 +340,7 @@
             "builder-work-replacement-queue-item";
           row.dataset.status = status;
           row.setAttribute("role", "listitem");
-    
+
           const state =
             document.createElement("span");
           state.className =
@@ -357,7 +356,7 @@
                     ? "!"
                     : "·";
           if (status === "selected") {
-            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-check"></use></svg>`;
+            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-check"></use></svg>`;
           }
           const name =
             document.createElement("span");
@@ -388,7 +387,7 @@
             block: "nearest"
           });
       };
-    
+
       const updateReplacementSummary = () => {
         if (!summary) {
           return;
@@ -493,7 +492,7 @@
             { base }
           );
       };
-    
+
       const selectCandidate = (
         operatorId,
         {
@@ -508,7 +507,7 @@
           );
         selectedOperatorId =
           selected?.operatorId || "";
-    
+
         for (const item of
           list.querySelectorAll(
             ".builder-work-replacement-item"
@@ -523,7 +522,7 @@
           item.tabIndex = active
             ? 0
             : -1;
-    
+
           if (active && focus) {
             item.focus({
               preventScroll: true
@@ -535,7 +534,7 @@
             });
           }
         }
-    
+
         setAlwaysClickableButtonAvailability(
           confirm,
           Boolean(selectedOperatorId),
@@ -543,7 +542,7 @@
         );
         updateReplacementSummary();
       };
-    
+
       const renderCandidates = () => {
         const query = String(
           search.value || ""
@@ -563,7 +562,7 @@
         );
         const fragment =
           document.createDocumentFragment();
-    
+
         for (const candidate of
           visibleCandidates) {
           const item =
@@ -581,7 +580,7 @@
             "aria-selected",
             "false"
           );
-    
+
           const symbol =
             document.createElement("span");
           symbol.className =
@@ -612,7 +611,7 @@
               paletteIcon.color ||
               "#8fdcff"
             );
-    
+
           const copy =
             document.createElement("span");
           copy.className =
@@ -675,7 +674,7 @@
             `${candidate.title || candidate.operatorId}\n${candidate.group || window.RMLI18n.t("ui.literal.924e20a624e5")}\n${candidate.operatorId}\n${match.textContent}`;
           fragment.appendChild(item);
         }
-    
+
         if (visibleCandidates.length === 0) {
           const empty =
             document.createElement("div");
@@ -685,7 +684,7 @@
             window.RMLI18n.t("{{i18n:js.presentation.ef10da90616f}}");
           fragment.appendChild(empty);
         }
-    
+
         list.setAttribute(
           "aria-busy",
           "true"
@@ -705,7 +704,7 @@
         } else {
           selectedOperatorId = "";
         }
-    
+
         selectCandidate(
           selectedOperatorId
         );
@@ -719,7 +718,7 @@
           updateReplacementSummary();
         }
       };
-    
+
       let choiceSettled = false;
       const choice = new Promise(
         (resolve, reject) => {
@@ -785,7 +784,7 @@
               rejectImport(window.RMLI18n.t("ui.literal.b42472fcdcdb"));
             }
           };
-    
+
           search.oninput =
             renderCandidates;
           search.onsearch =
@@ -886,7 +885,7 @@
               );
             cancelPointerArmed = false;
             cancelKeyboardArmed = false;
-    
+
             if (!explicitlyActivated) {
               updateBuilderWork(
                 workSession,
@@ -897,7 +896,7 @@
               );
               return;
             }
-    
+
             rejectImport(
               "explicit Cancel import button"
             );
@@ -909,17 +908,17 @@
           );
         }
       );
-    
+
       renderReplacementQueue();
       renderCandidates();
       await paintBuilderUi();
-    
+
       await new Promise(resolve =>
         window.requestAnimationFrame(() =>
           window.requestAnimationFrame(resolve)
         )
       );
-    
+
       if (!choiceSettled) {
         assertReplacementDialogActuallyVisible({
           operatorId,
@@ -927,15 +926,14 @@
           total,
           candidateCount: values.length
         });
-    
+
         search.focus({
           preventScroll: true
         });
       }
       return choice;
     }
-    
-    
+
     return Object.freeze({
       reset: resetBuilderReplacementUi,
       requestChoice:

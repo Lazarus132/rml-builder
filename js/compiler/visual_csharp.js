@@ -573,14 +573,9 @@
       const raw = normalizeCatalogType(hint);
       if (!raw) return "";
 
-      
       const primitive = primitiveAliases.get(raw);
       if (primitive && typeDefinitions?.[primitive]) return primitive;
 
-      
-      
-      
-      
       if (typeDefinitions?.[raw]) return raw;
 
       const graphCandidates = [
@@ -600,7 +595,6 @@
         }
       }
 
-      
       const registeredMatches =
         Object.entries(typeDefinitions || {})
           .filter(([, definition]) => {
@@ -623,9 +617,6 @@
         return registeredMatches[0][0];
       }
 
-      
-      
-      
       const provenByScanner =
         catalogHasExactType(raw);
       const provenByCustomCSharp =

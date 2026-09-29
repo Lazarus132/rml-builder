@@ -459,7 +459,7 @@
     heading.textContent = String(options.tabTitle || window.RMLI18n.t("ui.text.ba090b5e07cf"));
     const headerActions = popupDocument.createElement("div");
     headerActions.className = "editor-header-actions";
-    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.24.0-expression-source-factoring", window.location.href).href;
+    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.24.31-compile-only-on-zip", window.location.href).href;
     const createHeaderButton = (label, iconName) => {
       const button = popupDocument.createElement("button");
       button.type = "button";
@@ -862,8 +862,6 @@
     textarea.setAttribute("autocorrect", "off");
     textarea.setAttribute("aria-label", String(options.ariaLabel || window.RMLI18n.t("ui.auto.ec4bfc434347")));
 
-    
-    
     textarea.draggable = false;
     textarea.addEventListener(
       "dragstart",

@@ -1459,9 +1459,7 @@ function normalizeNodeParametersObject(
         candidate === null ||
         String(candidate).trim() === ""
       ) {
-        // A missing selection is an unconfigured/new node and may receive the
-        // declared default. An explicit persisted selection is semantic graph
-        // state and must never be silently rewritten to another type.
+
         parameters.valueType =
           definition.defaultType === "auto" &&
           definitionAllowsAutoType(definition)
@@ -8687,7 +8685,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.24.0-expression-source-factoring",
+        "1.24.31-compile-only-on-zip",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8720,7 +8718,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.24.0-expression-source-factoring" &&
+        "1.24.31-compile-only-on-zip" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -11194,10 +11192,7 @@ function pruneConnections(
       return mutationResultWithoutAutoVectors();
     }
     if (hasMissingOperatorDefinitions()) {
-      
-      
-      
-      
+
       if (preserveStoredConnections) {
         normalizeConnectionRouting(
           graph.connections,
@@ -11734,13 +11729,6 @@ function graphCsStaticFieldDeclaration(
 function graphCsNumberLiteralType(node, resolvedType) {
     const type = canonicalGraphType(resolvedType || "");
 
-    // A numeric constant can feed generic/any-value/object ports (for example
-    // reflection.writeMember.value). Those ports describe transport semantics,
-    // not the scalar literal type. Treating "anyValue" as the literal type
-    // makes graphCsNumberLiteral() fall through to its non-numeric default 0,
-    // silently changing explicit values such as TimeIntDriver.Repeat = 96.
-    // Only a resolved type that is itself a numeric scalar may override the
-    // constant's persisted valueType.
     if (type && graphNumericScalarDescriptor(type)) {
       return type;
     }
@@ -15102,10 +15090,7 @@ function buildTypedNodeGraphCSharpContribution(
       new Map();
     const expressionStack =
       new Set();
-    // Source factoring pass: long output expressions are emitted once as
-    // typed helper methods and referenced by call. This is deliberately
-    // NOT value memoization/CSE: every use still executes the expression,
-    // preserving evaluation count, ordering, exceptions and live reads.
+
     const factoredExpressionMethods =
       new Map();
     const FACTORED_EXPRESSION_MIN_CHARS = 192;
@@ -15120,8 +15105,7 @@ function buildTypedNodeGraphCSharpContribution(
       ) {
         return false;
       }
-      // These names are method-local implementation details of action/API
-      // emitters. A factored class-level helper must never capture them.
+
       return !/\b(?:apiTarget|apiArguments|apiMethod|prepared|exception|scope)\b/.test(source);
     };
 
@@ -18568,7 +18552,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.24.0-expression-source-factoring",
+          "1.24.31-compile-only-on-zip",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

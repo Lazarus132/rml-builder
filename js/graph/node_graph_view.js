@@ -784,10 +784,6 @@ function enforceGraphSvgSafety() {
     runtimeGraphPresentationPending = false;
     updatePackButton();
 
-    
-    
-    
-    
     const completionDetail =
       graphRenderCompleteDetail();
     document.dispatchEvent(
@@ -2629,13 +2625,11 @@ const nodeResizeLimitRefreshIds = new Set();
 
 let lastNodeResizePress = null;
 
-
 const NODE_RESIZE_DOUBLE_CLICK_DISTANCE = 8;
 
 let lastWirePointPress = null;
 
 let lastWireSegmentPress = null;
-
 
 const WIRE_DOUBLE_CLICK_DISTANCE = 8;
 
@@ -4685,7 +4679,7 @@ function setRmlNodeSymbolContent(element, symbol) {
   svg.setAttribute("aria-hidden", "true");
   svg.classList.add("rml-node-symbol-svg");
   const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", `assets/rml-icons.svg?v=1.24.0-expression-source-factoring#${iconId}`);
+  use.setAttribute("href", `assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#${iconId}`);
   svg.appendChild(use);
   element.appendChild(svg);
 }
@@ -9391,9 +9385,6 @@ function scheduleGeneratedOutputRefresh() {
         ?.();
     };
 
-    // Coalesce graph mutations within the current event turn, but never demote
-    // generated-output refresh to animation frames or scheduler background work.
-    // Codegen is semantic work and is independent from graph presentation.
     if (typeof queueMicrotask === "function") {
       queueMicrotask(run);
     } else {
@@ -11296,9 +11287,6 @@ function previewDefaultValue(type) {
       return previewKnown(type, []);
     }
 
-    
-    
-    
     if ([
       "object", "json", "type", "memberInfo", "methodInfo", "fieldInfo",
       "propertyInfo", "eventInfo", "exception", "component", "slot", "user",
@@ -11314,8 +11302,6 @@ function previewDefaultValue(type) {
       return previewKnown(type, "0");
     }
 
-    
-    
     if (typeof type === "string" && /(Array|List|Collection)$/i.test(type)) {
       return previewKnown(type, []);
     }
@@ -11532,11 +11518,6 @@ function previewContext() {
         graph.configSnapshot?.nodes || []
       );
 
-    
-    
-    
-    
-    
     const incomingByPort = new Map();
     for (const connection of graph.connections || []) {
       if (!connection?.toNode || !connection?.toPort) continue;
@@ -11663,8 +11644,7 @@ function previewInputValue(
       ) || null;
 
     if (!connection) {
-      
-      
+
       if (Object.prototype.hasOwnProperty.call(inputSpec || {}, "default")) {
         const raw = inputSpec.default;
         if (concreteType === "bool") {
@@ -12209,8 +12189,7 @@ const previewJsonParsePersistentCache = new WeakMap();
             break;
           }
           let formatted = String(formatValue.value ?? "");
-          
-          
+
           formatted = formatted.replace(/\{(\d+)(?:,[^}:]+)?(?::[^}]+)?\}/g, (match, indexText) => {
             const index = Number(indexText);
             if (!Number.isInteger(index) || index < 0 || index >= values.length) return match;
@@ -13819,8 +13798,7 @@ function runtimeMonitorPresentation(
   }
 
 function displayPreviewForNode(node, getPreviewContext = previewContext) {
-    
-    
+
     const context = getPreviewContext();
     const definition =
       nodeDefinition(node);
@@ -14093,7 +14071,7 @@ function graphPresentationVisible() {
   }
 
 function graphOutlineToggleMarkup() {
-    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-outline"></use></svg>`;
+    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-outline"></use></svg>`;
   }
 
 function markGraphPackPresentationPending() {
@@ -15302,7 +15280,7 @@ function restoreGraphPaletteScroll(
 
 function setGraphPanelToggleIcon(button, iconName) {
   if (!button) return;
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-${iconName}"></use></svg>`;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-${iconName}"></use></svg>`;
 }
 
 let graphPanelScrollPreservationSequence = 0;
@@ -16402,7 +16380,7 @@ function createPaletteItem(
 
     const add =
       document.createElement("small");
-    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
 
     button.append(
       symbol,
@@ -16704,7 +16682,7 @@ function refreshGraphPaletteConfigurationAvailability() {
     );
     const marker = button.querySelector("small");
     if (marker) {
-      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
     }
   }
 
@@ -18070,9 +18048,7 @@ function scheduleGraphPaletteRender() {
         ) {
           return;
         }
-        
-        
-        
+
         renderGraphPalette(signature);
       });
   }
@@ -21326,20 +21302,20 @@ function createToolbarButton(
 const GRAPH_TOOLBAR_ICONS =
     Object.freeze({
       center: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-center"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-center"></use></svg>`,
       clear: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-delete"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-delete"></use></svg>`,
       zoomOut: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-zoom-out"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-zoom-out"></use></svg>`,
       zoomIn: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-zoom-in"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-zoom-in"></use></svg>`,
       editMode: `
-        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-expand"></use></svg>
-        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-collapse"></use></svg>`,
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-expand"></use></svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-collapse"></use></svg>`,
       search: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-search"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-search"></use></svg>`,
       next: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-next"></use></svg>`
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-next"></use></svg>`
     });
 
 function createToolbarIconButton(
@@ -21822,7 +21798,7 @@ function renderGraphCanvas() {
       <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="{{i18n:js.presentation.f0d095db4021}}">
         <div class="rml-graph-search-overlay-head">
           <strong>{{i18n:js.presentation.f0d095db4021}}</strong>
-          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-close"></use></svg></button>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-close"></use></svg></button>
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="{{i18n:js.presentation.a00d3271edfc}}" aria-label="{{i18n:js.presentation.f0d095db4021}}" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
@@ -26348,7 +26324,6 @@ function refreshNodeAfterAutomaticLabelResize(
     const node = findGraphNode(id);
     if (!article || !node) return;
 
-    
     const changed =
       refreshRenderedNodeResizeLimits(
         new Set([id]),
@@ -26356,9 +26331,6 @@ function refreshNodeAfterAutomaticLabelResize(
         { presentationOnly: true }
       );
 
-    
-    
-    
     graphNodeGeometryCache.delete(id);
     invalidateGraphNodeViewportSpatialIndex(id);
     invalidateGraphGpuNodeRecord(id);
@@ -28021,7 +27993,7 @@ function createGraphNodeElementRmlOriginal(
       flip.className =
         "rml-graph-node-flip";
       flip.type = "button";
-      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-node-swap"></use></svg>`;
+      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-node-swap"></use></svg>`;
       flip.title = mirrored
         ? window.RMLI18n.t("ui.literal.9114b1bfc765")
         : window.RMLI18n.t("ui.literal.c8b7ca53198e");
@@ -33296,8 +33268,7 @@ function clearResolvedImportRecoveryMarkers(
 function reconcileInsertedCompositeCatalogState(
   value = graph
 ) {
-  
-  
+
   restorePreservedGraphCatalogOperators(value);
   const cleared =
     clearResolvedImportRecoveryMarkers(value);
@@ -36671,7 +36642,7 @@ function renderGraphInspector(options = {}) {
       empty.className =
         "empty-inspector";
       empty.innerHTML =
-        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-lightning"></use></svg></span>
+        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-lightning"></use></svg></span>
          <h2>{{i18n:ui.text.e02d912b50bb}}</h2>
          <p>{{i18n:ui.text.d19bd2965c4f}}</p>`;
       dom.inspectorContent.appendChild(
@@ -41004,17 +40975,13 @@ function refreshVisibleGraphInspectorLanguage() {
   }
 
 function refreshVisibleGraphLanguage() {
-    
-    
-    
+
     graphPaletteRenderedSignature = null;
     graphPaletteRenderSequence += 1;
     graphNodeDefinitionCache = new WeakMap();
 
     if (!graph?.active || !runtimeGraphViewActive) return;
 
-    
-    
     if (
       dom.root?.dataset.rmlGraphPhase ===
         "svg-blocked"
@@ -41552,10 +41519,6 @@ function appendParameterControl(
           node
         );
 
-        
-        
-        
-        
         control.draggable = false;
         control.addEventListener(
           "dragstart",
@@ -41923,7 +41886,7 @@ const INSPECTOR_ACTION_PRESENTATION = Object.freeze({
 
   function inspectorButtonIconMarkup(actionId) {
     const iconName = INSPECTOR_ACTION_PRESENTATION[actionId]?.[0] || "more";
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-${iconName}"></use></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-${iconName}"></use></svg>`;
   }
 
   function inspectorButtonTone(actionId) {
@@ -41989,7 +41952,7 @@ function visualFunctionParameterButton(action, label, handler) {
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("aria-hidden", "true");
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    use.setAttribute("href", `assets/rml-icons.svg?v=1.24.0-expression-source-factoring#icon-visual-function-parameter-${action}`);
+    use.setAttribute("href", `assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-visual-function-parameter-${action}`);
     svg.appendChild(use);
     button.appendChild(svg);
     button.addEventListener("click", event => {
@@ -50372,7 +50335,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.24.0-expression-source-factoring",
+      "1.24.31-compile-only-on-zip",
     writable: false,
     enumerable: true,
     configurable: true
