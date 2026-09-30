@@ -970,6 +970,7 @@
   "ui.auto.74c79eb2699c": "Preparing available API contracts…",
   "ui.auto.4c1216c7714b": "Fingerprint matches · reusing catalog…",
   "ui.auto.864578600d79": "Catalog fingerprint changed · downloading update…",
+  "ui.auto.1b67e3c912af": "Preparing API catalog · downloading initial copy…",
   "ui.auto.c6e763c4d979": "Catalog downloaded · updating cache…",
   "ui.auto.bc61ef326841": "Preparing required API node contracts…",
   "ui.auto.ae3c9ac55980": "Using cached API contracts…",

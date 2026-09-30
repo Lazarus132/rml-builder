@@ -31020,18 +31020,28 @@ async function ensureProjectRuntimePrerequisites(
             );
           },
           onCatalogRefresh(detail) {
+            const fingerprintMismatch =
+              detail?.fingerprintMismatch === true;
             updatePrerequisiteWork(
               workSession,
               {
                 title:
-                  window.RMLI18n.t("ui.auto.864578600d79"),
+                  window.RMLI18n.t(
+                    fingerprintMismatch
+                      ? "ui.auto.864578600d79"
+                      : "ui.auto.1b67e3c912af"
+                  ),
                 message:
                   String(
                     detail?.message ||
                     window.RMLI18n.t("ui.literal.b0daea485658")
                   ),
                 detail:
-                  window.RMLI18n.t("ui.literal.2bdbe12ad442"),
+                  window.RMLI18n.t(
+                    fingerprintMismatch
+                      ? "ui.literal.2bdbe12ad442"
+                      : "ui.auto.ef5bac1920fc"
+                  ),
                 progress:
                   importPrerequisiteProgressValue(
                     catalogProgressBranch,
