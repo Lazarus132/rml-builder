@@ -136,7 +136,7 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=803-visual-function-semantics",
+    "mod_nodes.js?v=819-hover-owner-binding",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(

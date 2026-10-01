@@ -2336,16 +2336,8 @@
           )
       };
     },
-    codegenCollect(api) {
-      ensureNumericVectorRuntime(api);
-    },
     codegenExpression(api) {
-      const information =
-        numericVectorDescriptor(
-          api.node
-        );
-
-      return `ReadNumericComponent<${api.csType(information.scalarType)}>(${api.input("value").code}, "${api.portId}")`;
+      return `(${api.input("value").code}).${api.portId}`;
     },
     previewEvaluate({
       node,
@@ -2908,12 +2900,23 @@
       port("body", window.RMLI18n.t("ui.auto.ec672784079b"), "impulse"),
       port("action", window.RMLI18n.t("ui.auto.c3c93182883a"), "action")
     ],
-    codegenExpression(api) {
+    codegenCollect(api) {
+      if (!generatedOutputIsUsed(api, "action")) {
+        return;
+      }
+      const field =
+        `_lambdaActionDelegate${nodeToken(api)}`;
       const body =
         api.inlineMethod(api.node.id, "body");
-      return body
-        ? `new System.Action(${body})`
-        : "new System.Action(delegate { })";
+      api.addField(
+        `${api.node.id}.lambdaActionDelegate`,
+        `private static readonly System.Action ${field} = ${body
+          ? `new System.Action(${body})`
+          : "new System.Action(delegate { })"};`
+      );
+    },
+    codegenExpression(api) {
+      return `_lambdaActionDelegate${nodeToken(api)}`;
     }
   });
 
@@ -3031,6 +3034,106 @@
           : `${field}++;`
         : "";
       return `${operation}${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  function configuredValueType(node) {
+    return String(node?.parameters?.valueType || "").trim();
+  }
+
+  registerNode("flow.typedValueRelay", {
+    title: "Typed Value Relay",
+    group: window.RMLI18n.t("ui.literal.86eff8eb789b"),
+    symbol: "⇢T",
+    description:
+      "Relays a value through an explicitly selected graph type so composite boundaries retain their exact value type.",
+    parameters: [
+      pText(
+        "valueType",
+        "Value type",
+        "object",
+        "Exact graph type, for example bool, colorX, slot or enum:MyEnum.",
+        { affectsPorts: true, affectsNode: true, commitImmediately: true }
+      )
+    ],
+    inputs: [port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "object")],
+    outputs: [port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "object")],
+    resolveDefinition(node) {
+      const valueType = configuredValueType(node) || "object";
+      return {
+        inputs: [
+          port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), valueType)
+        ],
+        outputs: [
+          port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), valueType)
+        ]
+      };
+    },
+    codegenExpression(api) {
+      return api.input("value").code;
+    }
+  });
+
+  registerNode("flow.captureValue", {
+    title: "Capture Value",
+    group: window.RMLI18n.t("ui.literal.86eff8eb789b"),
+    symbol: "=",
+    description:
+      "Evaluates a value once when called and exposes that captured value to the following flow.",
+    parameters: [
+      pText(
+        "valueType",
+        "Value type",
+        "",
+        "Optional exact graph type. Leave blank for inferred generic behavior.",
+        { affectsPorts: true, affectsNode: true, commitImmediately: true }
+      )
+    ],
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      genericPort("input", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "T", "value")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+      genericPort("value", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "T", "value")
+    ],
+    resolveDefinition(node) {
+      const valueType = configuredValueType(node);
+      if (!valueType) return {};
+      return {
+        inputs: [
+          port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+          port("input", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), valueType)
+        ],
+        outputs: [
+          port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+          port("value", window.RMLI18n.t("ui.auto.ca8a16007fd8"), valueType)
+        ]
+      };
+    },
+    codegenCollect(api) {
+      const inputSpec = api.definition.inputs.find(
+        specification => specification.id === "input"
+      );
+      const graphType =
+        api.resolvedType(api.node, inputSpec) || "object";
+      addStatefulField(
+        api,
+        "capturedValue",
+        api.csType(graphType),
+        api.csDefault(graphType)
+      );
+    },
+    codegenExpression(api) {
+      return generatedActionOutputExpression(
+        api,
+        `_capturedValue${nodeToken(api)}`
+      );
+    },
+    codegenAction(api) {
+      const field = `_capturedValue${nodeToken(api)}`;
+      const next = api.emit("done");
+      return `${field} = ${api.input("input").code};${next ? `\n        ${next}();` : ""}`;
     }
   });
 
@@ -4270,6 +4373,8 @@ failureSource]);
         const directTypes = new Map([
           ["FrooxEngine.UIX.RectTransform", "FrooxEngine.UIX.RectTransform"],
           ["FrooxEngine.UIX.Image", "FrooxEngine.UIX.Image"],
+          ["FrooxEngine.UIX.OutlinedArc", "FrooxEngine.UIX.OutlinedArc"],
+          ["FrooxEngine.ContextMenuItem", "FrooxEngine.ContextMenuItem"],
           ["FrooxEngine.UI_UnlitMaterial", "FrooxEngine.UI_UnlitMaterial"],
           ["FrooxEngine.TimeIntDriver", "FrooxEngine.TimeIntDriver"],
           ["FrooxEngine.ValueMultiDriver`1[[Elements.Core.float2, Elements.Core]], FrooxEngine", "FrooxEngine.ValueMultiDriver<Elements.Core.float2>"],
@@ -4281,6 +4386,1405 @@ failureSource]);
         }
       }
       return `FindType(${nameCode}) ?? throw new System.TypeLoadException(${nameCode})`;
+    }
+  });
+
+  registerNode("resonite.getLocalComponentByType", {
+    title: "Get Local Component by Type",
+    group: "Resonite API",
+    symbol: "COMP",
+    description:
+      "Calls Slot.GetComponent(Type, exactTypeOnly) directly without recursively searching child slots.",
+    inputs: [
+      port("target", "Slot", "slot"),
+      port("type", window.RMLI18n.t("ui.auto.c9b8f9dc7b1e"), "type"),
+      port("exactTypeOnly", "Exact type only", "bool")
+    ],
+    outputs: [
+      port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "component")
+    ],
+    codegenExpression(api) {
+      return `${api.input("target").code}.GetComponent(${api.input("type").code}, ${api.input("exactTypeOnly").code})`;
+    }
+  });
+
+  registerNode("resonite.contextMenuUpdateEvent", {
+    title: "Context Menu Update",
+    group: "Resonite API",
+    symbol: "MENU↻",
+    description:
+      "Patches ContextMenu.OnCommonUpdate with a strongly typed, invocation-local instance and one queued graph entry.",
+    outputs: [
+      port("called", "Updated", "impulse"),
+      port(
+        "context",
+        "ContextMenu",
+        "api.context-menu.56e93bd978d9b600"
+      )
+    ],
+    codegenCollect(api) {
+      ensureHarmonyRuntime(api);
+      api.requireRuntimeHelper(
+        window.RMLI18n.t("ui.literal.0685ff7ba1f5")
+      );
+      const token = nodeToken(api);
+      const capture = api.callbackCapture(
+        "context",
+        "FrooxEngine.ContextMenu",
+        "null!"
+      );
+      const callback = `ContextMenuUpdateCallback${token}`;
+      const emit = api.emitMethod(
+        api.node.id,
+        "called"
+      );
+      const emitStatement = emit
+        ? `${emit}();`
+        : "";
+
+      api.addMember(
+        `${api.node.id}.callback`,
+        `private static void ${callback}(FrooxEngine.ContextMenu __instance)
+{
+    try
+    {
+        using GraphExecutionScope scope = OpenGraphEntry();
+        if (!scope.Accepted) return;
+        ${capture.write("__instance")}
+        ${emitStatement}
+    }
+    catch (Exception exception)
+    {
+        ReportGraphRuntimeFailure(
+            "Harmony postfix FrooxEngine.ContextMenu.OnCommonUpdate",
+            exception);
+    }
+}`
+      );
+      api.addEngineInit(
+        `RegisterGeneratedHarmonyPatch("FrooxEngine.ContextMenu", "OnCommonUpdate", "", "postfix", nameof(${callback}), 400);`
+      );
+    },
+    codegenExpression(api) {
+      return api.callbackCapture(
+        "context",
+        "FrooxEngine.ContextMenu",
+        "null!"
+      ).read;
+    }
+  });
+
+  registerNode("resonite.findChildSlot", {
+    title: "Find Child Slot",
+    group: "Resonite API",
+    symbol: "CHILD",
+    description:
+      "Calls Slot.FindChild directly and captures the result once for the following flow.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Slot", "slot"),
+      port("arg0", "Name", "string"),
+      port("arg1", "Match substring", "bool"),
+      port("arg2", "Ignore case", "bool"),
+      port("arg3", "Maximum depth", "int")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+      port("result", "Slot", "slot")
+    ],
+    codegenCollect(api) {
+      addStatefulField(
+        api,
+        "foundChildSlot",
+        "FrooxEngine.Slot",
+        "null!"
+      );
+    },
+    codegenExpression(api) {
+      return generatedActionOutputExpression(
+        api,
+        `_foundChildSlot${nodeToken(api)}`
+      );
+    },
+    codegenAction(api) {
+      const field = `_foundChildSlot${nodeToken(api)}`;
+      const next = api.emit("done");
+      return `${field} = ${api.input("target").code}.FindChild(${api.input("arg0").code}, ${api.input("arg1").code}, ${api.input("arg2").code}, ${api.input("arg3").code});${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.worldIsDisposed", {
+    title: "World Is Disposed",
+    group: "Resonite API",
+    symbol: "WORLD?",
+    description: "Reads World.IsDisposed directly without reflection.",
+    inputs: [port("target", "World", "world")],
+    outputs: [port("value", "Is disposed", "bool")],
+    codegenExpression(api) {
+      return `${api.input("target").code}.IsDisposed`;
+    }
+  });
+
+  registerNode("resonite.runWorldSynchronously", {
+    title: "Run World Synchronously",
+    group: "Resonite API",
+    symbol: "WORLD!",
+    description:
+      "Calls World.RunSynchronously(Action, bool) directly without MethodInfo.Invoke.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "World", "world"),
+      port("arg0", "Action", "action"),
+      port("arg1", "Immediately if possible", "bool")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const next = api.emit("done");
+      return `${api.input("target").code}.RunSynchronously((System.Action)(${api.input("arg0").code}), ${api.input("arg1").code});${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.addSlot", {
+    title: "Add Slot",
+    group: "Resonite API",
+    symbol: "SLOT+",
+    description:
+      "Calls Slot.AddSlot directly and captures the created Slot without MethodInfo.Invoke.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Parent", "slot"),
+      port("arg0", "Name", "string"),
+      port("arg1", "Persistent", "bool")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+      port("result", "Slot", "slot")
+    ],
+    codegenCollect(api) {
+      addStatefulField(api, "addedSlot", "FrooxEngine.Slot", "null!");
+    },
+    codegenExpression(api) {
+      return generatedActionOutputExpression(
+        api,
+        `_addedSlot${nodeToken(api)}`
+      );
+    },
+    codegenAction(api) {
+      const field = `_addedSlot${nodeToken(api)}`;
+      const next = api.emit("done");
+      return `${field} = ${api.input("target").code}.AddSlot(${api.input("arg0").code}, ${api.input("arg1").code});${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.setSlotOrderOffset", {
+    title: "Set Slot Order Offset",
+    group: "Resonite API",
+    symbol: "ORDER=",
+    description: "Writes Slot.OrderOffset directly without reflection.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Slot", "slot"),
+      port("value", "Order offset", "long")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const next = api.emit("done");
+      return `${api.input("target").code}.OrderOffset = ${api.input("value").code};${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.attachUIUnlitMaterial", {
+    title: "Attach UI Unlit Material",
+    group: "Resonite API",
+    symbol: "MAT+",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Slot", "slot")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+      port("result", "UI Unlit Material", "component")
+    ],
+    codegenCollect(api) {
+      addStatefulField(
+        api,
+        "attachedUIUnlitMaterial",
+        "FrooxEngine.UI_UnlitMaterial",
+        "null!"
+      );
+    },
+    codegenExpression(api) {
+      return generatedActionOutputExpression(
+        api,
+        `_attachedUIUnlitMaterial${nodeToken(api)}`
+      );
+    },
+    codegenAction(api) {
+      const field = `_attachedUIUnlitMaterial${nodeToken(api)}`;
+      const next = api.emit("done");
+      return `${field} = ${api.input("target").code}.AttachComponent<FrooxEngine.UI_UnlitMaterial>();${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.configureUIUnlitMaterial", {
+    title: "Configure UI Unlit Material",
+    group: "Resonite API",
+    symbol: "MAT=",
+    description:
+      "Configures the circuit material through typed Sync<T>.Value writes.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "UI Unlit Material", "component"),
+      port("tint", "Tint", "colorX"),
+      port("overlay", "Overlay", "bool"),
+      port("renderQueue", "Render queue", "int")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    parameters: [
+      pSelect(
+        "blendMode",
+        "Blend mode",
+        [
+          ["Transparent", "Transparent"],
+          ["Additive", "Additive"]
+        ],
+        "Transparent",
+        "",
+        { affectsPorts: false, affectsNode: true, commitImmediately: true }
+      )
+    ],
+    codegenAction(api) {
+      const target = `((FrooxEngine.UI_UnlitMaterial)(${api.input("target").code}))`;
+      const requested = String(api.node.parameters?.blendMode || "Transparent");
+      const blendMode = requested === "Additive" ? "Additive" : "Transparent";
+      const next = api.emit("done");
+      return `${target}.Tint.Value = ${api.input("tint").code};\n        ${target}.BlendMode.Value = FrooxEngine.BlendMode.${blendMode};\n        ${target}.Overlay.Value = ${api.input("overlay").code};\n        ${target}.ZWrite.Value = FrooxEngine.ZWrite.Off;\n        ${target}.ZTest.Value = FrooxEngine.ZTest.Always;\n        ${target}.Sidedness.Value = FrooxEngine.Sidedness.Double;\n        ${target}.RenderQueue.Value = ${api.input("renderQueue").code};${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.attachImage", {
+    title: "Attach Image",
+    group: "Resonite API",
+    symbol: "IMAGE+",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Slot", "slot")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+      port("result", "Image", "component")
+    ],
+    codegenCollect(api) {
+      addStatefulField(api, "attachedImage", "FrooxEngine.UIX.Image", "null!");
+    },
+    codegenExpression(api) {
+      return generatedActionOutputExpression(api, `_attachedImage${nodeToken(api)}`);
+    },
+    codegenAction(api) {
+      const field = `_attachedImage${nodeToken(api)}`;
+      const next = api.emit("done");
+      return `${field} = ${api.input("target").code}.AttachComponent<FrooxEngine.UIX.Image>();${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.configureImage", {
+    title: "Configure Image",
+    group: "Resonite API",
+    symbol: "IMAGE=",
+    description:
+      "Assigns material, tint and interaction flags directly on an Image.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Image", "component"),
+      port("material", "Material", "component"),
+      port("tint", "Tint", "colorX")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const target = `((FrooxEngine.UIX.Image)(${api.input("target").code}))`;
+      const material = `((FrooxEngine.UI_UnlitMaterial)(${api.input("material").code}))`;
+      const next = api.emit("done");
+      return `${target}.Material.Target = ${material};\n        ${target}.Tint.Value = ${api.input("tint").code};\n        ${target}.InteractionTarget.Value = false;\n        ${target}.PreserveAspect.Value = false;${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.attachValueMultiDriverFloat2", {
+    title: "Attach ValueMultiDriver<float2>",
+    group: "Resonite API",
+    symbol: "MULTI+",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Slot", "slot")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+      port("result", "ValueMultiDriver<float2>", "component")
+    ],
+    codegenCollect(api) {
+      addStatefulField(
+        api,
+        "attachedValueMultiDriverFloat2",
+        "FrooxEngine.ValueMultiDriver<Elements.Core.float2>",
+        "null!"
+      );
+    },
+    codegenExpression(api) {
+      return generatedActionOutputExpression(
+        api,
+        `_attachedValueMultiDriverFloat2${nodeToken(api)}`
+      );
+    },
+    codegenAction(api) {
+      const field = `_attachedValueMultiDriverFloat2${nodeToken(api)}`;
+      const next = api.emit("done");
+      return `${field} = ${api.input("target").code}.AttachComponent<FrooxEngine.ValueMultiDriver<Elements.Core.float2>>();${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.addFloat2Drive", {
+    title: "Add float2 Drive",
+    group: "Resonite API",
+    symbol: "DRIVE+",
+    description:
+      "Adds a typed float2 drive and targets one RectTransform anchor field.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "ValueMultiDriver<float2>", "component"),
+      port("rect", "RectTransform", "component")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    parameters: [
+      pSelect(
+        "field",
+        "Anchor field",
+        [
+          ["AnchorMin", "AnchorMin"],
+          ["AnchorMax", "AnchorMax"]
+        ],
+        "AnchorMin",
+        "",
+        { affectsPorts: false, affectsNode: true, commitImmediately: true }
+      )
+    ],
+    codegenAction(api) {
+      const driver = `((FrooxEngine.ValueMultiDriver<Elements.Core.float2>)(${api.input("target").code}))`;
+      const rect = `((FrooxEngine.UIX.RectTransform)(${api.input("rect").code}))`;
+      const field = api.node.parameters?.field === "AnchorMax" ? "AnchorMax" : "AnchorMin";
+      const next = api.emit("done");
+      return `${driver}.Drives.Add().Target = ${rect}.${field};${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.attachValueMultiplexerFloat2", {
+    title: "Attach ValueMultiplexer<float2>",
+    group: "Resonite API",
+    symbol: "MUX+",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Slot", "slot")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+      port("result", "ValueMultiplexer<float2>", "component")
+    ],
+    codegenCollect(api) {
+      addStatefulField(
+        api,
+        "attachedValueMultiplexerFloat2",
+        "FrooxEngine.ValueMultiplexer<Elements.Core.float2>",
+        "null!"
+      );
+    },
+    codegenExpression(api) {
+      return generatedActionOutputExpression(
+        api,
+        `_attachedValueMultiplexerFloat2${nodeToken(api)}`
+      );
+    },
+    codegenAction(api) {
+      const field = `_attachedValueMultiplexerFloat2${nodeToken(api)}`;
+      const next = api.emit("done");
+      return `${field} = ${api.input("target").code}.AttachComponent<FrooxEngine.ValueMultiplexer<Elements.Core.float2>>();${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.configureValueMultiplexerFloat2", {
+    title: "Configure ValueMultiplexer<float2>",
+    group: "Resonite API",
+    symbol: "MUX=",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "ValueMultiplexer<float2>", "component"),
+      port("source", "ValueMultiDriver<float2>", "component")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const target = `((FrooxEngine.ValueMultiplexer<Elements.Core.float2>)(${api.input("target").code}))`;
+      const source = `((FrooxEngine.ValueMultiDriver<Elements.Core.float2>)(${api.input("source").code}))`;
+      const next = api.emit("done");
+      return `${target}.Target.Target = ${source}.Value;\n        ${target}.AllowWriteBack.Value = false;${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.addFloat2MultiplexerValue", {
+    title: "Add Multiplexer float2 Value",
+    group: "Resonite API",
+    symbol: "MUX[]+",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "ValueMultiplexer<float2>", "component"),
+      port("value", "Value", "float2")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const target = `((FrooxEngine.ValueMultiplexer<Elements.Core.float2>)(${api.input("target").code}))`;
+      const next = api.emit("done");
+      return `${target}.Values.Add().Value = ${api.input("value").code};${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.attachTimeIntDriver", {
+    title: "Attach TimeIntDriver",
+    group: "Resonite API",
+    symbol: "CLOCK+",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Slot", "slot")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+      port("result", "TimeIntDriver", "component")
+    ],
+    codegenCollect(api) {
+      addStatefulField(api, "attachedTimeIntDriver", "FrooxEngine.TimeIntDriver", "null!");
+    },
+    codegenExpression(api) {
+      return generatedActionOutputExpression(
+        api,
+        `_attachedTimeIntDriver${nodeToken(api)}`
+      );
+    },
+    codegenAction(api) {
+      const field = `_attachedTimeIntDriver${nodeToken(api)}`;
+      const next = api.emit("done");
+      return `${field} = ${api.input("target").code}.AttachComponent<FrooxEngine.TimeIntDriver>();${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.configureTimeIntDriverForFloat2Multiplexer", {
+    title: "Configure TimeIntDriver",
+    group: "Resonite API",
+    symbol: "CLOCK=",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "TimeIntDriver", "component"),
+      port("multiplexer", "ValueMultiplexer<float2>", "component"),
+      port("scale", "Scale", "float"),
+      port("repeat", "Repeat", "int"),
+      port("pingPong", "Ping pong", "bool")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const target = `((FrooxEngine.TimeIntDriver)(${api.input("target").code}))`;
+      const multiplexer = `((FrooxEngine.ValueMultiplexer<Elements.Core.float2>)(${api.input("multiplexer").code}))`;
+      const next = api.emit("done");
+      return `${target}.Scale.Value = ${api.input("scale").code};\n        ${target}.Repeat.Value = ${api.input("repeat").code};\n        ${target}.PingPong.Value = ${api.input("pingPong").code};\n        ${target}.Target.Target = ${multiplexer}.Index;${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.attachRectTransform", {
+    title: "Attach RectTransform",
+    group: "Resonite API",
+    symbol: "RECT+",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Slot", "slot")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+      port("result", "RectTransform", "component")
+    ],
+    codegenCollect(api) {
+      addStatefulField(
+        api,
+        "attachedRectTransform",
+        "FrooxEngine.UIX.RectTransform",
+        "null!"
+      );
+    },
+    codegenExpression(api) {
+      return generatedActionOutputExpression(
+        api,
+        `_attachedRectTransform${nodeToken(api)}`
+      );
+    },
+    codegenAction(api) {
+      const field = `_attachedRectTransform${nodeToken(api)}`;
+      const next = api.emit("done");
+      return `${field} = ${api.input("target").code}.AttachComponent<FrooxEngine.UIX.RectTransform>();${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.stretchRectTransform", {
+    title: "Stretch RectTransform",
+    group: "Resonite API",
+    symbol: "RECT=",
+    description: "Sets a RectTransform to full-parent stretch directly.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "RectTransform", "component")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const target = `((FrooxEngine.UIX.RectTransform)(${api.input("target").code}))`;
+      const next = api.emit("done");
+      return `${target}.AnchorMin.Value = Elements.Core.float2.Zero;\n        ${target}.AnchorMax.Value = Elements.Core.float2.One;\n        ${target}.OffsetMin.Value = Elements.Core.float2.Zero;\n        ${target}.OffsetMax.Value = Elements.Core.float2.Zero;${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.configureRectTransform", {
+    title: "Configure RectTransform",
+    group: "Resonite API",
+    symbol: "RECT=",
+    description:
+      "Writes all four RectTransform layout fields directly without reflection.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "RectTransform", "component"),
+      port("anchorMin", "Anchor min", "float2"),
+      port("anchorMax", "Anchor max", "float2"),
+      port("offsetMin", "Offset min", "float2"),
+      port("offsetMax", "Offset max", "float2")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const target = `((FrooxEngine.UIX.RectTransform)(${api.input("target").code}))`;
+      const next = api.emit("done");
+      return `${target}.AnchorMin.Value = ${api.input("anchorMin").code};\n        ${target}.AnchorMax.Value = ${api.input("anchorMax").code};\n        ${target}.OffsetMin.Value = ${api.input("offsetMin").code};\n        ${target}.OffsetMax.Value = ${api.input("offsetMax").code};${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.attachOutlinedArc", {
+    title: "Attach OutlinedArc",
+    group: "Resonite API",
+    symbol: "ARC+",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Slot", "slot")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+      port("result", "OutlinedArc", "api.outlined-arc.e1f451ef2dd45d2a")
+    ],
+    codegenCollect(api) {
+      addStatefulField(
+        api,
+        "attachedOutlinedArc",
+        "FrooxEngine.UIX.OutlinedArc",
+        "null!"
+      );
+    },
+    codegenExpression(api) {
+      return generatedActionOutputExpression(
+        api,
+        `_attachedOutlinedArc${nodeToken(api)}`
+      );
+    },
+    codegenAction(api) {
+      const field = `_attachedOutlinedArc${nodeToken(api)}`;
+      const next = api.emit("done");
+      return `${field} = ${api.input("target").code}.AttachComponent<FrooxEngine.UIX.OutlinedArc>();${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.configureHoverMaskArc", {
+    title: "Configure Hover Mask Arc",
+    group: "Resonite API",
+    symbol: "ARC=",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "OutlinedArc", "api.outlined-arc.e1f451ef2dd45d2a"),
+      port("fill", "Fill color", "colorX"),
+      port("thickness", "Outline thickness", "float")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const target = api.input("target").code;
+      const next = api.emit("done");
+      return `${target}.FillColor.Value = ${api.input("fill").code};\n        ${target}.OutlineThickness.Value = ${api.input("thickness").code};${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.attachMask", {
+    title: "Attach Mask",
+    group: "Resonite API",
+    symbol: "MASK+",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Slot", "slot")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+      port("result", "Mask", "component")
+    ],
+    codegenCollect(api) {
+      addStatefulField(api, "attachedMask", "FrooxEngine.UIX.Mask", "null!");
+    },
+    codegenExpression(api) {
+      return generatedActionOutputExpression(
+        api,
+        `_attachedMask${nodeToken(api)}`
+      );
+    },
+    codegenAction(api) {
+      const field = `_attachedMask${nodeToken(api)}`;
+      const next = api.emit("done");
+      return `${field} = ${api.input("target").code}.AttachComponent<FrooxEngine.UIX.Mask>();${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.configureHiddenMask", {
+    title: "Hide Mask Graphic",
+    group: "Resonite API",
+    symbol: "MASK=",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Mask", "component"),
+      port("value", "Show mask graphic", "bool")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const target = `((FrooxEngine.UIX.Mask)(${api.input("target").code}))`;
+      const next = api.emit("done");
+      return `${target}.ShowMaskGraphic.Value = ${api.input("value").code};${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.selectSlot", {
+    title: "Select Slot",
+    group: "Resonite API",
+    symbol: "SLOT?",
+    inputs: [
+      port("condition", "Condition", "bool"),
+      port("true", "True", "slot"),
+      port("false", "False", "slot")
+    ],
+    outputs: [port("result", "Slot", "slot")],
+    codegenExpression(api) {
+      return `(${api.input("condition").code} ? ${api.input("true").code} : ${api.input("false").code})`;
+    }
+  });
+
+  registerNode("resonite.contextMenuIsRemoved", {
+    title: "Context Menu Is Removed",
+    group: "Resonite API",
+    symbol: "LIVE?",
+    inputs: [
+      port("target", "ContextMenu", "api.context-menu.56e93bd978d9b600")
+    ],
+    outputs: [port("value", "Is removed", "bool")],
+    codegenExpression(api) {
+      return `${api.input("target").code}.IsRemoved`;
+    }
+  });
+
+  registerNode("resonite.contextMenuIsUnderLocalUser", {
+    title: "Context Menu Is Under Local User",
+    group: "Resonite API",
+    symbol: "LOCAL?",
+    inputs: [
+      port("target", "ContextMenu", "api.context-menu.56e93bd978d9b600")
+    ],
+    outputs: [port("value", "Is under local user", "bool")],
+    codegenExpression(api) {
+      return `${api.input("target").code}.IsUnderLocalUser`;
+    }
+  });
+
+  registerNode("resonite.contextMenuSlot", {
+    title: "Context Menu Slot",
+    group: "Resonite API",
+    symbol: "SLOT",
+    inputs: [
+      port("target", "ContextMenu", "api.context-menu.56e93bd978d9b600")
+    ],
+    outputs: [port("value", "Slot", "slot")],
+    codegenExpression(api) {
+      return `${api.input("target").code}.Slot`;
+    }
+  });
+
+  registerNode("resonite.slotIsRemoved", {
+    title: "Slot Is Removed",
+    group: "Resonite API",
+    symbol: "LIVE?",
+    inputs: [port("target", "Slot", "slot")],
+    outputs: [port("value", "Is removed", "bool")],
+    codegenExpression(api) {
+      return `${api.input("target").code}.IsRemoved`;
+    }
+  });
+
+  registerNode("resonite.slotName", {
+    title: "Slot Name",
+    group: "Resonite API",
+    symbol: "NAME",
+    inputs: [port("target", "Slot", "slot")],
+    outputs: [port("value", "Name", "string")],
+    codegenExpression(api) {
+      return `${api.input("target").code}.Name`;
+    }
+  });
+
+  function projectEnumGraphType(node) {
+    const requested = String(
+      node?.parameters?.enumName || "SettingOption"
+    )
+      .trim()
+      .replace(/^enum:/i, "");
+    return `enum:${requested || "SettingOption"}`;
+  }
+
+  registerNode("configuration.enumLiteral", {
+    title: "Project Enum Literal",
+    group: "Configuration",
+    symbol: "ENUM",
+    description:
+      "Emits a strongly typed member of an enum declared by this Builder project without strings, boxing or reflection.",
+    parameters: [
+      pText(
+        "enumName",
+        "Enum name",
+        "SettingOption",
+        "The project-defined enum type name.",
+        { affectsPorts: true, affectsNode: true, commitImmediately: true }
+      ),
+      pText(
+        "member",
+        "Member",
+        "Value",
+        "The enum member to emit.",
+        { affectsPorts: false, affectsNode: true, commitImmediately: true }
+      )
+    ],
+    inputs: [],
+    outputs: [port("value", "Value", "enum:SettingOption")],
+    resolveDefinition(node) {
+      return {
+        outputs: [
+          port("value", "Value", projectEnumGraphType(node))
+        ]
+      };
+    },
+    codegenExpression(api) {
+      const enumType = api.csType(projectEnumGraphType(api.node));
+      const member = api.identifier(
+        api.node.parameters?.member,
+        "Value"
+      );
+      return `${enumType}.${member}`;
+    }
+  });
+
+  const keyedSnapshotValueIds = [
+    "value1",
+    "value2",
+    "value3",
+    "value4",
+    "value5",
+    "value6",
+    "value7",
+    "value8"
+  ];
+
+  function keyedSnapshotHash(value) {
+    let first = 0x811c9dc5;
+    let second = 0x9e3779b9;
+    const source = String(value || "");
+    for (let index = 0; index < source.length; index += 1) {
+      const unit = source.charCodeAt(index);
+      first = Math.imul(first ^ unit, 0x01000193);
+      second = Math.imul(second ^ unit, 0x85ebca6b);
+    }
+    return `${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
+  }
+
+  function keyedSnapshotConfiguredType(node, parameter) {
+    return String(node?.parameters?.[parameter] || "").trim();
+  }
+
+  function keyedSnapshotInputs(includeCall = false, node = null) {
+    const keyType = keyedSnapshotConfiguredType(node, "keyType");
+    const inputs = [
+      keyType
+        ? port("key", "Key", keyType)
+        : genericPort("key", "Key", "TKey", "anyValue"),
+      ...keyedSnapshotValueIds.map((id, index) => {
+        const valueType = keyedSnapshotConfiguredType(
+          node,
+          `value${index + 1}Type`
+        );
+        return valueType
+          ? port(id, `Value ${index + 1}`, valueType)
+          : genericPort(
+              id,
+              `Value ${index + 1}`,
+              `TValue${index + 1}`,
+              "anyValue"
+            );
+      })
+    ];
+    return includeCall
+      ? [
+          port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+          ...inputs
+        ]
+      : inputs;
+  }
+
+  function keyedSnapshotSchema(api) {
+    const inputIds = ["key", ...keyedSnapshotValueIds];
+    const graphTypes = inputIds.map(
+      id => api.input(id).type || "object"
+    );
+    const csTypes = graphTypes.map(type => api.csType(type));
+    const stateId =
+      String(api.node.parameters?.stateId || "default").trim() ||
+      "default";
+    const schema = `${stateId}\u0000${csTypes.join("\u0000")}`;
+    const token = `${api.identifier(stateId, "State")}${keyedSnapshotHash(schema)}`;
+    return {
+      stateId,
+      graphTypes,
+      csTypes,
+      keyType: csTypes[0],
+      valueTypes: csTypes.slice(1),
+      token,
+      snapshotType: `NodeKeyedSnapshot${token}`,
+      cacheField: `_nodeKeyedSnapshots${token}`,
+      matchMethod: `NodeKeyedSnapshotMatches${token}`,
+      rememberMethod: `RememberNodeKeyedSnapshot${token}`
+    };
+  }
+
+  function ensureKeyedSnapshotCache(api) {
+    const schema = keyedSnapshotSchema(api);
+    const parameters = [
+      `${schema.keyType} key`,
+      ...schema.valueTypes.map(
+        (type, index) => `${type} value${index + 1}`
+      )
+    ].join(",\n    ");
+    const fields = schema.valueTypes
+      .map((type, index) => `    public ${type} Value${index + 1};`)
+      .join("\n");
+    const comparisons = schema.valueTypes
+      .map(
+        (type, index) =>
+          `        System.Collections.Generic.EqualityComparer<${type}>.Default.Equals(snapshot.Value${index + 1}, value${index + 1})`
+      )
+      .join(" &&\n");
+    const assignments = schema.valueTypes
+      .map((_, index) => `        Value${index + 1} = value${index + 1}`)
+      .join(",\n");
+
+    api.addMember(
+      `state.keyedSnapshot:${schema.token}`,
+      `private sealed class ${schema.snapshotType}
+{
+${fields}
+}
+
+private static readonly System.Collections.Generic.Dictionary<${schema.keyType}, ${schema.snapshotType}>
+    ${schema.cacheField} = new();
+
+private static bool ${schema.matchMethod}(
+    ${parameters})
+{
+    if (!${schema.cacheField}.TryGetValue(key, out var snapshot))
+    {
+        return false;
+    }
+
+    return
+${comparisons};
+}
+
+private static void ${schema.rememberMethod}(
+    ${parameters})
+{
+    ${schema.cacheField}[key] = new ${schema.snapshotType}
+    {
+${assignments}
+    };
+}`
+    );
+    return schema;
+  }
+
+  function keyedSnapshotArguments(api) {
+    return ["key", ...keyedSnapshotValueIds]
+      .map(id => api.input(id).code)
+      .join(", ");
+  }
+
+  const keyedSnapshotParameters = () => [
+    pText(
+      "stateId",
+      "State ID",
+      "default",
+      "Nodes with the same State ID and identical key/value schema share one typed snapshot dictionary.",
+      { affectsPorts: false, affectsNode: true, commitImmediately: true }
+    ),
+    pText(
+      "keyType",
+      "Key type",
+      "",
+      "Optional exact graph type for the key. Leave blank to infer it.",
+      { affectsPorts: true, affectsNode: true, commitImmediately: true }
+    ),
+    ...keyedSnapshotValueIds.map((_, index) =>
+      pText(
+        `value${index + 1}Type`,
+        `Value ${index + 1} type`,
+        "",
+        "Optional exact graph type. Leave blank to infer this value independently.",
+        { affectsPorts: true, affectsNode: true, commitImmediately: true }
+      )
+    )
+  ];
+
+  registerNode("state.keyedSnapshotChanged", {
+    title: "Keyed Snapshot Changed",
+    group: "State",
+    symbol: "STATE≠",
+    description:
+      "Reports whether the eight strongly typed values differ from the last snapshot stored for this key and State ID.",
+    parameters: keyedSnapshotParameters(),
+    inputs: keyedSnapshotInputs(),
+    outputs: [port("result", "Changed", "bool")],
+    resolveDefinition(node) {
+      return { inputs: keyedSnapshotInputs(false, node) };
+    },
+    codegenCollect(api) {
+      ensureKeyedSnapshotCache(api);
+    },
+    codegenExpression(api) {
+      const schema = keyedSnapshotSchema(api);
+      return `!${schema.matchMethod}(${keyedSnapshotArguments(api)})`;
+    }
+  });
+
+  registerNode("state.keyedSnapshotRemember", {
+    title: "Remember Keyed Snapshot",
+    group: "State",
+    symbol: "STATE=",
+    description:
+      "Stores eight strongly typed values as the latest snapshot for this key and State ID.",
+    parameters: keyedSnapshotParameters(),
+    inputs: keyedSnapshotInputs(true),
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    resolveDefinition(node) {
+      return { inputs: keyedSnapshotInputs(true, node) };
+    },
+    codegenCollect(api) {
+      ensureKeyedSnapshotCache(api);
+    },
+    codegenAction(api) {
+      const schema = keyedSnapshotSchema(api);
+      const next = api.emit("done");
+      return `${schema.rememberMethod}(${keyedSnapshotArguments(api)});${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  function ensureCircuitSettingsCache(api) {
+    api.addMember(
+      "resonite.circuitSettingsCache",
+      `private sealed class NodeCircuitBuiltSettings
+{
+    public bool Enabled;
+    public Elements.Core.colorX Gold;
+    public float TraceBrightness;
+    public float PulseBrightness;
+    public float Speed;
+    public int StreamCount;
+    public bool KeepCenterClear;
+    public CircuitDisplayMode DisplayMode;
+}
+
+private static readonly System.Collections.Generic.Dictionary<FrooxEngine.Slot, NodeCircuitBuiltSettings>
+    _nodeCircuitBuiltSettingsByRadialMenu = new();
+
+private static CircuitDisplayMode NormalizeNodeCircuitDisplayMode(
+    CircuitDisplayMode displayMode)
+{
+    return displayMode is
+        CircuitDisplayMode.InactiveOnly or
+        CircuitDisplayMode.HoverOnly or
+        CircuitDisplayMode.Everywhere
+        ? displayMode
+        : CircuitDisplayMode.InactiveOnly;
+}
+
+private static bool NodeCircuitBuiltSettingsMatch(
+    FrooxEngine.Slot radialMenu,
+    bool enabled,
+    Elements.Core.colorX gold,
+    float traceBrightness,
+    float pulseBrightness,
+    float speed,
+    int streamCount,
+    bool keepCenterClear,
+    CircuitDisplayMode displayMode)
+{
+    if (!_nodeCircuitBuiltSettingsByRadialMenu.TryGetValue(radialMenu, out NodeCircuitBuiltSettings? built))
+    {
+        return false;
+    }
+
+    return
+        built.Enabled == enabled &&
+        built.Gold.Equals(gold) &&
+        built.TraceBrightness.Equals(traceBrightness) &&
+        built.PulseBrightness.Equals(pulseBrightness) &&
+        built.Speed.Equals(speed) &&
+        built.StreamCount == streamCount &&
+        built.KeepCenterClear == keepCenterClear &&
+        built.DisplayMode == displayMode;
+}
+
+private static void RememberNodeCircuitBuiltSettings(
+    FrooxEngine.Slot radialMenu,
+    bool enabled,
+    Elements.Core.colorX gold,
+    float traceBrightness,
+    float pulseBrightness,
+    float speed,
+    int streamCount,
+    bool keepCenterClear,
+    CircuitDisplayMode displayMode)
+{
+    _nodeCircuitBuiltSettingsByRadialMenu[radialMenu] = new NodeCircuitBuiltSettings
+    {
+        Enabled = enabled,
+        Gold = gold,
+        TraceBrightness = traceBrightness,
+        PulseBrightness = pulseBrightness,
+        Speed = speed,
+        StreamCount = streamCount,
+        KeepCenterClear = keepCenterClear,
+        DisplayMode = displayMode
+    };
+}`
+    );
+  }
+
+  const circuitSettingsInputs = () => [
+    port("target", "Radial Menu", "slot"),
+    port("enabled", "Enabled", "bool"),
+    port("gold", "Gold", "colorX"),
+    port("trace", "Trace brightness", "float"),
+    port("pulse", "Pulse brightness", "float"),
+    port("speed", "Speed", "float"),
+    port("count", "Stream count", "int"),
+    port("center", "Keep center clear", "bool"),
+    port("mode", "Display mode", "object")
+  ];
+
+  const circuitSettingsArguments = api =>
+    `${api.input("target").code}, ${api.input("enabled").code}, ${api.input("gold").code}, ${api.input("trace").code}, ${api.input("pulse").code}, ${api.input("speed").code}, ${api.input("count").code}, ${api.input("center").code}, NormalizeNodeCircuitDisplayMode((CircuitDisplayMode)(${api.input("mode").code}))`;
+
+  registerNode("resonite.circuitSettingsChanged", {
+    title: "Circuit Settings Changed",
+    group: "Resonite API",
+    symbol: "CFG≠",
+    description:
+      "Compares the current circuit settings against a typed per-Radial-Menu cache without strings, boxing dictionaries or reflection.",
+    inputs: circuitSettingsInputs(),
+    outputs: [port("result", "Changed", "bool")],
+    codegenCollect(api) {
+      ensureCircuitSettingsCache(api);
+    },
+    codegenExpression(api) {
+      return `!NodeCircuitBuiltSettingsMatch(${circuitSettingsArguments(api)})`;
+    }
+  });
+
+  registerNode("resonite.rememberCircuitSettings", {
+    title: "Remember Circuit Settings",
+    group: "Resonite API",
+    symbol: "CFG=",
+    description:
+      "Stores the successfully built settings for this Radial Menu in the typed cache.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      ...circuitSettingsInputs()
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenCollect(api) {
+      ensureCircuitSettingsCache(api);
+    },
+    codegenAction(api) {
+      const next = api.emit("done");
+      return `RememberNodeCircuitBuiltSettings(${circuitSettingsArguments(api)});${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.circuitDisplayModeEquals", {
+    title: "Circuit Display Mode Equals",
+    group: "Resonite API",
+    symbol: "MODE=",
+    description:
+      "Compares CircuitDisplayMode directly as an enum without converting it to an allocating string.",
+    inputs: [port("value", "Display mode", "object")],
+    outputs: [port("result", "Matches", "bool")],
+    parameters: [
+      pSelect(
+        "mode",
+        "Mode",
+        [
+          ["InactiveOnly", "InactiveOnly"],
+          ["HoverOnly", "HoverOnly"],
+          ["Everywhere", "Everywhere"]
+        ],
+        "InactiveOnly",
+        "",
+        { affectsPorts: false, affectsNode: true, commitImmediately: true }
+      )
+    ],
+    codegenCollect(api) {
+      ensureCircuitSettingsCache(api);
+    },
+    codegenExpression(api) {
+      const requested = String(api.node.parameters?.mode || "InactiveOnly");
+      const mode = ["InactiveOnly", "HoverOnly", "Everywhere"].includes(requested)
+        ? requested
+        : "InactiveOnly";
+      return `NormalizeNodeCircuitDisplayMode((CircuitDisplayMode)(${api.input("value").code})) == CircuitDisplayMode.${mode}`;
+    }
+  });
+
+  registerNode("resonite.preferLiveSlot", {
+    title: "Prefer Live Slot",
+    group: "Resonite API",
+    symbol: "SLOT?",
+    description:
+      "Uses only a live Slot that belongs to the current owner, preferring the freshly built Slot over the discovered fallback Slot.",
+    inputs: [
+      port("preferred", "Preferred", "slot"),
+      port("fallback", "Fallback", "slot"),
+      port("owner", "Current owner", "slot")
+    ],
+    outputs: [port("result", "Slot", "slot")],
+    codegenExpression(api) {
+      const preferred = api.input("preferred").code;
+      const fallback = api.input("fallback").code;
+      const owner = api.input("owner").code;
+      return `(${preferred} is FrooxEngine.Slot preferredSlot && !preferredSlot.IsRemoved && System.Object.ReferenceEquals(preferredSlot.Parent, ${owner}) ? preferredSlot : (${fallback} is FrooxEngine.Slot fallbackSlot && !fallbackSlot.IsRemoved && System.Object.ReferenceEquals(fallbackSlot.Parent, ${owner}) ? fallbackSlot : null))`;
+    }
+  });
+
+  registerNode("resonite.getLocalOutlinedArc", {
+    title: "Get Local Outlined Arc",
+    group: "Resonite API",
+    symbol: "ARC",
+    description:
+      "Calls Slot.GetComponent<OutlinedArc>() directly on the selected slot.",
+    inputs: [
+      port("target", "Slot", "slot")
+    ],
+    outputs: [
+      port(
+        "result",
+        "OutlinedArc",
+        "api.outlined-arc.e1f451ef2dd45d2a"
+      )
+    ],
+    codegenExpression(api) {
+      return `${api.input("target").code}.GetComponent<FrooxEngine.UIX.OutlinedArc>()`;
+    }
+  });
+
+  registerNode("resonite.getContextMenuItemInChildren", {
+    title: "Get Context Menu Item in Children",
+    group: "Resonite API",
+    symbol: "MENU?",
+    description:
+      "Calls Slot.GetComponentInChildren<ContextMenuItem> with a typed predicate and native early exit.",
+    inputs: [
+      port("target", "Slot", "slot"),
+      port("predicate", "Predicate", "object"),
+      port("includeLocal", "Include local", "bool"),
+      port("excludeDisabled", "Exclude disabled", "bool")
+    ],
+    outputs: [
+      port("result", "ContextMenuItem", "api.context-menu-item.fbd1a4522841d5b3")
+    ],
+    codegenExpression(api) {
+      return `${api.input("target").code}.GetComponentInChildren<FrooxEngine.ContextMenuItem>((System.Predicate<FrooxEngine.ContextMenuItem>)(${api.input("predicate").code}), ${api.input("includeLocal").code}, ${api.input("excludeDisabled").code})`;
+    }
+  });
+
+  registerNode("resonite.contextMenuItemIsRemoved", {
+    title: "Context Menu Item Is Removed",
+    group: "Resonite API",
+    symbol: "LIVE?",
+    inputs: [
+      port("target", "ContextMenuItem", "api.context-menu-item.fbd1a4522841d5b3")
+    ],
+    outputs: [port("value", "Is removed", "bool")],
+    codegenExpression(api) {
+      return `${api.input("target").code}.IsRemoved`;
+    }
+  });
+
+  registerNode("resonite.buttonIsRemoved", {
+    title: "Button Is Removed",
+    group: "Resonite API",
+    symbol: "LIVE?",
+    inputs: [
+      port("target", "Button", "api.button.0d678da3093382b2")
+    ],
+    outputs: [port("value", "Is removed", "bool")],
+    codegenExpression(api) {
+      return `${api.input("target").code}.IsRemoved`;
+    }
+  });
+
+  registerNode("resonite.outlinedArcIsRemoved", {
+    title: "Outlined Arc Is Removed",
+    group: "Resonite API",
+    symbol: "LIVE?",
+    inputs: [
+      port("target", "OutlinedArc", "api.outlined-arc.e1f451ef2dd45d2a")
+    ],
+    outputs: [port("value", "Is removed", "bool")],
+    codegenExpression(api) {
+      return `${api.input("target").code}.IsRemoved`;
+    }
+  });
+
+  registerNode("resonite.contextMenuItemSlot", {
+    title: "Context Menu Item Slot",
+    group: "Resonite API",
+    symbol: "SLOT",
+    inputs: [
+      port("target", "ContextMenuItem", "api.context-menu-item.fbd1a4522841d5b3")
+    ],
+    outputs: [port("value", "Slot", "slot")],
+    codegenExpression(api) {
+      return `${api.input("target").code}.Slot`;
+    }
+  });
+
+  registerNode("resonite.buttonSlot", {
+    title: "Button Slot",
+    group: "Resonite API",
+    symbol: "SLOT",
+    inputs: [
+      port("target", "Button", "api.button.0d678da3093382b2")
+    ],
+    outputs: [port("value", "Slot", "slot")],
+    codegenExpression(api) {
+      return `${api.input("target").code}.Slot`;
+    }
+  });
+
+  registerNode("resonite.readSyncBool", {
+    title: "Read Sync Boolean",
+    group: "Resonite API",
+    symbol: "SYNC?",
+    description: "Reads the Value of a Sync<bool> directly.",
+    inputs: [
+      port("target", "Sync<bool>", "api.sync-system-boolean.fbbcc62fafd852fb")
+    ],
+    outputs: [
+      port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "bool")
+    ],
+    codegenExpression(api) {
+      return `${api.input("target").code}.Value`;
+    }
+  });
+
+  registerNode("resonite.readSyncFloat", {
+    title: "Read Sync Float",
+    group: "Resonite API",
+    symbol: "SYNCƒ",
+    description: "Reads the Value of a Sync<float> directly.",
+    inputs: [
+      port("target", "Sync<float>", "api.sync-system-single.1c6f1d916d8034a0")
+    ],
+    outputs: [
+      port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "float")
+    ],
+    codegenExpression(api) {
+      return `${api.input("target").code}.Value`;
+    }
+  });
+
+  registerNode("resonite.writeSyncFloat", {
+    title: "Write Sync Float",
+    group: "Resonite API",
+    symbol: "SYNC=",
+    description: "Writes the Value of a Sync<float> directly.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Sync<float>", "api.sync-system-single.1c6f1d916d8034a0"),
+      port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "float")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const next = api.emit("done");
+      return `${api.input("target").code}.Value = ${api.input("value").code};${next ? `\n        ${next}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.setSlotActiveSelf", {
+    title: "Set Slot Active Self",
+    group: "Resonite API",
+    symbol: "ACTIVE=",
+    description: "Writes Slot.ActiveSelf directly.",
+    inputs: [
+      port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"),
+      port("target", "Slot", "slot"),
+      port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "bool")
+    ],
+    outputs: [
+      port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")
+    ],
+    codegenAction(api) {
+      const next = api.emit("done");
+      return `${api.input("target").code}.ActiveSelf = ${api.input("value").code};${next ? `\n        ${next}();` : ""}`;
     }
   });
 
@@ -6763,7 +8267,7 @@ faulted ? `\n        ${faulted}();` : ""])
   }
 
   function normalCatalogDelegateSignatures() {
-    const values = [];
+    const values = ["System.Action<System.String>"];
     const add = value => {
       if (typeof value === "string") values.push(value);
     };
@@ -6787,6 +8291,12 @@ faulted ? `\n        ${faulted}();` : ""])
       values
         .map(normalClosedDelegateSignature)
         .filter(Boolean)
+        .filter(signature =>
+          !signature.argumentCsTypes.some(type =>
+            type === "FrooxEngine.Component" ||
+            type === "FrooxEngine.ContextMenuItem"
+          )
+        )
         .map(signature => [signature.csType, signature])
     ).values()].sort((left, right) =>
       left.csType.localeCompare(right.csType)
@@ -6949,6 +8459,71 @@ faulted ? `\n        ${faulted}();` : ""])
         }
         return `new ${selected.csType}((${parameters.join(", ")}) =>\n        {\n            ${statements.join("\n            ")}\n        })`;
       }
+    });
+
+    registerNode("flow.contextMenuItemPredicate", {
+        title: "Context Menu Item Predicate",
+        group: window.RMLI18n.t("ui.literal.86eff8eb789b"),
+        symbol: "MENU?",
+        description:
+          "Builds one cached, statically typed ContextMenuItem predicate without reflection or per-call graph execution dictionaries.",
+        inputs: [
+          port(
+            "result",
+            window.RMLI18n.t("ui.auto.54c601d015ec"),
+            "bool"
+          )
+        ],
+        outputs: [
+          port("body", window.RMLI18n.t("ui.auto.ec672784079b"), "impulse"),
+          port(
+            "argument0",
+            "ContextMenuItem",
+            "api.context-menu-item.fbd1a4522841d5b3"
+          ),
+          port(
+            "callback",
+            window.RMLI18n.t("ui.auto.6e0631a52877"),
+            "object"
+          )
+        ],
+        codegenCollect(api) {
+          addStatefulField(
+            api,
+            "contextMenuItemPredicateArgument",
+            "FrooxEngine.ContextMenuItem",
+            "null!"
+          );
+          addStatefulField(
+            api,
+            "contextMenuItemPredicateDelegate",
+            "System.Predicate<FrooxEngine.ContextMenuItem>",
+            "null!"
+          );
+        },
+        codegenExpression(api) {
+          const token = nodeToken(api);
+          const argumentField =
+            `_contextMenuItemPredicateArgument${token}`;
+          if (String(api.portId || "") === "argument0") {
+            return argumentField;
+          }
+          const delegateField =
+            `_contextMenuItemPredicateDelegate${token}`;
+          const body = api.inlineMethod(
+            api.node.id,
+            "body"
+          );
+          const invokeBody = body
+            ? `${body}();`
+            : "";
+          return `${delegateField} ??= new System.Predicate<FrooxEngine.ContextMenuItem>((FrooxEngine.ContextMenuItem argument0) =>
+        {
+            ${argumentField} = argument0;
+            ${invokeBody}
+            return ${api.input("result").code};
+        })`;
+        }
     });
   }
 
@@ -8108,6 +9683,34 @@ private static string GetNormalTryParseError${token}(string? text)
     }
   });
 
+  registerNode("logic.isFinite", {
+    title: "Is Finite",
+    group: window.RMLI18n.t("ui.literal.3d52a6d8fedc"),
+    symbol: "ℝ?",
+    description:
+      "Returns true only when the float is neither NaN nor positive or negative infinity.",
+    inputs: [
+      port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "float")
+    ],
+    outputs: [
+      port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "bool")
+    ],
+    codegenExpression(api) {
+      return `System.Single.IsFinite(${api.input("value").code})`;
+    },
+    previewEvaluate({ input, known, unknown }) {
+      const value = input("value");
+      return value.known
+        ? known(
+            "bool",
+            Number.isFinite(
+              Math.fround(Number(value.value))
+            )
+          )
+        : unknown("bool", value.reason);
+    }
+  });
+
   registerNode("logic.compare", {
     title: window.RMLI18n.t("ui.auto.a5a20db782e6"),
     group: window.RMLI18n.t("ui.literal.3d52a6d8fedc"),
@@ -8939,6 +10542,392 @@ private static bool _textSplitHasValue${token};`);
         .map(id => api.input(id).code)
         .join(", ");
       return `new ${api.csType(itemType)}[] { ${values} }`;
+    }
+  });
+
+  function cachedArrayCodegenDefinition(
+    api
+  ) {
+    const stableDefinitionValue = value => {
+      if (Array.isArray(value)) {
+        return value.map(stableDefinitionValue);
+      }
+      if (
+        value &&
+        typeof value === "object"
+      ) {
+        return Object.fromEntries(
+          Object.keys(value)
+            .filter(key => key !== "portLayout")
+            .sort()
+            .map(key => [
+              key,
+              stableDefinitionValue(value[key])
+            ])
+        );
+      }
+      return value;
+    };
+    const { itemType } =
+      normalArrayNodeType(api.node);
+    const count = Math.max(
+      2,
+      Math.min(
+        64,
+        Number(
+          api.node.parameters
+            ?.variadicInputCount
+        ) || 2
+      )
+    );
+    const cacheId =
+      String(api.node.parameters?.cacheId || "").trim() ||
+      api.node.id;
+    const inputIds = normalVariadicIds(count);
+    const definitions = inputIds.map(id => {
+      const connection = api.inputConnection(id);
+      if (!connection) {
+        return {
+          connected: false
+        };
+      }
+
+      const source = api.graph.nodes.find(
+        node => node.id === connection.fromNode
+      );
+      return {
+        connected: true,
+        constant:
+          Boolean(source) &&
+          String(source.operatorId || "").startsWith("constant."),
+        operatorId: source?.operatorId || "",
+        parameters:
+          stableDefinitionValue(
+            source?.parameters || {}
+          ),
+        fromPort: connection.fromPort || ""
+      };
+    });
+    const inputCodes = inputIds.map(
+      id => api.input(id).code
+    );
+    const signature = JSON.stringify({
+      itemType,
+      count,
+      definitions: definitions.map(
+        (definition, index) =>
+          definition.connected &&
+          definition.constant
+            ? definition
+            : {
+                ...definition,
+                inputCode: inputCodes[index]
+              }
+      )
+    });
+    return {
+      itemType,
+      count,
+      cacheId,
+      inputIds,
+      definitions,
+      inputCodes,
+      signature
+    };
+  }
+
+  registerNode("collection.cachedArray", {
+    title: "Cached typed array",
+    group: window.RMLI18n.t("ui.literal.4bbb632f02fd"),
+    symbol: "T[]*",
+    description:
+      "Creates one shared typed array from literal constant inputs and reuses it. Treat the returned array as read-only. Nodes with the same non-empty cache ID, item type and literal definition intentionally share the same array.",
+    parameters: [
+      ...normalListNodeParameters(),
+      pText(
+        "cacheId",
+        "Cache ID",
+        "",
+        "Optional stable ID. Equal IDs, item types and literal definitions share one constant-definition array across flattened composites."
+      )
+    ],
+    inputs: [
+      port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), "string"),
+      port("b", window.RMLI18n.t("ui.auto.47a451f273f8"), "string")
+    ],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 64,
+      preserveAB: true,
+      template: port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), "string")
+    },
+    outputs: [
+      port(
+        "value",
+        window.RMLI18n.t("ui.auto.b482cd0622c5"),
+        normalArrayType("string")
+      )
+    ],
+    resolveDefinition(node) {
+      const { itemType, arrayType } =
+        normalArrayNodeType(node);
+      return {
+        inputs: [
+          port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), itemType),
+          port("b", window.RMLI18n.t("ui.auto.47a451f273f8"), itemType)
+        ],
+        outputs: [
+          port("value", window.RMLI18n.t("ui.auto.b482cd0622c5"), arrayType)
+        ],
+        variadicInputs: {
+          minimum: 2,
+          defaultCount: 2,
+          maximum: 64,
+          preserveAB: true,
+          template: port(
+            "a",
+            window.RMLI18n.t("ui.auto.33a84c726bd4"),
+            itemType
+          )
+        }
+      };
+    },
+    codegenCollect(api) {
+      if (!generatedOutputIsUsed(api, "value")) {
+        return;
+      }
+      const {
+        itemType,
+        cacheId,
+        inputIds,
+        definitions,
+        inputCodes,
+        signature
+      } = cachedArrayCodegenDefinition(api);
+      const cacheToken = api.token(
+        `cached-array:${itemType}:${cacheId}:${signature}`
+      );
+      const itemCsType = api.csType(itemType);
+      definitions.forEach((definition, index) => {
+        if (
+          definition.connected &&
+          !definition.constant
+        ) {
+          api.diagnostic(
+            `Cached typed array '${cacheId}' only accepts disconnected defaults or literal constant inputs; input '${inputIds[index]}' is dynamic.`
+          );
+        }
+      });
+      const values = inputCodes.join(", ");
+      const field = `_cachedArray${cacheToken}`;
+
+      api.addMember(
+        `collection.cachedArray:${itemType}:${cacheId}:${signature}`,
+`private static readonly ${itemCsType}[] ${field} = new ${itemCsType}[] { ${values} };`
+      );
+    },
+    codegenExpression(api) {
+      const {
+        itemType,
+        cacheId,
+        signature
+      } = cachedArrayCodegenDefinition(api);
+      const cacheToken = api.token(
+        `cached-array:${itemType}:${cacheId}:${signature}`
+      );
+      return `_cachedArray${cacheToken}`;
+    }
+  });
+
+  registerNode("collection.getTypedArrayItemAtIndex", {
+    title: "Get typed array item at index",
+    group: window.RMLI18n.t("ui.literal.4bbb632f02fd"),
+    symbol: "T[i]",
+    description:
+      "Reads a typed array directly without object conversion, boxing or reflection.",
+    parameters: normalListNodeParameters(),
+    inputs: [
+      port("array", window.RMLI18n.t("ui.auto.cb9729d42e95"), normalArrayType("string")),
+      port("index", window.RMLI18n.t("ui.auto.3909ec65b935"), "int")
+    ],
+    outputs: [
+      port("item", window.RMLI18n.t("ui.auto.b482cd0622c5"), "string"),
+      port("success", window.RMLI18n.t("ui.auto.779e8eb06b44"), "bool"),
+      port("count", window.RMLI18n.t("ui.auto.cd6db24e1acf"), "int")
+    ],
+    resolveDefinition(node) {
+      const { itemType, arrayType } = normalArrayNodeType(node);
+      return {
+        inputs: [
+          port("array", window.RMLI18n.t("ui.auto.cb9729d42e95"), arrayType),
+          port("index", window.RMLI18n.t("ui.auto.3909ec65b935"), "int")
+        ],
+        outputs: [
+          port("item", window.RMLI18n.t("ui.auto.b482cd0622c5"), itemType),
+          port("success", window.RMLI18n.t("ui.auto.779e8eb06b44"), "bool"),
+          port("count", window.RMLI18n.t("ui.auto.cd6db24e1acf"), "int")
+        ]
+      };
+    },
+    codegenCollect(api) {
+      api.addMember(
+        "collection.getTypedArrayItemAtIndex.runtime",
+`private static T GraphTypedArrayItemAt<T>(T[]? array, int index)
+{
+    return array != null && (uint)index < (uint)array.Length
+        ? array[index]
+        : default!;
+}
+
+private static bool GraphTypedArrayHasIndex<T>(T[]? array, int index)
+{
+    return array != null && (uint)index < (uint)array.Length;
+}`
+      );
+    },
+    codegenExpression(api) {
+      const { itemType } = normalArrayNodeType(api.node);
+      const itemCsType = api.csType(itemType);
+      if (api.portId === "success") {
+        return `GraphTypedArrayHasIndex<${itemCsType}>(${api.input("array").code}, ${api.input("index").code})`;
+      }
+      if (api.portId === "count") {
+        return `((${api.input("array").code})?.Length ?? 0)`;
+      }
+      return `GraphTypedArrayItemAt<${itemCsType}>(${api.input("array").code}, ${api.input("index").code})`;
+    }
+  });
+
+  registerNode("collection.selectArrayByIndex", {
+    title: "Select typed array by index",
+    group: window.RMLI18n.t("ui.literal.4bbb632f02fd"),
+    symbol: "T[][i]",
+    description:
+      "Selects one typed array by index. The index is evaluated once, only the selected array input is evaluated, and an out-of-range index returns an empty typed array.",
+    parameters: normalListNodeParameters(),
+    inputs: [
+      port("index", window.RMLI18n.t("ui.auto.3909ec65b935"), "int"),
+      port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), normalArrayType("string")),
+      port("b", window.RMLI18n.t("ui.auto.47a451f273f8"), normalArrayType("string"))
+    ],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 64,
+      preserved: 1,
+      preserveAB: true,
+      template: port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), normalArrayType("string"))
+    },
+    outputs: [
+      port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), normalArrayType("string"))
+    ],
+    resolveDefinition(node) {
+      const { arrayType } = normalArrayNodeType(node);
+      return {
+        inputs: [
+          port("index", window.RMLI18n.t("ui.auto.3909ec65b935"), "int"),
+          port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), arrayType),
+          port("b", window.RMLI18n.t("ui.auto.47a451f273f8"), arrayType)
+        ],
+        outputs: [
+          port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), arrayType)
+        ],
+        variadicInputs: {
+          minimum: 2,
+          defaultCount: 2,
+          maximum: 64,
+          preserved: 1,
+          preserveAB: true,
+          template: port(
+            "a",
+            window.RMLI18n.t("ui.auto.33a84c726bd4"),
+            arrayType
+          )
+        }
+      };
+    },
+    codegenExpression(api) {
+      const { arrayType } = normalArrayNodeType(api.node);
+      const count = Math.max(
+        2,
+        Math.min(
+          64,
+          Number(api.node.parameters?.variadicInputCount) || 2
+        )
+      );
+      const ids = normalVariadicIds(count);
+      const branches = ids
+        .map((id, index) => `${index} => ${api.input(id).code}`)
+        .join(", ");
+      const fallback = api.csDefault(arrayType);
+      return `((${api.input("index").code}) switch { ${branches}, _ => ${fallback} })`;
+    }
+  });
+
+  registerNode("geometry.samplePolyline2D", {
+    title: "Sample 2D polyline",
+    group: "Geometry",
+    symbol: "PATH@T",
+    description:
+      "Samples a float2 polyline by normalized distance. The path and parameter are each evaluated once; traversal uses typed locals and allocates nothing.",
+    inputs: [
+      port("path", "Path", normalArrayType("float2")),
+      port("t", "Normalized position", "float", { defaultCs: "0f" })
+    ],
+    outputs: [
+      port("value", window.RMLI18n.t("ui.auto.b482cd0622c5"), "float2")
+    ],
+    codegenCollect(api) {
+      ensureNormalArrayType("float2");
+      api.addMember(
+        "geometry.samplePolyline2D.runtime",
+`private static Elements.Core.float2 GraphSamplePolyline2D(Elements.Core.float2[] path, float t)
+{
+    if (path == null || path.Length == 0)
+    {
+        return Elements.Core.float2.Zero;
+    }
+
+    if (path.Length == 1)
+    {
+        return path[0];
+    }
+
+    float totalLength = 0f;
+    for (int i = 0; i < path.Length - 1; i++)
+    {
+        float dx = path[i + 1].x - path[i].x;
+        float dy = path[i + 1].y - path[i].y;
+        totalLength += MathF.Sqrt(dx * dx + dy * dy);
+    }
+
+    float repeated = t - MathF.Floor(t);
+    float remaining = repeated * totalLength;
+    for (int i = 0; i < path.Length - 1; i++)
+    {
+        Elements.Core.float2 from = path[i];
+        Elements.Core.float2 to = path[i + 1];
+        float dx = to.x - from.x;
+        float dy = to.y - from.y;
+        float segmentLength = MathF.Sqrt(dx * dx + dy * dy);
+        if (remaining <= segmentLength || i == path.Length - 2)
+        {
+            float segmentT = segmentLength <= 0.00001f
+                ? 0f
+                : remaining / segmentLength;
+            return from + (to - from) * segmentT;
+        }
+
+        remaining -= segmentLength;
+    }
+
+    return path[path.Length - 1];
+}`
+      );
+    },
+    codegenExpression(api) {
+      return `GraphSamplePolyline2D(${api.input("path").code}, ${api.input("t").code})`;
     }
   });
 

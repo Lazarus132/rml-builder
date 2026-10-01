@@ -4376,7 +4376,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.24.38-source-comment-cleanup",
+      "../workers/graph_codegen_worker.js?v=1.24.54-hover-owner-binding",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -38820,8 +38820,9 @@ function updateExportDialog() {
       }
     }
 
-    elements.exportDownloadHint.textContent = "";
-    elements.exportDownloadHint.classList.remove("error");
+    elements.exportDownloadHint.textContent =
+      exportReadiness.diagnostics.join("\n");
+    elements.exportDownloadHint.classList.add("error");
     return;
   }
   if (!publication) {

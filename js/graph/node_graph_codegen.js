@@ -15383,6 +15383,37 @@ function buildTypedNodeGraphCSharpContribution(
           nodeId,
           portId
         ),
+      callbackCapture(
+        name,
+        csType,
+        defaultCode
+      ) {
+        const normalizedName = String(
+          name || "value"
+        ).trim() || "value";
+        const key = graphCsEscapeString(
+          `callback-capture:${
+            node?.id || "graph"
+          }:${normalizedName}`
+        );
+        const type = String(
+          csType || "object?"
+        ).trim() || "object?";
+        const fallback = String(
+          defaultCode || "default!"
+        ).trim() || "default!";
+
+        return Object.freeze({
+          key,
+          read:
+            `ReadGraphExecutionValue<${type}>("${key}", ${fallback})`,
+          write(valueCode) {
+            return `WriteGraphExecutionValue("${key}", ${String(
+              valueCode || fallback
+            )});`;
+          }
+        });
+      },
       token: graphCsMethodToken,
       identifier: graphCsIdentifier,
       escapeString:
