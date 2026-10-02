@@ -771,7 +771,7 @@ async function ensureRuntime(
       "../graph/node_graph_registry.js?v=1-physical-modules-v752-catalog-cache-equivalent"
     );
     importScripts(
-      "../catalog/mod_nodes.js?v=819-hover-owner-binding"
+      "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
       "../compiler/visual_csharp.js?v=1.24.31-compile-only-on-zip"

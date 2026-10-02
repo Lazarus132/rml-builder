@@ -2376,7 +2376,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.24.54-hover-owner-binding",
+        "js/workers/graph_codegen_worker.js?v=1.24.31-compile-only-on-zip",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }

@@ -187,7 +187,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.24.54-hover-owner-binding&status-catalog=12",
+          url: "../catalog/catalog_loader.js?v=1.24.31-compile-only-on-zip&status-catalog=4",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&

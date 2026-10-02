@@ -136,7 +136,7 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=819-hover-owner-binding",
+    "mod_nodes.js?v=803-visual-function-semantics",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
@@ -13116,14 +13116,6 @@
               )
             )
           );
-        const fingerprintMismatchedCache =
-          Boolean(
-            cached?.catalog &&
-            cachedFingerprint &&
-            String(live.fingerprint || "") &&
-            String(live.fingerprint || "") !==
-              String(cachedFingerprint || "")
-          );
 
         if (!fingerprintMatchedCache) {
           publishScannerCheckProgress(
@@ -13145,11 +13137,7 @@
           );
           updateScannerCheckWork({
             title:
-              window.RMLI18n.t(
-                fingerprintMismatchedCache
-                  ? "ui.auto.864578600d79"
-                  : "ui.auto.1b67e3c912af"
-              ),
+              window.RMLI18n.t("ui.auto.864578600d79"),
             message:
               window.RMLI18n.t("ui.auto.ef5bac1920fc"),
             progress: 5
@@ -13159,8 +13147,6 @@
             {
               phase:
                 "catalog-demand-stream",
-              fingerprintMismatch:
-                fingerprintMismatchedCache,
               message:
                 "The API catalog is being updated in bounded demand records."
             }
