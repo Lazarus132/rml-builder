@@ -2,10 +2,10 @@
   "use strict";
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.24.31-compile-only-on-zip";
+    "1.24.90-reliable-folder-direct-dll-build";
 
   if (
-    window.RMLScriptLoader?.version >= 47 &&
+    window.RMLScriptLoader?.version >= 48 &&
     window.RMLScriptLoader?.moduleId ===
       SCRIPT_LOADER_MODULE_ID
   ) {
@@ -127,13 +127,13 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../ui/builder_replacement_dialog.js?v=1.24.31-compile-only-on-zip",
+          url: "../ui/builder_replacement_dialog.js?v=1.24.90-reliable-folder-direct-dll-build",
           ready: () =>
             window.RMLBuilderReplacementDialog
               ?.moduleId === SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../ui/builder_work_controller.js?v=1.24.31-compile-only-on-zip",
+          url: "../ui/builder_work_controller.js?v=1.24.90-reliable-folder-direct-dll-build",
           ready: () =>
             window.RMLBuilderWorkController
               ?.moduleId === SCRIPT_LOADER_MODULE_ID
@@ -143,7 +143,7 @@
     "scanner-connection": Object.freeze({
       dependencies: Object.freeze([]),
       files: Object.freeze([Object.freeze({
-        url: "../graph/runtime_bridge.js?v=1.24.31-compile-only-on-zip&status-runtime=4",
+        url: "../graph/runtime_bridge.js?v=1.24.90-reliable-folder-direct-dll-build&status-runtime=4",
         ready: () => window.RMLRuntimeBridge?.version >= 14 &&
           typeof window.RMLRuntimeBridge?.connect === "function"
       })])
@@ -187,25 +187,25 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.24.31-compile-only-on-zip&status-catalog=4",
+          url: "../catalog/catalog_loader.js?v=1.24.90-reliable-folder-direct-dll-build&status-catalog=7&portable-types=1&specializations=2&inherited-demand=1",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
             Number(
               window.RMLCatalogImportGate
                 ?.loaderVersion
-            ) === 91 &&
+            ) === 95 &&
             Number(
               window.RMLCatalogImportGate
                 ?.requiredApiFactoryVersion
-            ) === 38 &&
+            ) === 41 &&
             (
               typeof window.RMLBaseModNodesReady?.then === "function" ||
               typeof window.RMLModNodesReady?.then === "function"
             )
         }),
         Object.freeze({
-          url: "../graph/node_graph_registry.js?v=1-physical-modules-v752-catalog-cache-equivalent",
+          url: "../graph/node_graph_registry.js?v=1.24.90-reliable-folder-direct-dll-build&portable-types=1",
           ready: () =>
             typeof window.RMLModNodeRegistry?.getNodeDefinitions ===
               "function"
@@ -239,7 +239,13 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.24.31-compile-only-on-zip",
+          url: "../graph/node_graph_type_migration.js?v=1.24.40-all-ports-fix2&type-migration=2&portable-types=1",
+          ready: () =>
+            window.RMLGraphTypeImportMigrations
+              ?.version === 1
+        }),
+        Object.freeze({
+          url: "../graph/node_graph_codegen.js?v=1.24.90-reliable-folder-direct-dll-build&portable-types=1&specializations=1",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -256,7 +262,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.24.31-compile-only-on-zip",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.24.90-reliable-folder-direct-dll-build",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -265,13 +271,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.24.31-compile-only-on-zip",
+          url: "../graph/node_graph_composites.js?v=1.24.90-reliable-folder-direct-dll-build",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.24.31-compile-only-on-zip",
+          url: "../graph/node_graph_custom_csharp.js?v=1.24.90-reliable-folder-direct-dll-build&worker-null-fallback=3&portable-types=1&specializations=1",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -280,17 +286,17 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.24.31-compile-only-on-zip&status-readiness=4",
+          url: "../graph/node_graph_view.js?v=1.24.90-reliable-folder-direct-dll-build&status-readiness=5&schema=4&type-migration=1&portable-types=1&specializations=1",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.24.31-compile-only-on-zip",
+          url: "../graph/node_graph_bootstrap.js?v=1.24.90-reliable-folder-direct-dll-build&type-migration=1&portable-types=1&specializations=1",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
-            window.RMLDynamicGraphHost?.version >= 73 &&
+            window.RMLDynamicGraphHost?.version >= 74 &&
             typeof window.RMLDynamicGraphHost?.isReady === "function"
         })
       ]),
@@ -310,7 +316,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=1.24.31-compile-only-on-zip",
+          url: "../graph/graph_gpu_renderer.js?v=1.24.90-reliable-folder-direct-dll-build",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })
@@ -382,8 +388,8 @@
         "RMLCatalogImportGate",
         {
           loaderModuleId: SCRIPT_LOADER_MODULE_ID,
-          loaderVersion: 91,
-          requiredApiFactoryVersion: 38
+          loaderVersion: 95,
+          requiredApiFactoryVersion: 41
         },
         {
           loaderModuleId:
@@ -465,12 +471,23 @@
         }
       );
     }
+    if (path.endsWith("/graph/node_graph_type_migration.js")) {
+      return typed(
+        "RMLGraphTypeImportMigrations",
+        { version: 1 },
+        {
+          version:
+            window.RMLGraphTypeImportMigrations
+              ?.version ?? null
+        }
+      );
+    }
     if (path.endsWith("/graph/node_graph_bootstrap.js")) {
       return typed(
         "RMLDynamicGraphHost",
         {
           loaderModuleId: SCRIPT_LOADER_MODULE_ID,
-          minimumVersion: 73,
+          minimumVersion: 74,
           isReadyType: "function"
         },
         {
@@ -1002,7 +1019,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 47,
+      version: 48,
       moduleId: SCRIPT_LOADER_MODULE_ID,
       ensure,
       isLoaded(name) {

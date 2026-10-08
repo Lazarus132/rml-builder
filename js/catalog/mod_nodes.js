@@ -3729,6 +3729,7 @@ emit ? `${emit}()` : "{ }"])
     title: window.RMLI18n.t("ui.auto.6bc5b9076214"),
     group: window.RMLI18n.t("ui.literal.09b6aa6507d0"),
     symbol: "H",
+    expertOnly: true,
     description:
       window.RMLI18n.t("ui.auto.76e1152b029a"),
     parameters: [
@@ -3741,13 +3742,13 @@ emit ? `${emit}()` : "{ }"])
       pText(
         "targetType",
         window.RMLI18n.t("ui.literal.a45f8055dba4"),
-        "FrooxEngine.Engine",
+        "",
         window.RMLI18n.t("ui.literal.6f69bcf6791c")
       ),
       pText(
         "targetMethod",
         window.RMLI18n.t("ui.literal.e0fc2b617c9e"),
-        window.RMLI18n.t("ui.literal.aa15d6e5885c"),
+        "",
         window.RMLI18n.t("ui.literal.c3dd233540d6")
       ),
       pText(
@@ -3882,129 +3883,6 @@ failureSource]);
       return `_patchContext${nodeToken(api)}`;
     }
   });
-
-  function registerLifecycleHarmonyPreset(
-    id,
-    title,
-    symbol,
-    targetType,
-    targetMethod,
-    description
-  ) {
-    const harmonyDefinition =
-      registry.getNodeDefinition(
-        "harmony.patchEvent"
-      );
-
-    registerNode(id, {
-      title,
-      group: window.RMLI18n.t("ui.literal.033df3d297c2"),
-      symbol,
-      description:
-        `${description} The target type and method remain editable because internal Resonite names can change between builds.`,
-      parameters: [
-        pSelect(
-          "patchKind",
-          window.RMLI18n.t("ui.literal.610d75ebc6c6"),
-          ["prefix", "postfix", "finalizer"],
-          "postfix"
-        ),
-        pText(
-          "targetType",
-          window.RMLI18n.t("ui.literal.a45f8055dba4"),
-          targetType,
-          window.RMLI18n.t("ui.literal.9823faed7e30")
-        ),
-        pText(
-          "targetMethod",
-          window.RMLI18n.t("ui.literal.e0fc2b617c9e"),
-          targetMethod,
-          window.RMLI18n.t("ui.literal.c3bb456b3556")
-        ),
-        pText(
-          "argumentTypes",
-          window.RMLI18n.t("ui.auto.631184b96d50"),
-          "",
-          window.RMLI18n.t("ui.literal.8691ff4ab349")
-        ),
-        pNumber(
-          "priority",
-          window.RMLI18n.t("ui.literal.0d5118820149"),
-          400
-        ),
-        pBool(
-          "captureResult",
-          window.RMLI18n.t("ui.literal.e7288b2c2cc7"),
-          false
-        )
-      ],
-      outputs: [
-        port("called", window.RMLI18n.t("ui.auto.6e8b938b82e2"), "impulse"),
-        port("context", window.RMLI18n.t("ui.auto.ada776fb609f"), "patchContext")
-      ],
-      codegenCollect:
-        harmonyDefinition.codegenCollect,
-      codegenExpression:
-        harmonyDefinition.codegenExpression
-    });
-  }
-
-  registerLifecycleHarmonyPreset(
-    "lifecycle.worldStart",
-    window.RMLI18n.t("ui.literal.9ac6dd7e519a"),
-    window.RMLI18n.t("ui.literal.231b3fc8d429"),
-    "FrooxEngine.World",
-    window.RMLI18n.t("ui.literal.0bd1faf074d7"),
-    window.RMLI18n.t("ui.literal.1b5e56a6c9a1")
-  );
-  registerLifecycleHarmonyPreset(
-    "lifecycle.worldDestroy",
-    window.RMLI18n.t("ui.literal.4318495b28e5"),
-    window.RMLI18n.t("ui.literal.83a86dd559cb"),
-    "FrooxEngine.World",
-    window.RMLI18n.t("ui.literal.9d34c39bf776"),
-    window.RMLI18n.t("ui.literal.b94126360d17")
-  );
-  registerLifecycleHarmonyPreset(
-    "lifecycle.userJoin",
-    window.RMLI18n.t("ui.literal.fb5fcfccb0bf"),
-    window.RMLI18n.t("ui.literal.9de39be68f15"),
-    "FrooxEngine.World",
-    window.RMLI18n.t("ui.literal.fc1192ea5901"),
-    window.RMLI18n.t("ui.literal.3ec412ab9320")
-  );
-  registerLifecycleHarmonyPreset(
-    "lifecycle.userLeave",
-    window.RMLI18n.t("ui.literal.c245ef87bfc5"),
-    window.RMLI18n.t("ui.literal.e57b26fceb81"),
-    "FrooxEngine.World",
-    window.RMLI18n.t("ui.literal.7edcd4e55626"),
-    window.RMLI18n.t("ui.literal.cd5bd9b80fe1")
-  );
-  registerLifecycleHarmonyPreset(
-    "lifecycle.componentAttach",
-    window.RMLI18n.t("ui.literal.9a005008703e"),
-    window.RMLI18n.t("ui.literal.8a5ebc115bc7"),
-    "FrooxEngine.Component",
-    window.RMLI18n.t("ui.literal.175f4a81f6c8"),
-    window.RMLI18n.t("ui.literal.3ffbc6f80244")
-  );
-  registerLifecycleHarmonyPreset(
-    "lifecycle.componentDestroy",
-    window.RMLI18n.t("ui.literal.2c3ffdb1abb5"),
-    window.RMLI18n.t("ui.literal.a46c36996215"),
-    "FrooxEngine.Component",
-    window.RMLI18n.t("ui.literal.9d34c39bf776"),
-    window.RMLI18n.t("ui.literal.b98cfe9ca008")
-  );
-  registerLifecycleHarmonyPreset(
-    "lifecycle.engineUpdate",
-    window.RMLI18n.t("ui.literal.3c90d35f073e"),
-    window.RMLI18n.t("ui.literal.52c6c1812015"),
-    "FrooxEngine.Engine",
-    window.RMLI18n.t("ui.literal.fb91e24fa52d"),
-    window.RMLI18n.t("ui.literal.0acebe062529")
-  );
 
   registerNode("harmony.patchArgument", {
     title: window.RMLI18n.t("ui.auto.2d373316f88c"),
@@ -4193,7 +4071,7 @@ failureSource]);
     description:
       window.RMLI18n.t("ui.auto.d055cab326ae"),
     parameters: [
-      pText("targetType", window.RMLI18n.t("ui.literal.a45f8055dba4"), "FrooxEngine.SomeType"),
+      pText("targetType", window.RMLI18n.t("ui.literal.a45f8055dba4"), ""),
       pText("targetMethod", window.RMLI18n.t("ui.literal.e0fc2b617c9e"), window.RMLI18n.t("ui.literal.04ad15ba1756")),
       pText("targetArguments", window.RMLI18n.t("ui.literal.d364cd5224a2"), ""),
       pText(
@@ -4261,25 +4139,6 @@ failureSource]);
     codegenExpression(api) {
       ensureReflectionRuntime(api);
       const nameCode = String(api.input("name").code || "").trim();
-
-      const literalMatch = nameCode.match(/^"((?:\\.|[^"\\])*)"$/);
-      if (literalMatch) {
-        const literal = literalMatch[1]
-          .replace(/\\"/g, '"')
-          .replace(/\\\\/g, "\\");
-        const directTypes = new Map([
-          ["FrooxEngine.UIX.RectTransform", "FrooxEngine.UIX.RectTransform"],
-          ["FrooxEngine.UIX.Image", "FrooxEngine.UIX.Image"],
-          ["FrooxEngine.UI_UnlitMaterial", "FrooxEngine.UI_UnlitMaterial"],
-          ["FrooxEngine.TimeIntDriver", "FrooxEngine.TimeIntDriver"],
-          ["FrooxEngine.ValueMultiDriver`1[[Elements.Core.float2, Elements.Core]], FrooxEngine", "FrooxEngine.ValueMultiDriver<Elements.Core.float2>"],
-          ["FrooxEngine.ValueMultiplexer`1[[Elements.Core.float2, Elements.Core]], FrooxEngine", "FrooxEngine.ValueMultiplexer<Elements.Core.float2>"]
-        ]);
-        const direct = directTypes.get(literal);
-        if (direct) {
-          return `typeof(${direct})`;
-        }
-      }
       return `FindType(${nameCode}) ?? throw new System.TypeLoadException(${nameCode})`;
     }
   });
@@ -6628,9 +6487,10 @@ faulted ? `\n        ${faulted}();` : ""])
     }
 
     const broadType = catalogGraphType(normalized);
+    const broadInformation = broadType
+      ? registry.getTypeDefinitions()?.[broadType]
+      : null;
     if (broadType) {
-      const broadInformation =
-        registry.getTypeDefinitions()?.[broadType];
       if (
         normalizedCatalogTypeName(
           broadInformation?.csType || ""
@@ -6664,10 +6524,15 @@ faulted ? `\n        ${faulted}();` : ""])
       referenceType: !valueType,
       valueType: true,
       globalGenericCandidate: false,
-      assignableTo: [
+      assignableTo: [...new Set([
+        ...(Array.isArray(
+          broadInformation?.assignableTo
+        )
+          ? broadInformation.assignableTo
+          : []),
         ...(broadType ? [broadType] : []),
         "object"
-      ],
+      ])],
       constraints: valueType
         ? ["value", "serializable"]
         : ["reference", "serializable"],
@@ -6793,8 +6658,27 @@ faulted ? `\n        ${faulted}();` : ""])
     );
   }
 
-  const NORMAL_CATALOG_DELEGATES =
+  const NORMAL_FALLBACK_DELEGATE =
+    normalClosedDelegateSignature(
+      "System.Action<System.String>"
+    );
+  const NORMAL_DISCOVERED_DELEGATES =
     normalCatalogDelegateSignatures();
+  const NORMAL_CATALOG_DELEGATES = [
+    ...new Map(
+      [
+        NORMAL_FALLBACK_DELEGATE,
+        ...NORMAL_DISCOVERED_DELEGATES
+      ]
+        .filter(Boolean)
+        .map(signature => [
+          signature.csType,
+          signature
+        ])
+    ).values()
+  ].sort((left, right) =>
+    left.csType.localeCompare(right.csType)
+  );
   const NORMAL_CATALOG_DELEGATE_BY_CS = new Map(
     NORMAL_CATALOG_DELEGATES.map(signature => [
       signature.csType,
@@ -6802,12 +6686,40 @@ faulted ? `\n        ${faulted}();` : ""])
     ])
   );
 
+  function normalSelectedDelegateSignature(
+    node,
+    fallback
+  ) {
+    const custom = String(
+      node?.parameters?.customDelegateType || ""
+    ).trim();
+    const selected = String(
+      node?.parameters?.delegateType || ""
+    ).trim();
+    return normalClosedDelegateSignature(
+      custom || selected
+    ) || NORMAL_CATALOG_DELEGATE_BY_CS.get(
+      fallback
+    ) || NORMAL_FALLBACK_DELEGATE;
+  }
+
   function ensureNormalDelegateGraphType(signature) {
     refreshNormalGraphTypeIndex();
     if (normalGraphTypeByCs.has(signature.csType)) {
       return normalGraphTypeByCs.get(signature.csType);
     }
     const id = `normalDelegate:${normalStableHash(signature.csType)}`;
+    const delegateBaseTypes = [
+      "System.MulticastDelegate",
+      "System.Delegate",
+      "System.ICloneable",
+      "System.Runtime.Serialization.ISerializable",
+      "System.Object"
+    ].map(ensureNormalExactGraphType);
+    const references =
+      catalogAssemblyReferencesForCsType(
+        signature.csType
+      );
     registerType(id, {
       label: signature.csType.replace(/^System\./, ""),
       short: window.RMLI18n.t("ui.literal.1b3cb4846951"),
@@ -6815,10 +6727,18 @@ faulted ? `\n        ${faulted}();` : ""])
       csType: signature.csType,
       defaultCs: "null!",
       referenceType: true,
-      valueType: false,
+      valueType: true,
       globalGenericCandidate: false,
-      assignableTo: ["object"],
-      constraints: ["value", "reference", "delegate"]
+      assignableTo: [...new Set(
+        delegateBaseTypes
+      )],
+      constraints: ["value", "reference", "delegate"],
+      assembly:
+        references[0]?.include || "",
+      assemblies: references.map(reference =>
+        reference.include
+      ),
+      assemblyReferences: references
     });
     normalGraphTypeByCs.set(signature.csType, id);
     return id;
@@ -6834,20 +6754,25 @@ faulted ? `\n        ${faulted}();` : ""])
     ensureNormalDelegateGraphType(signature);
   }
 
-  if (NORMAL_CATALOG_DELEGATES.length > 0) {
-    const defaultDelegate =
-      NORMAL_CATALOG_DELEGATE_BY_CS.has(
-        "System.Action<System.String>"
-      )
-        ? "System.Action<System.String>"
-        : NORMAL_CATALOG_DELEGATES[0].csType;
+  const defaultDelegate =
+    NORMAL_DISCOVERED_DELEGATES.find(
+      signature =>
+        signature.csType ===
+          NORMAL_FALLBACK_DELEGATE.csType
+    )?.csType ||
+    NORMAL_DISCOVERED_DELEGATES[0]
+      ?.csType ||
+    NORMAL_FALLBACK_DELEGATE.csType;
 
-    registerNode("flow.typedCallback", {
+  registerNode("flow.typedCallback", {
       title: window.RMLI18n.t("ui.auto.f5a1e9789893"),
       group: window.RMLI18n.t("ui.literal.86eff8eb789b"),
       symbol: "CALL",
       description:
         window.RMLI18n.t("ui.auto.e4862e614184"),
+      codegenLexicalImpulseOutputs: [
+        "body"
+      ],
       parameters: [
         pSelect(
           "delegateType",
@@ -6856,6 +6781,18 @@ faulted ? `\n        ${faulted}();` : ""])
             signature => signature.csType
           ),
           defaultDelegate
+        ),
+        pText(
+          "customDelegateType",
+          "Exact delegate type (optional)",
+          "",
+          "A closed System.Action, System.Func, System.Predicate or System.Comparison type. When set, it overrides the catalog selection."
+        ),
+        pBool(
+          "openGraphEntry",
+          "Track graph execution scope",
+          true,
+          "Disable only when the delegate is invoked synchronously from an already active graph entry."
         )
       ],
       inputs: [],
@@ -6871,10 +6808,10 @@ faulted ? `\n        ${faulted}();` : ""])
       ],
       resolveDefinition(node) {
         const selected =
-          NORMAL_CATALOG_DELEGATE_BY_CS.get(
-            String(node.parameters?.delegateType || "")
-          ) ||
-          NORMAL_CATALOG_DELEGATE_BY_CS.get(defaultDelegate);
+          normalSelectedDelegateSignature(
+            node,
+            defaultDelegate
+          );
         return {
           inputs: selected.returnCsType
             ? [
@@ -6907,10 +6844,10 @@ faulted ? `\n        ${faulted}();` : ""])
       },
       codegenExpression(api) {
         const selected =
-          NORMAL_CATALOG_DELEGATE_BY_CS.get(
-            String(api.node.parameters?.delegateType || "")
-          ) ||
-          NORMAL_CATALOG_DELEGATE_BY_CS.get(defaultDelegate);
+          normalSelectedDelegateSignature(
+            api.node,
+            defaultDelegate
+          );
         const token = nodeToken(api);
         const argumentIndex =
           String(api.portId || "").match(
@@ -6922,35 +6859,84 @@ faulted ? `\n        ${faulted}();` : ""])
             selected.argumentCsTypes[index]
           );
           const information = normalTypeInformation(graphType);
-          return `ReadGraphExecutionValue<${api.csType(graphType)}>("normal-callback:${token}:${index}", ${information.defaultCs || "default!"})`;
+          return information.defaultCs || "default!";
         }
 
-        const body = api.inlineMethod(
-          api.node.id,
-          "body"
-        );
+        const field = `_typedCallback${token}`;
+        const callback = `TypedCallback${token}`;
         const parameters = selected.argumentCsTypes.map(
           (argument, index) =>
             `${argument} argument${index}`
         );
-        const writes = selected.argumentCsTypes.map(
-          (_argument, index) =>
-            `WriteGraphExecutionValue("normal-callback:${token}:${index}", argument${index});`
+        const bindings = selected.argumentCsTypes.map(
+          (argument, index) => ({
+            nodeId: api.node.id,
+            portId: `argument${index}`,
+            code: `argument${index}`,
+            type: ensureNormalExactGraphType(argument)
+          })
         );
-        const statements = [
-          "using GraphExecutionScope scope = OpenGraphEntry();",
-          ...writes,
-          ...(body ? [`${body}();`] : [])
-        ];
-        if (selected.returnCsType) {
-          statements.push(
-            `return ${api.input("result").code};`
+        api.addField(
+          `${api.node.id}.typed-callback-field`,
+          `private static readonly ${selected.csType} ${field} = ${callback};`
+        );
+        api.deferCodegen(
+          `${api.node.id}.typed-callback-member`,
+          () => {
+            const flow = api.lexicalInlineScope(
+              api.node.id,
+              "body",
+              bindings,
+              `Callback${token}`
+            );
+            const result = selected.returnCsType
+              ? api.withOutputBindings(
+                  flow.bindings,
+                  () => api.input("result").code
+                )
+              : "";
+            const scope =
+              api.node.parameters
+                ?.openGraphEntry === false
+                ? ""
+                : "    using GraphExecutionScope scope = OpenGraphEntry();\n";
+            const locals = flow.locals
+              ? `    ${flow.locals}\n\n`
+              : "";
+            const returnType =
+              selected.returnCsType || "void";
+            const returnStatement =
+              selected.returnCsType
+                ? `\n    return ${result};`
+                : "";
+            api.addMember(
+              `${api.node.id}.typed-callback-member`,
+`private static ${returnType} ${callback}(${parameters.join(", ")})
+{
+${scope}${locals}${flow.declarations}
+
+    ${flow.entryMethod}();${returnStatement}
+}`
+            );
+          }
+        );
+        const requested = String(
+          api.node.parameters
+            ?.customDelegateType ||
+          api.node.parameters?.delegateType ||
+          ""
+        ).trim();
+        if (
+          requested &&
+          !normalClosedDelegateSignature(requested)
+        ) {
+          api.warning(
+            `${api.definition.title}: '${requested}' is not a supported closed delegate signature; '${selected.csType}' is used instead.`
           );
         }
-        return `new ${selected.csType}((${parameters.join(", ")}) =>\n        {\n            ${statements.join("\n            ")}\n        })`;
+        return field;
       }
-    });
-  }
+  });
 
   function normalSelectedCsType(
     api,
@@ -10765,63 +10751,6 @@ attempt ? `\n    ${attempt}();` : ""])
     result: "harmony.setResult"
   });
 
-  {
-    const harmonyDefinition = registry.getNodeDefinition("harmony.patchEvent");
-    const lifecyclePresets = {
-      worldStart: [window.RMLI18n.t("ui.literal.9ac6dd7e519a"), window.RMLI18n.t("ui.literal.231b3fc8d429"), "FrooxEngine.World", window.RMLI18n.t("ui.literal.0bd1faf074d7")],
-      worldDestroy: [window.RMLI18n.t("ui.literal.4318495b28e5"), window.RMLI18n.t("ui.literal.83a86dd559cb"), "FrooxEngine.World", window.RMLI18n.t("ui.literal.9d34c39bf776")],
-      userJoin: [window.RMLI18n.t("ui.literal.fb5fcfccb0bf"), window.RMLI18n.t("ui.literal.9de39be68f15"), "FrooxEngine.World", window.RMLI18n.t("ui.literal.fc1192ea5901")],
-      userLeave: [window.RMLI18n.t("ui.literal.c245ef87bfc5"), window.RMLI18n.t("ui.literal.e57b26fceb81"), "FrooxEngine.World", window.RMLI18n.t("ui.literal.7edcd4e55626")],
-      componentAttach: [window.RMLI18n.t("ui.literal.9a005008703e"), window.RMLI18n.t("ui.literal.8a5ebc115bc7"), "FrooxEngine.Component", window.RMLI18n.t("ui.literal.175f4a81f6c8")],
-      componentDestroy: [window.RMLI18n.t("ui.literal.2c3ffdb1abb5"), window.RMLI18n.t("ui.literal.a46c36996215"), "FrooxEngine.Component", window.RMLI18n.t("ui.literal.9d34c39bf776")],
-      engineUpdate: [window.RMLI18n.t("ui.literal.3c90d35f073e"), window.RMLI18n.t("ui.literal.52c6c1812015"), "FrooxEngine.Engine", window.RMLI18n.t("ui.literal.fb91e24fa52d")]
-    };
-    const legacyLifecycleIds = {
-      worldStart: "lifecycle.worldStart", worldDestroy: "lifecycle.worldDestroy",
-      userJoin: "lifecycle.userJoin", userLeave: "lifecycle.userLeave",
-      componentAttach: "lifecycle.componentAttach", componentDestroy: "lifecycle.componentDestroy",
-      engineUpdate: "lifecycle.engineUpdate"
-    };
-    for (const legacyId of Object.values(legacyLifecycleIds)) {
-      const definition = registry.getNodeDefinition(legacyId);
-      if (definition) definition.hiddenFromPalette = true;
-    }
-    registerNode("lifecycle.harmonyEvent", {
-      title: window.RMLI18n.t("ui.auto.b18fd8a950d5"),
-      group: window.RMLI18n.t("ui.literal.033df3d297c2"),
-      symbol: "LIFE",
-      parameters: [
-        pSelect("operation", window.RMLI18n.t("ui.auto.9162bc274ebc"), Object.entries(lifecyclePresets).map(([value, preset]) => [value, preset[0]]), "worldStart", "", { affectsPorts: true, affectsNode: true, commitImmediately: true }),
-        pSelect("patchKind", window.RMLI18n.t("ui.literal.610d75ebc6c6"), ["prefix", "postfix", "finalizer"], "postfix"),
-        pText("targetTypeOverride", window.RMLI18n.t("ui.literal.996744e99386"), "", window.RMLI18n.t("ui.literal.3776b33e6ca0")),
-        pText("targetMethodOverride", window.RMLI18n.t("ui.literal.826408e978f7"), "", window.RMLI18n.t("ui.literal.3776b33e6ca0")),
-        pText("argumentTypes", window.RMLI18n.t("ui.auto.631184b96d50"), ""),
-        pNumber("priority", window.RMLI18n.t("ui.literal.0d5118820149"), 400),
-        pBool("captureResult", window.RMLI18n.t("ui.literal.e7288b2c2cc7"), false)
-      ],
-      outputs: [port("called", window.RMLI18n.t("ui.auto.6e8b938b82e2"), "impulse"), port("context", window.RMLI18n.t("ui.auto.ada776fb609f"), "patchContext")],
-      resolveDefinition(node) {
-        const preset = lifecyclePresets[node.parameters?.operation] || lifecyclePresets.worldStart;
-        return { title: `Lifecycle · ${preset[0]}`, symbol: preset[1] };
-      },
-      codegenCollect(api) {
-        const preset = lifecyclePresets[api.node.parameters?.operation] || lifecyclePresets.worldStart;
-        const node = {
-          ...api.node,
-          parameters: {
-            ...api.node.parameters,
-            targetType: String(api.node.parameters?.targetTypeOverride || "").trim() || preset[2],
-            targetMethod: String(api.node.parameters?.targetMethodOverride || "").trim() || preset[3]
-          }
-        };
-        return harmonyDefinition.codegenCollect({ ...api, node });
-      },
-      codegenExpression(api) {
-        return harmonyDefinition.codegenExpression(api);
-      }
-    });
-  }
-
   for (const legacyId of [
     "math.add", "math.subtract", "math.multiply", "math.divide", "math.modulo", "math.power", "math.minimum", "math.maximum",
     "math.negate", "math.absolute", "math.squareRoot", "math.round", "math.floor", "math.ceiling",
@@ -10832,8 +10761,7 @@ attempt ? `\n    ${attempt}();` : ""])
     "task.whenAll", "task.whenAny", "collection.addItem", "collection.insertItem", "collection.removeItem", "collection.removeAt", "collection.clearList", "dictionary.setValue", "dictionary.removeKey", "json.setProperty", "json.removeProperty", "json.addArrayItem", "text.concat", "text.format", "text.join", "cast.doubleToFloat", "cast.floatToInt", "cast.toString", "network.tcpSend", "network.udpSend",
     "flow.whileLoop", "flow.doWhileLoop", "flow.break", "flow.continue", "lifecycle.processExit", "lifecycle.modUnload",
     "configuration.setVisibility", "configuration.setLabelVisibility", "harmony.patchArgument", "harmony.patchResult",
-    "harmony.setArgument", "harmony.setResult", "lifecycle.worldStart", "lifecycle.worldDestroy", "lifecycle.userJoin",
-    "lifecycle.userLeave", "lifecycle.componentAttach", "lifecycle.componentDestroy", "lifecycle.engineUpdate"
+    "harmony.setArgument", "harmony.setResult"
   ]) {
     const definition = registry.getNodeDefinition(legacyId);
     if (definition) {

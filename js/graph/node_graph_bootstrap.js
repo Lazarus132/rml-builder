@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.24.31-compile-only-on-zip";
+  "1.24.90-reliable-folder-direct-dll-build";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];
@@ -246,10 +246,29 @@ if (
 
 Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 73,
+      version: 74,
       moduleId:
         GRAPH_BOOTSTRAP_MODULE_ID,
       getState() { return graph; },
+      migrateGraphTypeAliasesForImport(
+        graphDocument
+      ) {
+        const migrations =
+          window.RMLGraphTypeImportMigrations;
+        if (
+          migrations?.version !== 1 ||
+          typeof migrations.migrate !==
+            "function"
+        ) {
+          throw new Error(
+            "The graph type import migration module is unavailable."
+          );
+        }
+        return migrations.migrate(
+          graphDocument,
+          window.RMLModNodeRegistry
+        );
+      },
       openPresentation() {
         return graphPresentationVisible()
           ? true
@@ -260,8 +279,69 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         return customCSharpEditorPersistenceDirty || graphParameterPersistenceDirty;
       },
       flushPendingEditorEdits() {
+        const parametersFlushed =
+          flushGraphParameterPersistence();
+        const customCSharpFlushed =
+          flushCustomCSharpEditorPersistence();
+        return Boolean(
+          parametersFlushed ||
+          customCSharpFlushed
+        );
+      },
+      preparePortableSnapshot() {
+        if (
+          !graphHostInitialized ||
+          !graph ||
+          !bridge ||
+          bridge !==
+            window.RMLBuilderBridge ||
+          activeInteraction
+        ) {
+          return null;
+        }
+        const activeProjectEpoch =
+          Number(
+            bridge.getProjectEpoch?.()
+          ) || 0;
+        if (
+          activeProjectEpoch <= 0 ||
+          activeProjectEpoch !==
+            builderProjectEpoch
+        ) {
+          return null;
+        }
 
-        return flushGraphParameterPersistence() || flushCustomCSharpEditorPersistence();
+        flushGraphParameterPersistence();
+        flushCustomCSharpEditorPersistence();
+        flushGraphViewPersistence(true);
+
+        const portableSnapshot =
+          clearStoredGraphMultiSelection(
+            graphSerializableState({
+              viewOnly: false,
+              mutationClass: "parameter",
+              synchronizeCompositeFingerprints:
+                false
+            }),
+            true
+          );
+        if (
+          Object.hasOwn(
+            graph,
+            "integratedNodeCompatibility"
+          )
+        ) {
+          portableSnapshot
+            .integratedNodeCompatibility =
+              nodeGraphClone(
+                graph
+                  .integratedNodeCompatibility
+              );
+        } else {
+          delete portableSnapshot
+            .integratedNodeCompatibility;
+        }
+        return portableSnapshot;
       },
       hasUncommittedGraphChanges() {
         return Boolean(activeInteraction) || customCSharpEditorPersistenceDirty || graphParameterPersistenceDirty;
@@ -272,6 +352,45 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
 
         persistGraph(true);
         return true;
+      },
+      verifyPortableCatalogOperatorsForExport(
+        requiredNodes = []
+      ) {
+        if (
+          !graph ||
+          !graphHostInitialized ||
+          !bridge ||
+          activeInteraction ||
+          typeof verifyPortableCatalogOperatorsForExport !==
+            "function"
+        ) {
+          return Object.freeze({
+            required: true,
+            verified: false,
+            available: false,
+            unresolved: Math.max(
+              1,
+              Array.isArray(requiredNodes)
+                ? requiredNodes.length
+                : 0
+            ),
+            failureLabels: Object.freeze([
+              "The Runtime Graph is not ready for portable export verification."
+            ])
+          });
+        }
+        const rootDocument =
+          !customCSharpEditor &&
+          !apiCompositeEditor
+            ? graph
+            : {
+                ...graph,
+                ...rootRuntimeGraphView()
+              };
+        return verifyPortableCatalogOperatorsForExport(
+          rootDocument,
+          requiredNodes
+        );
       },
       getCSharpImportTarget() {
         if (
@@ -459,7 +578,13 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
               token: admissionToken,
               planKey: String(
                 plan?.planKey || ""
-              )
+              ),
+              typeContracts:
+                Array.isArray(
+                  plan?.typeContracts
+                )
+                  ? plan.typeContracts
+                  : []
             }
           );
       },
@@ -1472,7 +1597,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           return {
             ok: false,
             operatorId,
-            reason: `Unknown operator: ${operatorId}`
+            reason: "Unknown operator"
           };
         }
         const scale = nodeGraphClamp(
@@ -1563,7 +1688,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
             ok: false,
             created: false,
             nodeId: "",
-            reason: `Unknown operator: ${operatorId}`
+            reason: "Unknown operator"
           };
         }
 
@@ -1596,7 +1721,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
               ok: false,
               created: false,
               nodeId: "",
-              reason: `Could not create operator: ${operatorId}`
+              reason: "Could not create operator"
             };
       },
       ensureConnection(first, second) {

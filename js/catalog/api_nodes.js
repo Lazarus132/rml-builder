@@ -2,9 +2,9 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.24.31-compile-only-on-zip";
-  const FACTORY_VERSION = 38;
-  const API_VERIFICATION_SCHEMA_VERSION = 3;
+    "1.24.90-reliable-folder-direct-dll-build";
+  const FACTORY_VERSION = 41;
+  const API_VERIFICATION_SCHEMA_VERSION = 4;
   const CATALOG_PROJECTION_INDEX_VERSION = 2;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const UNAVAILABLE_GROUP = "Unavailable API";
@@ -12,10 +12,120 @@
     types: "API · Types & Enums",
     constructors: "API · Constructors",
     methods: "API · Methods",
+    hooks: "API · Hooks",
     properties: "API · Properties",
     fields: "API · Fields",
     events: "API · Events"
   });
+
+  function catalogVisibleText(
+      value,
+      forbiddenValues = []
+    ) {
+    const text = String(value ?? "").trim();
+    if (!text) return "";
+    const forbidden = (Array.isArray(forbiddenValues)
+      ? forbiddenValues
+      : [forbiddenValues]
+    )
+      .map(candidate => String(candidate || "").trim())
+      .filter(Boolean);
+    if (
+      forbidden.some(candidate =>
+        text === candidate ||
+        text.includes(candidate)
+      ) ||
+      /^(?:unavailable\.preserved\.|api\.)/.test(text) ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)
+    ) {
+      return "";
+    }
+    return text;
+  }
+
+  function catalogContractDisplayName(
+      contract,
+      fallback = "Unavailable API"
+    ) {
+    const source =
+      contract &&
+      typeof contract === "object" &&
+      !Array.isArray(contract)
+        ? contract
+        : {};
+    const ownerType = catalogVisibleText(
+      source.ownerType || source.catalogType
+    );
+    const memberName = catalogVisibleText(
+      source.memberName ||
+      source.catalogMember ||
+      source.name
+    );
+    const qualifiedName = [
+      ownerType,
+      memberName
+    ].filter(Boolean).join(".");
+    const signature = catalogVisibleText(
+      source.signature || source.apiSignature
+    );
+    return qualifiedName ||
+      signature ||
+      ownerType ||
+      fallback;
+  }
+
+  function catalogDefinitionDisplayName(
+      definition,
+      operatorId = "",
+      fallback = "API node"
+    ) {
+    const contract =
+      definition?.apiVerification ||
+      definition?.preservedApiContract ||
+      definition ||
+      null;
+    for (const candidate of [
+      definition?.title,
+      catalogContractDisplayName(
+        contract,
+        ""
+      ),
+      definition?.apiSignature
+    ]) {
+      const readable = catalogVisibleText(
+        candidate,
+        [operatorId]
+      );
+      if (readable) return readable;
+    }
+    return fallback;
+  }
+
+  function catalogUnavailableTitle(
+      isApi,
+      displayName
+    ) {
+    const prefix = isApi
+      ? "Unavailable API"
+      : "Unavailable Operator";
+    const readable = catalogVisibleText(
+      displayName
+    );
+    return !readable || readable === prefix
+      ? prefix
+      : `${prefix} · ${readable}`;
+  }
+
+  function catalogUnavailableTypeLabel(
+      csType
+    ) {
+    const readable = catalogVisibleText(
+      normalizedPortableCsType(csType)
+    );
+    return readable
+      ? `Unavailable · ${readable}`
+      : "Unavailable API type";
+  }
 
   let prerequisiteWaitInstalled = false;
   let factoryBuildPromise = null;
@@ -630,6 +740,18 @@
     const explicit = String(port?.role || port?.roleKey || "").trim();
     if (explicit) return explicit;
     const id = String(port?.id || "").trim();
+    if (kind === "hook-method") {
+      if (id === "called") {
+        return "output:called";
+      }
+      if (id === "instance") {
+        return "output:instance";
+      }
+      const argument = /^argument(\d+)$/.exec(id);
+      if (argument) {
+        return `parameter:${Number(argument[1])}:output`;
+      }
+    }
     const fixed = new Set([
       "call", "done", "success", "exception", "target", "result", "value"
     ]);
@@ -640,6 +762,8 @@
     if (match) return `parameter:${Number(match[1])}:output`;
     match = /^generic(\d+)$/.exec(id);
     if (match) return `generic:${Number(match[1])}:input`;
+    match = /^ownerGeneric(\d+)$/.exec(id);
+    if (match) return `owner-generic:${Number(match[1])}:input`;
     const parameter = parameters.find(value =>
       String(value?.name || "") === id
     );
@@ -653,20 +777,82 @@
     if (!contract || typeof contract !== "object") return "";
     const supplied = String(contract.stableContractId || "").trim();
     if (supplied) return supplied;
-    const ownerType = String(contract.ownerType || "")
-      .replace(/^global::/, "")
-      .replace(/\s+/g, "")
-      .replace(/&$/, "");
-    const kind = String(contract.kind || "").trim();
-    if (!ownerType || !kind) return "";
+    const semantic = exactApiSemanticContractKey(contract);
+    if (!semantic) return "";
     return `contract.${stableHash(JSON.stringify({
-      version: 1,
-      ownerType,
-      kind,
-      memberName: String(contract.memberName || ""),
-      isStatic: contract.isStatic === true,
-      genericArity: Math.max(0, Number(contract.genericArity) || 0)
+      version: 2,
+      semantic
     }))}`;
+  }
+
+  function stableContractAliasValues(
+    ...sources
+  ) {
+    const result = [];
+    const seen = new Set();
+    const append = source => {
+      if (Array.isArray(source)) {
+        for (const value of source) {
+          append(value);
+        }
+        return;
+      }
+      const value = String(source || "").trim();
+      if (!value || seen.has(value)) return;
+      seen.add(value);
+      result.push(value);
+    };
+    for (const source of sources) {
+      append(source);
+    }
+    return result;
+  }
+
+  function stableContractAliasRecord(
+    canonical,
+    legacy,
+    contract,
+    additional = []
+  ) {
+    const fallback = stableContractId({
+      ...(contract &&
+      typeof contract === "object" &&
+      !Array.isArray(contract)
+        ? contract
+        : {}),
+      stableContractId: ""
+    });
+    const aliases = stableContractAliasValues(
+      canonical,
+      legacy,
+      additional,
+      fallback
+    );
+    return {
+      primary: aliases[0] || "",
+      legacy:
+        String(legacy || "").trim() ||
+        fallback ||
+        aliases[0] ||
+        "",
+      aliases
+    };
+  }
+
+  function readStableContractId(member) {
+    return String(
+      member?.readStableContractId ||
+      member?.readContractId ||
+      ""
+    ).trim();
+  }
+
+  function writeStableContractId(member) {
+    return String(
+      member?.writeStableContractId ||
+      member?.writeContractId ||
+      ""
+    ).trim();
   }
 
   function normalizeReloadSafety(value) {
@@ -871,8 +1057,12 @@
           ),
           isByRef:
             parameter?.isByRef === true,
+          isIn:
+            parameter?.isIn === true,
           isOut:
-            parameter?.isOut === true
+            parameter?.isOut === true,
+          isOptional:
+            parameter?.isOptional === true
         })),
       returnType: normalizeType(
         contract.returnType ||
@@ -883,7 +1073,13 @@
       genericArity: Math.max(
         0,
         Number(contract.genericArity) || 0
-      )
+      ),
+      hookVisibility:
+        kind === "hook-method"
+          ? String(
+              contract.hookVisibility || ""
+            )
+          : ""
     });
   }
 
@@ -907,6 +1103,9 @@
       type: String(
         port?.type || ""
       ).trim(),
+      csType: normalizedPortableCsType(
+        port?.csType || ""
+      ),
       typeVar: String(
         port?.typeVar || ""
       ).trim(),
@@ -923,12 +1122,102 @@
     }));
 
     return JSON.stringify({
+      schemaVersion: Math.max(
+        0,
+        Number(contract?.schemaVersion) || 0
+      ),
       semantic,
       signature: String(
         contract?.signature || ""
       ).trim(),
       runtimeBound:
         contract?.runtimeBound === true,
+      directExecutable:
+        contract?.directExecutable === true,
+      parameters:
+        (Array.isArray(contract?.parameters)
+          ? contract.parameters
+          : []).map((parameter, index) => ({
+          position: Math.max(
+            0,
+            Number(parameter?.position) || index
+          ),
+          name: String(parameter?.name || ""),
+          type: normalizedPortableCsType(
+            parameter?.elementType ||
+            parameter?.type
+          ),
+          isByRef:
+            parameter?.isByRef === true,
+          isIn:
+            parameter?.isIn === true,
+          isOut:
+            parameter?.isOut === true,
+          isOptional:
+            parameter?.isOptional === true,
+          hasDefaultValue:
+            parameter?.hasDefaultValue === true,
+          defaultValueCSharp: String(
+            parameter?.defaultValueCSharp || ""
+          )
+        })),
+      ownerGenericParameters:
+        portableGenericParameterRows(
+          contract,
+          "ownerGenericParameters"
+        ).map(portableGenericParameterContract),
+      methodGenericParameters:
+        portableGenericParameterRows(
+          contract,
+          "methodGenericParameters"
+        ).map(portableGenericParameterContract),
+      requiredAssemblyReferences:
+        normalizedPortableAssemblyReferences(
+          contract?.requiredAssemblyReferences
+        ),
+      baseAssemblyReferences:
+        normalizedPortableAssemblyReferences(
+          contract?.baseAssemblyReferences ||
+          contract?.requiredAssemblyReferences
+        ),
+      enumValues:
+        normalizedPortableEnumValues(
+          contract?.enumValues
+        ),
+      enumUnderlyingType:
+        normalizedPortableCsType(
+          contract?.enumUnderlyingType || ""
+        ),
+      enumIsFlags:
+        contract?.enumIsFlags === true,
+      enumDefaultValue: String(
+        contract?.enumDefaultValue || ""
+      ),
+      enumValue: String(
+        contract?.enumValue || ""
+      ),
+      genericBindings:
+        Object.fromEntries(
+          Object.entries(
+            contract?.genericBindings &&
+            typeof contract.genericBindings ===
+              "object" &&
+            !Array.isArray(
+              contract.genericBindings
+            )
+              ? contract.genericBindings
+              : {}
+          )
+            .map(([key, value]) => [
+              String(key),
+              normalizedPortableCsType(
+                value
+              )
+            ])
+            .sort(([left], [right]) =>
+              left.localeCompare(right)
+            )
+        ),
       inputPorts: normalizePorts(
         "input",
         "inputPorts"
@@ -948,6 +1237,270 @@
       .replace(/^global::/, "")
       .replace(/\s+/g, " ")
       .replace(/\?$/, "");
+  }
+
+  function canonicalPortableCsType(value) {
+    const aliases = new Map([
+      ["bool", "System.Boolean"],
+      ["byte", "System.Byte"],
+      ["sbyte", "System.SByte"],
+      ["short", "System.Int16"],
+      ["ushort", "System.UInt16"],
+      ["int", "System.Int32"],
+      ["uint", "System.UInt32"],
+      ["long", "System.Int64"],
+      ["ulong", "System.UInt64"],
+      ["nint", "System.IntPtr"],
+      ["nuint", "System.UIntPtr"],
+      ["char", "System.Char"],
+      ["float", "System.Single"],
+      ["double", "System.Double"],
+      ["decimal", "System.Decimal"],
+      ["string", "System.String"],
+      ["object", "System.Object"],
+      ["void", "System.Void"]
+    ]);
+    return normalizedPortableCsType(value)
+      .replace(
+        /(^|[^A-Za-z0-9_.@])(bool|byte|sbyte|short|ushort|int|uint|long|ulong|nint|nuint|char|float|double|decimal|string|object|void)(?=$|[^A-Za-z0-9_])/g,
+        (_match, prefix, alias) =>
+          `${prefix}${aliases.get(alias)}`
+      )
+      .replace(/\s+/g, "");
+  }
+
+  function portableCsTypesEqual(left, right) {
+    return Boolean(
+      canonicalPortableCsType(left) &&
+      canonicalPortableCsType(left) ===
+        canonicalPortableCsType(right)
+    );
+  }
+
+  function normalizedPortableAssemblyReferences(value) {
+    const references = new Map();
+    for (const reference of
+      Array.isArray(value) ? value : []) {
+      const include = String(
+        reference?.include || ""
+      ).trim();
+      if (
+        !include ||
+        !/^[A-Za-z0-9_.-]+$/.test(include) ||
+        portableFrameworkAssembly(include)
+      ) {
+        continue;
+      }
+      const hintPath = String(
+        reference?.hintPath || ""
+      ).trim().replace(/\\/g, "/");
+      const resonitePrefix =
+        "$(ResonitePath)";
+      const relativeHintPath =
+        hintPath.startsWith(resonitePrefix)
+          ? hintPath.slice(
+              resonitePrefix.length
+            )
+          : "";
+      if (
+        hintPath &&
+        (
+          /[<>"';&|`\r\n]/.test(hintPath) ||
+          !/^[A-Za-z0-9_.$()\/ +:-]+$/.test(
+            hintPath
+          ) ||
+          !relativeHintPath ||
+          relativeHintPath.startsWith("/") ||
+          relativeHintPath.includes("$(") ||
+          relativeHintPath.includes(":") ||
+          relativeHintPath
+            .split("/")
+            .some(segment =>
+              segment === ".." ||
+              segment === "."
+            )
+        )
+      ) {
+        continue;
+      }
+      references.set(
+        include.toLowerCase(),
+        {
+          include,
+          hintPath,
+          private:
+            reference?.private === true
+        }
+      );
+    }
+    return [...references.values()].sort(
+      (left, right) =>
+        left.include.localeCompare(
+          right.include
+        )
+    );
+  }
+
+  function portableFrameworkAssembly(value) {
+    const name = String(value || "")
+      .trim()
+      .replace(/\.dll$/i, "");
+    return Boolean(
+      name === "mscorlib" ||
+      name === "netstandard" ||
+      name === "Microsoft.CSharp" ||
+      name === "System" ||
+      name.startsWith("System.")
+    );
+  }
+
+  function portableExactEnumNumericText(value) {
+    if (typeof value === "string") {
+      const text = value.trim();
+      return /^-?(?:0|[1-9][0-9]*)$/.test(text)
+        ? text
+        : "";
+    }
+    if (
+      typeof value === "number" &&
+      Number.isSafeInteger(value)
+    ) {
+      return String(value);
+    }
+    if (typeof value === "bigint") {
+      return String(value);
+    }
+    return "";
+  }
+
+  function portableEnumCastExpression(
+    enumType,
+    underlyingType,
+    value
+  ) {
+    const numeric =
+      portableExactEnumNumericText(value);
+    const underlying =
+      canonicalPortableCsType(underlyingType);
+    if (!numeric || ![
+      "System.SByte", "System.Byte",
+      "System.Int16", "System.UInt16",
+      "System.Int32", "System.UInt32",
+      "System.Int64", "System.UInt64"
+    ].includes(underlying)) {
+      return "";
+    }
+    let literal = numeric;
+    if (underlying === "System.UInt32") {
+      literal = `${numeric}U`;
+    } else if (underlying === "System.Int64") {
+      literal = numeric === "-9223372036854775808"
+        ? "System.Int64.MinValue"
+        : `${numeric}L`;
+    } else if (underlying === "System.UInt64") {
+      literal = `${numeric}UL`;
+    }
+    return `unchecked((${enumType})(${underlying})(${literal}))`;
+  }
+
+  function normalizedPortableEnumValues(value) {
+    const values = new Map();
+    for (const entry of
+      Array.isArray(value) ? value : []) {
+      const name = String(
+        entry?.name || entry || ""
+      ).trim();
+      if (
+        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(
+          name
+        )
+      ) {
+        continue;
+      }
+      const raw =
+        entry &&
+        typeof entry === "object" &&
+        !Array.isArray(entry)
+          ? entry.value ??
+            entry.numericValue
+          : null;
+      values.set(name, {
+        name,
+        value: portableExactEnumNumericText(raw)
+      });
+    }
+    return [...values.values()].sort(
+      (left, right) =>
+        left.name.localeCompare(right.name)
+    );
+  }
+
+  function portableEnumValueNames(value) {
+    return normalizedPortableEnumValues(value)
+      .map(entry => entry.name);
+  }
+
+  function portableEnumMetadataIsSafe(
+    contract
+  ) {
+    const sourceValues = Array.isArray(
+      contract?.enumValues
+    )
+      ? contract.enumValues
+      : [];
+    const underlying = canonicalPortableCsType(
+      contract?.enumUnderlyingType || ""
+    );
+    const ranges = new Map([
+      ["System.SByte", [-128n, 127n]],
+      ["System.Byte", [0n, 255n]],
+      ["System.Int16", [-32768n, 32767n]],
+      ["System.UInt16", [0n, 65535n]],
+      ["System.Int32", [-2147483648n, 2147483647n]],
+      ["System.UInt32", [0n, 4294967295n]],
+      ["System.Int64", [-9223372036854775808n, 9223372036854775807n]],
+      ["System.UInt64", [0n, 18446744073709551615n]]
+    ]);
+    const range = ranges.get(underlying);
+    if (
+      !range ||
+      typeof contract?.enumIsFlags !==
+        "boolean"
+    ) {
+      return false;
+    }
+    const values = normalizedPortableEnumValues(
+      sourceValues
+    );
+    if (
+      values.length === 0 ||
+      values.length !== sourceValues.length
+    ) {
+      return false;
+    }
+    const numericValueCount = values.filter(
+      entry => entry.value !== ""
+    ).length;
+    if (numericValueCount === 0) {
+      return Number(contract?.schemaVersion) < 4;
+    }
+    if (numericValueCount !== values.length) {
+      return false;
+    }
+    return values.every(entry => {
+      if (!/^-?(?:0|[1-9][0-9]*)$/.test(
+        entry.value
+      )) {
+        return false;
+      }
+      try {
+        const numeric = BigInt(entry.value);
+        return numeric >= range[0] &&
+          numeric <= range[1];
+      } catch {
+        return false;
+      }
+    });
   }
 
   function portableGenericTypeParts(
@@ -1117,6 +1670,10 @@
     direction,
     port
   ) {
+    const declared =
+      normalizedPortableCsType(
+        port?.csType
+      );
     const role = portablePortRole(
       contract?.kind,
       direction,
@@ -1124,6 +1681,14 @@
       contract?.parameters
     );
     if (role === "input:target") {
+      return normalizedPortableCsType(
+        contract?.ownerType
+      );
+    }
+    if (
+      direction === "output" &&
+      role === "output:instance"
+    ) {
       return normalizedPortableCsType(
         contract?.ownerType
       );
@@ -1147,6 +1712,22 @@
         contract?.returnType
       );
     }
+    if (
+      direction === "input" &&
+      role === "input:value" &&
+      ["property-set", "field-set"].includes(
+        String(contract?.kind || "")
+      )
+    ) {
+      const parameters = Array.isArray(
+        contract?.parameters
+      ) ? contract.parameters : [];
+      const parameter = parameters.at(-1);
+      return normalizedPortableCsType(
+        parameter?.elementType ||
+        parameter?.type
+      );
+    }
     const match =
       /^parameter:(\d+):/.exec(role);
     if (match) {
@@ -1166,7 +1747,511 @@
         parameter?.type
       );
     }
-    return "";
+    return declared;
+  }
+
+  function portableStoredPortCsType(
+    contract,
+    direction,
+    port
+  ) {
+    return normalizedPortableCsType(
+      port?.csType
+    ) || portableContractPortCsType(
+      contract,
+      direction,
+      port
+    );
+  }
+
+  function portableGenericParameterRows(
+    contract,
+    key,
+    fallback = []
+  ) {
+    const values = Array.isArray(
+      contract?.[key]
+    )
+      ? contract[key]
+      : fallback;
+    return values
+      .map((value, index) => ({
+        ...(
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value)
+            ? value
+            : {}
+        ),
+        name: String(
+          value?.name || value || ""
+        ).trim(),
+        position: Math.max(
+          0,
+          Number(value?.position) || index
+        )
+      }))
+      .filter(value => value.name)
+      .sort((left, right) =>
+        left.position - right.position
+      );
+  }
+
+  function portableGenericParameterContract(
+    value
+  ) {
+    return {
+      name: String(value?.name || "").trim(),
+      position: Math.max(
+        0,
+        Number(value?.position) || 0
+      ),
+      referenceTypeConstraint:
+        value?.referenceTypeConstraint === true,
+      valueTypeConstraint:
+        value?.valueTypeConstraint === true,
+      defaultConstructorConstraint:
+        value?.defaultConstructorConstraint === true,
+      unmanagedConstraint:
+        value?.unmanagedConstraint === true,
+      notNullConstraint:
+        value?.notNullConstraint === true,
+      variance: String(
+        value?.variance || ""
+      ).trim(),
+      constraints: (
+        Array.isArray(value?.constraints)
+          ? value.constraints
+          : []
+      ).map(normalizedPortableCsType)
+        .filter(Boolean)
+        .sort()
+    };
+  }
+
+  function portableContractSpecialization(
+    requested,
+    available = requested
+  ) {
+    if (
+      exactApiSemanticContractKey(
+        requested
+      ) !==
+      exactApiSemanticContractKey(
+        available
+      )
+    ) {
+      return null;
+    }
+    const ownerRows =
+      portableGenericParameterRows(
+        available,
+        "ownerGenericParameters",
+        genericTypeParameterNames(
+          available?.ownerType
+        )
+      );
+    const methodRows =
+      portableGenericParameterRows(
+        available,
+        "methodGenericParameters"
+      );
+    const requestedOwnerRows =
+      portableGenericParameterRows(
+        requested,
+        "ownerGenericParameters",
+        genericTypeParameterNames(
+          requested?.ownerType
+        )
+      );
+    const requestedMethodRows =
+      portableGenericParameterRows(
+        requested,
+        "methodGenericParameters"
+      );
+    if (
+      JSON.stringify(
+        requestedOwnerRows.map(
+          portableGenericParameterContract
+        )
+      ) !== JSON.stringify(
+        ownerRows.map(
+          portableGenericParameterContract
+        )
+      ) ||
+      JSON.stringify(
+        requestedMethodRows.map(
+          portableGenericParameterContract
+        )
+      ) !== JSON.stringify(
+        methodRows.map(
+          portableGenericParameterContract
+        )
+      )
+    ) {
+      return null;
+    }
+    const expectedMethodArity =
+      Math.max(
+        0,
+        Number(available?.genericArity) || 0
+      );
+    if (
+      methodRows.length !==
+        expectedMethodArity
+    ) {
+      return null;
+    }
+    const bindings =
+      requested?.genericBindings &&
+      typeof requested.genericBindings ===
+        "object" &&
+      !Array.isArray(
+        requested.genericBindings
+      )
+        ? requested.genericBindings
+        : {};
+    const rows = [
+      ...ownerRows.map(value => ({
+        ...value,
+        prefix: "ownerGeneric"
+      })),
+      ...methodRows.map(value => ({
+        ...value,
+        prefix: "generic"
+      }))
+    ];
+    if (
+      Object.keys(bindings).length !==
+        rows.length
+    ) {
+      return null;
+    }
+
+    const ownerSubstitutions = new Map();
+    const methodSubstitutions = new Map();
+    const normalizedBindings = {};
+    for (const row of rows) {
+      const key =
+        `${row.prefix}${row.position}`;
+      const selected =
+        normalizedPortableCsType(
+          bindings[key]
+        );
+      if (
+        !selected ||
+        !isSafeCSharpTypeExpression(
+          selected
+        ) ||
+        isGenericParameterName(selected) ||
+        isOpenTypeExpression(selected)
+      ) {
+        return null;
+      }
+      normalizedBindings[key] = selected;
+      (
+        row.prefix === "ownerGeneric"
+          ? ownerSubstitutions
+          : methodSubstitutions
+      ).set(row.name, selected);
+    }
+    if (
+      Object.keys(bindings).some(key =>
+        !Object.prototype.hasOwnProperty.call(
+          normalizedBindings,
+          key
+        )
+      )
+    ) {
+      return null;
+    }
+    const substitutions = new Map([
+      ...ownerSubstitutions,
+      ...methodSubstitutions
+    ]);
+    const ownerType =
+      substituteGenericTypeParameters(
+        available?.ownerType ||
+          "System.Object",
+        available?.kind === "type"
+          ? substitutions
+          : ownerSubstitutions
+      );
+    const returnType =
+      substituteGenericTypeParameters(
+        available?.returnType ||
+          "System.Void",
+        substitutions
+      );
+    const parameters = (
+      Array.isArray(available?.parameters)
+        ? available.parameters
+        : []
+    ).map(parameter => {
+      const result = { ...parameter };
+      for (const key of [
+        "type",
+        "elementType"
+      ]) {
+        if (result[key]) {
+          result[key] =
+            substituteGenericTypeParameters(
+              result[key],
+              substitutions
+            );
+        }
+      }
+      return result;
+    });
+    const specializedContract = {
+      ...available,
+      ownerType,
+      returnType,
+      parameters
+    };
+    for (const [direction, key] of [
+      ["input", "inputPorts"],
+      ["output", "outputPorts"]
+    ]) {
+      const requestedPorts = Array.isArray(
+        requested?.[key]
+      )
+        ? requested[key]
+        : [];
+      const availablePorts = new Map(
+        (Array.isArray(available?.[key])
+          ? available[key]
+          : []).map(port => [
+          String(port?.id || ""),
+          port
+        ])
+      );
+      if (
+        requestedPorts.length !==
+          availablePorts.size
+      ) {
+        return null;
+      }
+      for (const port of requestedPorts) {
+        const id = String(port?.id || "");
+        const basis =
+          availablePorts.get(id);
+        if (!basis) return null;
+        const expectedCsType =
+          portableContractPortCsType(
+            specializedContract,
+            direction,
+            {
+              ...basis,
+              csType: ""
+            }
+          );
+        const actualCsType =
+          normalizedPortableCsType(
+            port?.csType
+          );
+        if (
+          expectedCsType &&
+          !portableCsTypesEqual(
+            actualCsType,
+            expectedCsType
+          )
+        ) {
+          return null;
+        }
+        if (
+          !expectedCsType &&
+          actualCsType
+        ) {
+          return null;
+        }
+      }
+    }
+    return Object.freeze({
+      genericBindings:
+        Object.freeze(normalizedBindings),
+      ownerType,
+      returnType,
+      parameters: Object.freeze(parameters),
+      ownerSubstitutions,
+      methodSubstitutions,
+      substitutions
+    });
+  }
+
+  function portableContractSpecializationMatches(
+    requested,
+    available
+  ) {
+    return Boolean(
+      portableContractSpecialization(
+        requested,
+        available
+      )
+    );
+  }
+
+  function portableParameterContractKey(
+    contract
+  ) {
+    return JSON.stringify(
+      (Array.isArray(contract?.parameters)
+        ? contract.parameters
+        : []).map((parameter, index) => ({
+        position: Math.max(
+          0,
+          Number(parameter?.position) || index
+        ),
+        name: String(parameter?.name || ""),
+        type: canonicalPortableCsType(
+          parameter?.elementType ||
+          parameter?.type
+        ),
+        isByRef:
+          parameter?.isByRef === true,
+        isIn:
+          parameter?.isIn === true,
+        isOut:
+          parameter?.isOut === true,
+        isOptional:
+          parameter?.isOptional === true,
+        hasDefaultValue:
+          parameter?.hasDefaultValue === true,
+        defaultValueCSharp: String(
+          parameter?.defaultValueCSharp || ""
+        )
+      }))
+    );
+  }
+
+  function portableBaseMetadataKey(contract) {
+    return JSON.stringify({
+      schemaVersion: Math.max(
+        0,
+        Number(contract?.schemaVersion) || 0
+      ),
+      semantic:
+        exactApiSemanticContractKey(contract),
+      parameters:
+        portableParameterContractKey(
+          contract
+        ),
+      ownerGenericParameters:
+        portableGenericParameterRows(
+          contract,
+          "ownerGenericParameters",
+          genericTypeParameterNames(
+            contract?.ownerType
+          )
+        ).map(portableGenericParameterContract),
+      methodGenericParameters:
+        portableGenericParameterRows(
+          contract,
+          "methodGenericParameters"
+        ).map(portableGenericParameterContract),
+      requiredAssemblyReferences:
+        normalizedPortableAssemblyReferences(
+          contract?.baseAssemblyReferences ||
+          contract?.requiredAssemblyReferences
+        ),
+      enumValues:
+        normalizedPortableEnumValues(
+          contract?.enumValues
+        ),
+      enumDefaultValue: String(
+        contract?.enumDefaultValue || ""
+      ),
+      enumUnderlyingType:
+        canonicalPortableCsType(
+          contract?.enumUnderlyingType || ""
+        ),
+      enumIsFlags:
+        contract?.enumIsFlags === true,
+      ports: [
+        ["input", "inputPorts"],
+        ["output", "outputPorts"]
+      ].map(([direction, key]) =>
+        (Array.isArray(contract?.[key])
+          ? contract[key]
+          : []).map(port => ({
+          id: String(port?.id || ""),
+          optional:
+            port?.optional === true,
+          role: portablePortRole(
+            contract?.kind,
+            direction,
+            port,
+            contract?.parameters
+          )
+        }))
+      )
+    });
+  }
+
+  function portableBaseMetadataMatches(
+    requested,
+    available
+  ) {
+    if (
+      String(requested?.kind || "") === "enum" ||
+      String(available?.kind || "") === "enum"
+    ) {
+      if (
+        String(requested?.kind || "") !== "enum" ||
+        String(available?.kind || "") !== "enum"
+      ) {
+        return false;
+      }
+      const requestedCore = {
+        ...requested,
+        enumValues: [],
+        enumDefaultValue: "",
+        enumValue: ""
+      };
+      const availableCore = {
+        ...available,
+        enumValues: [],
+        enumDefaultValue: "",
+        enumValue: ""
+      };
+      if (
+        !exactApiSemanticContractKey(requested) ||
+        portableBaseMetadataKey(requestedCore) !==
+          portableBaseMetadataKey(availableCore)
+      ) {
+        return false;
+      }
+      const requestedValues = new Map(
+        normalizedPortableEnumValues(
+          requested?.enumValues
+        ).map(value => [value.name, value.value])
+      );
+      const availableValues = new Map(
+        normalizedPortableEnumValues(
+          available?.enumValues
+        ).map(value => [value.name, value.value])
+      );
+      const selected = String(
+        requested?.enumValue ||
+        requested?.enumDefaultValue ||
+        ""
+      );
+      if (!selected || !availableValues.has(selected)) {
+        return false;
+      }
+      const requestedNumeric =
+        requestedValues.get(selected) || "";
+      const availableNumeric =
+        availableValues.get(selected) || "";
+      return !requestedNumeric ||
+        !availableNumeric ||
+        requestedNumeric === availableNumeric;
+    }
+    return Boolean(
+      exactApiSemanticContractKey(requested) &&
+      portableBaseMetadataKey(requested) ===
+        portableBaseMetadataKey(available)
+    );
   }
 
   function placeholderMatchesGeneratedContract(
@@ -1174,28 +2259,214 @@
     generatedDefinition
   ) {
     if (
-      placeholder
-        ?.unavailableApiContract !== true ||
+      (
+        placeholder
+          ?.unavailableApiContract !== true &&
+        placeholder
+          ?.portableApiExecutableContract !== true
+      ) ||
       generatedDefinition
         ?.catalogGenerated !== true
     ) {
       return false;
     }
-    const preservedKey =
-      exactPortableContractKey(
-        placeholder
-          .preservedApiContract
-      );
-    const generatedKey =
-      exactPortableContractKey(
-        generatedDefinition
-          .apiVerification
-      );
+    const preserved =
+      placeholder.preservedApiContract;
+    const generated =
+      generatedDefinition.apiVerification;
     return Boolean(
-      preservedKey &&
-      generatedKey &&
-      preservedKey === generatedKey
+      portableBaseMetadataMatches(
+        preserved,
+        generated
+      ) &&
+      portableContractSpecializationMatches(
+        preserved,
+        generated
+      )
     );
+  }
+
+  function normalizedRequiredApiPortCsType(
+    value
+  ) {
+    return normalizeCsType(value)
+      .replace(/\s+/g, "");
+  }
+
+  function resolvedRequiredApiDefinitionPorts(
+    definition,
+    requirement
+  ) {
+    if (!definition) return null;
+    const genericBindings =
+      requirement?.apiContract
+        ?.genericBindings;
+    const requiresSpecialization = Boolean(
+      definition.compileTimeSpecializable ===
+        true ||
+      (
+        genericBindings &&
+        typeof genericBindings === "object" &&
+        !Array.isArray(genericBindings) &&
+        Object.keys(genericBindings).length > 0
+      )
+    );
+    if (!requiresSpecialization) {
+      return {
+        inputs: Array.isArray(definition.inputs)
+          ? definition.inputs
+          : [],
+        outputs: Array.isArray(definition.outputs)
+          ? definition.outputs
+          : []
+      };
+    }
+    if (
+      typeof definition.resolveDefinition !==
+        "function"
+    ) {
+      return null;
+    }
+    try {
+      const resolved =
+        definition.resolveDefinition({
+          operatorId: String(
+            requirement?.operatorId || ""
+          ),
+          parameters:
+            requirement?.nodeParameters &&
+            typeof requirement.nodeParameters ===
+              "object" &&
+            !Array.isArray(
+              requirement.nodeParameters
+            )
+              ? requirement.nodeParameters
+              : {},
+          apiContract:
+            requirement?.apiContract || null
+        });
+      if (
+        !resolved ||
+        !Array.isArray(resolved.inputs) ||
+        !Array.isArray(resolved.outputs)
+      ) {
+        return null;
+      }
+      return {
+        inputs: resolved.inputs,
+        outputs: resolved.outputs
+      };
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function requiredApiPortMismatches(
+    definition,
+    requirement,
+    direction,
+    actualPorts
+  ) {
+    const contractKey =
+      direction === "input"
+        ? "inputPorts"
+        : "outputPorts";
+    const referencedKey =
+      direction === "input"
+        ? "inputPorts"
+        : "outputPorts";
+    const expectedPorts = Array.isArray(
+      requirement?.apiContract?.[contractKey]
+    )
+      ? requirement.apiContract[contractKey]
+      : [];
+    const referencedPorts = Array.isArray(
+      requirement?.[referencedKey]
+    )
+      ? requirement[referencedKey]
+      : [];
+    const actualById = new Map(
+      (Array.isArray(actualPorts)
+        ? actualPorts
+        : []).map(port => [
+        String(port?.id || ""),
+        port
+      ])
+    );
+    const verificationById = new Map(
+      (Array.isArray(
+        definition?.apiVerification?.[contractKey]
+      )
+        ? definition.apiVerification[contractKey]
+        : []).map(port => [
+        String(port?.id || ""),
+        port
+      ])
+    );
+    const mismatches = new Set();
+
+    for (const portId of referencedPorts) {
+      const id = String(portId || "");
+      if (id && !actualById.has(id)) {
+        mismatches.add(id);
+      }
+    }
+    for (const expected of expectedPorts) {
+      const id = String(expected?.id || "");
+      const actual = actualById.get(id);
+      if (!id || !actual) {
+        if (id) mismatches.add(id);
+        continue;
+      }
+      const expectedType = String(
+        expected?.type || ""
+      );
+      if (
+        expectedType &&
+        String(actual?.type || "") !==
+          expectedType
+      ) {
+        mismatches.add(id);
+        continue;
+      }
+      const expectedTypeVar = String(
+        expected?.typeVar || ""
+      );
+      if (
+        expectedTypeVar &&
+        String(actual?.typeVar || "") !==
+          expectedTypeVar
+      ) {
+        mismatches.add(id);
+        continue;
+      }
+      const expectedCsType =
+        normalizedRequiredApiPortCsType(
+          expected?.csType
+        );
+      const actualCsType =
+        normalizedRequiredApiPortCsType(
+          actual?.apiCsType ||
+          actual?.csType ||
+          verificationById.get(id)?.csType
+        );
+      if (
+        expectedCsType &&
+        actualCsType !== expectedCsType
+      ) {
+        mismatches.add(id);
+        continue;
+      }
+      if (
+        typeof expected?.optional ===
+          "boolean" &&
+        (actual?.optional === true) !==
+          expected.optional
+      ) {
+        mismatches.add(id);
+      }
+    }
+    return [...mismatches];
   }
 
   function factoryRegistryIntegrity(
@@ -1345,36 +2616,46 @@
         definitions?.[operatorId];
       const contract =
         definition?.apiVerification;
-      const inputIds = new Set(
-        (Array.isArray(definition?.inputs)
-          ? definition.inputs
-          : []).map(port =>
-          String(port?.id || "")
-        )
-      );
-      const outputIds = new Set(
-        (Array.isArray(definition?.outputs)
-          ? definition.outputs
-          : []).map(port =>
-          String(port?.id || "")
-        )
-      );
-      const requiredInputs =
+      const resolvedPorts =
         typeof requirement === "string"
+          ? {
+              inputs:
+                Array.isArray(
+                  definition?.inputs
+                )
+                  ? definition.inputs
+                  : [],
+              outputs:
+                Array.isArray(
+                  definition?.outputs
+                )
+                  ? definition.outputs
+                  : []
+            }
+          : resolvedRequiredApiDefinitionPorts(
+              definition,
+              requirement
+            );
+      const incompatibleInputs =
+        typeof requirement === "string" ||
+        !resolvedPorts
           ? []
-          : Array.isArray(
-                requirement?.inputPorts
-              )
-            ? requirement.inputPorts
-            : [];
-      const requiredOutputs =
-        typeof requirement === "string"
+          : requiredApiPortMismatches(
+              definition,
+              requirement,
+              "input",
+              resolvedPorts.inputs
+            );
+      const incompatibleOutputs =
+        typeof requirement === "string" ||
+        !resolvedPorts
           ? []
-          : Array.isArray(
-                requirement?.outputPorts
-              )
-            ? requirement.outputPorts
-            : [];
+          : requiredApiPortMismatches(
+              definition,
+              requirement,
+              "output",
+              resolvedPorts.outputs
+            );
       if (
         definition?.catalogGenerated !==
           true ||
@@ -1394,12 +2675,9 @@
         !String(
           contract.contractFingerprint || ""
         ).trim() ||
-        !requiredInputs.every(id =>
-          inputIds.has(String(id || ""))
-        ) ||
-        !requiredOutputs.every(id =>
-          outputIds.has(String(id || ""))
-        )
+        !resolvedPorts ||
+        incompatibleInputs.length > 0 ||
+        incompatibleOutputs.length > 0
       ) {
         missingRequired.push(operatorId);
       }
@@ -1649,16 +2927,10 @@
       captureFactoryEnvironment(
         window.RMLModNodeRegistry
       );
-    if (
-      environment.apiCatalog ||
-      environment.componentCatalog ||
-      environment.factoryReport
-        ?.verificationPassed === true
-    ) {
-      throw new Error(
-        "A catalog or verified API node factory became available before portable offline admission."
-      );
-    }
+    // Portable contracts are also the exact fallback for an incomplete
+    // Live/cache catalog. The frozen environment, factory lease and the
+    // staging collision checks below provide the required safety; catalog
+    // presence alone is not a semantic conflict.
     const token = Object.freeze({
       epoch: factoryOperationEpoch,
       planKey: key,
@@ -1704,18 +2976,8 @@
     assertFactoryEnvironmentUnchanged(
       record.environment,
       lease,
-      "admitting portable offline API contracts"
+      "admitting portable API contracts"
     );
-    if (
-      window.RMLResoniteApiCatalog ||
-      window.RMLFrooxComponentCatalog ||
-      window.RMLApiNodeFactoryReport
-        ?.verificationPassed === true
-    ) {
-      throw new Error(
-        "A catalog or verified API node factory became available during portable offline admission. Retry the project import."
-      );
-    }
   }
 
   function registerUnavailableApiOperator(operatorId, apiContract, required = {}) {
@@ -1730,7 +2992,10 @@
     const contract = hasApiContract
       ? structuredClone(apiContract)
       : {};
-    contract.schemaVersion = 3;
+    contract.schemaVersion = Math.max(
+      0,
+      Number(contract.schemaVersion) || 3
+    );
     contract.stableContractId = stableContractId(contract);
     for (const [direction, key] of [["input", "inputPorts"], ["output", "outputPorts"]]) {
       contract[key] = (Array.isArray(contract[key]) ? contract[key] : []).map(port => ({
@@ -1749,10 +3014,24 @@
       existing?.unavailableApiContract ===
         true
     ) {
-      return exactPortableContractKey(
-        existing.preservedApiContract
-      ) === exactPortableContractKey(
-        contract
+      const preserved =
+        existing.preservedApiContract;
+      return (
+        exactPortableContractKey(
+          preserved
+        ) === exactPortableContractKey(
+          contract
+        ) ||
+        (
+          portableBaseMetadataMatches(
+            contract,
+            preserved
+          ) &&
+          portableContractSpecializationMatches(
+            contract,
+            preserved
+          )
+        )
       )
         ? id
         : "";
@@ -1776,12 +3055,14 @@
       const existingOutputIds = new Set((existing.outputs || []).map(port => String(port?.id || "")));
       if (
         sameExactContract &&
-        exactPortableContractKey(
-          contract
-        ) ===
-          exactPortableContractKey(
-            available
-          ) &&
+        portableBaseMetadataMatches(
+          contract,
+          available
+        ) &&
+        portableContractSpecializationMatches(
+          contract,
+          available
+        ) &&
         referencedInputs.every(portId => existingInputIds.has(portId)) &&
         referencedOutputs.every(portId => existingOutputIds.has(portId))
       ) {
@@ -1836,7 +3117,9 @@
         if (!registry.getTypeInformation?.(type)) {
           if (type && type !== "T" && !port?.typeVar) {
             registry.registerType?.(type, {
-              label: `Unavailable · ${type}`,
+              label: catalogUnavailableTypeLabel(
+                port?.csType || port?.apiCsType
+              ),
               short: "API?",
               color: "#ff6f91",
               csType: "object",
@@ -1861,23 +3144,49 @@
     };
     const inputs = makePorts("input", contract.inputPorts, referencedInputs);
     const outputs = makePorts("output", contract.outputPorts, referencedOutputs);
-    contract.inputPorts = inputs.map(port => ({
-      id: port.id,
-      type: port.type,
-      optional: port.optional === true,
-      role: port.semanticRole
-    }));
-    contract.outputPorts = outputs.map(port => ({
-      id: port.id,
-      type: port.type,
-      optional: port.optional === true,
-      role: port.semanticRole
-    }));
-    const displayName = [contract.ownerType, contract.memberName].filter(Boolean).join(".") || id;
+    const retainPortablePortMetadata = (
+      ports,
+      stored
+    ) => {
+      const byId = new Map(
+        (Array.isArray(stored) ? stored : [])
+          .map(port => [
+            String(port?.id || ""),
+            port
+          ])
+      );
+      return ports.map(port => ({
+        ...(byId.get(String(port.id)) || {}),
+        id: port.id,
+        type: port.type,
+        optional: port.optional === true,
+        role: port.semanticRole
+      }));
+    };
+    contract.inputPorts =
+      retainPortablePortMetadata(
+        inputs,
+        contract.inputPorts
+      );
+    contract.outputPorts =
+      retainPortablePortMetadata(
+        outputs,
+        contract.outputPorts
+      );
     const isApi = id.startsWith("api.");
+    const displayName =
+      catalogContractDisplayName(
+        contract,
+        isApi
+          ? "Unavailable API"
+          : "Unavailable Operator"
+      );
     registry.registerGroup?.(UNAVAILABLE_GROUP, { after: ADVANCED_GROUP });
     const registered = registry.registerNode(registrationId, {
-      title: `${isApi ? "Unavailable API" : "Unavailable Operator"} · ${displayName}`,
+      title: catalogUnavailableTitle(
+        isApi,
+        displayName
+      ),
       group: UNAVAILABLE_GROUP,
       symbol: "API?",
       description: `The original ${isApi ? "API contract" : "node contract"} is preserved, but the current Builder has no safely equivalent operator. The project remains editable; only export of this unresolved runtime path is blocked.`,
@@ -1888,15 +3197,36 @@
       inputs,
       outputs,
       parameters: [],
+      resolveDefinition(node) {
+        const requested =
+          node?.apiContract &&
+          typeof node.apiContract ===
+            "object" &&
+          !Array.isArray(node.apiContract)
+            ? node.apiContract
+            : contract;
+        return {
+          inputs: makePorts(
+            "input",
+            requested.inputPorts,
+            []
+          ),
+          outputs: makePorts(
+            "output",
+            requested.outputPorts,
+            []
+          )
+        };
+      },
       codegenCollect(api) {
-        api.diagnostic?.(`Unavailable API contract '${displayName}' (${id}) must be resolved before export.`);
+        api.diagnostic?.(`${isApi ? "Unavailable API" : "Unavailable node"} contract '${displayName}' must be resolved before export.`);
       },
       codegenExpression(api) {
-        api.diagnostic?.(`Unavailable API contract '${displayName}' (${id}) must be resolved before export.`);
+        api.diagnostic?.(`${isApi ? "Unavailable API" : "Unavailable node"} contract '${displayName}' must be resolved before export.`);
         return api.csDefault?.(api.type || "object") || "default!";
       },
       codegenAction(api) {
-        api.diagnostic?.(`Unavailable API contract '${displayName}' (${id}) must be resolved before export.`);
+        api.diagnostic?.(`${isApi ? "Unavailable API" : "Unavailable node"} contract '${displayName}' must be resolved before export.`);
         return "";
       }
     });
@@ -1911,6 +3241,18 @@
     return registered === false
       ? ""
       : registrationId;
+  }
+
+  function projectStoredContractMayExecute(
+    _operatorId
+  ) {
+    /*
+     * Executable catalog definitions are owned exclusively by the active
+     * scanner catalog. A project may preserve identity and ports for
+     * recovery, but saved project data must never authorize code generation,
+     * irrespective of an operator-id prefix supplied by that project.
+     */
+    return false;
   }
 
   function stageUnavailableOperatorTransaction(
@@ -1970,9 +3312,103 @@
     )
       ? requestedEntries
       : [];
-    if (entries.length === 0) {
+    const admittedTypeContracts =
+      Array.isArray(admission?.typeContracts)
+        ? admission.typeContracts
+        : [];
+    if (
+      entries.length === 0 &&
+      admittedTypeContracts.length === 0
+    ) {
       throw new Error(
-        "No portable API contracts were supplied for installation."
+        "No portable API operator or type contracts were supplied for installation."
+      );
+    }
+
+    const portableTypeContractsById =
+      new Map();
+    const portableTypeContractsByCsType =
+      new Map();
+    for (const value of
+      admittedTypeContracts) {
+      const graphType = String(
+        value?.graphType || ""
+      ).trim();
+      const csType =
+        normalizedPortableCsType(
+          value?.csType
+        );
+      if (
+        !graphType ||
+        !csType ||
+        !isSafeCSharpTypeExpression(csType) ||
+        isOpenTypeExpression(csType)
+      ) {
+        throw new Error(
+          "A portable graph type contract is incomplete or unsafe."
+        );
+      }
+      const assignableToCsTypes = [
+        ...new Set(
+          (Array.isArray(
+            value?.assignableToCsTypes
+          )
+            ? value.assignableToCsTypes
+            : [])
+            .map(normalizedPortableCsType)
+            .filter(type =>
+              type &&
+              type !== csType &&
+              isSafeCSharpTypeExpression(type) &&
+              !isOpenTypeExpression(type)
+            )
+        )
+      ].sort();
+      const contract = Object.freeze({
+        graphType,
+        csType,
+        referenceType:
+          value?.referenceType === true,
+        valueType:
+          value?.valueType === true,
+        assignableToCsTypes:
+          Object.freeze(
+            assignableToCsTypes
+          ),
+        assemblyReferences:
+          Object.freeze(
+            normalizedPortableAssemblyReferences(
+              value?.assemblyReferences
+            )
+          )
+      });
+      const previous =
+        portableTypeContractsById.get(
+          graphType
+        );
+      if (
+        previous &&
+        JSON.stringify(previous) !==
+          JSON.stringify(contract)
+      ) {
+        throw new Error(
+          `Portable C# type '${csType}' has conflicting contracts.`
+        );
+      }
+      portableTypeContractsById.set(
+        graphType,
+        contract
+      );
+      const family =
+        portableTypeContractsByCsType.get(
+          csType
+        ) || [];
+      if (!family.includes(graphType)) {
+        family.push(graphType);
+      }
+      portableTypeContractsByCsType.set(
+        csType,
+        family
       );
     }
 
@@ -1993,20 +3429,28 @@
         Array.isArray(value)
       ) {
         throw new Error(
-          `Portable API contract '${operatorId}' is missing.`
+          "A portable API contract is missing."
         );
       }
       const contract =
         structuredClone(value);
+      const contractName =
+        catalogContractDisplayName(
+          contract,
+          "Unnamed API contract"
+        );
       if (
         !String(contract.ownerType || "").trim() ||
         !String(contract.kind || "").trim()
       ) {
         throw new Error(
-          `Portable API contract '${operatorId}' has no complete owner/kind identity.`
+          `Portable API contract '${contractName}' has no complete owner/kind identity.`
         );
       }
-      contract.schemaVersion = 3;
+      contract.schemaVersion = Math.max(
+        0,
+        Number(contract.schemaVersion) || 3
+      );
       contract.stableContractId =
         stableContractId(contract);
       for (const [direction, key] of [
@@ -2028,12 +3472,12 @@
           ).trim();
           if (!id || !type) {
             throw new Error(
-              `Portable API contract '${operatorId}' contains an incomplete ${direction} port.`
+              `Portable API contract '${contractName}' contains an incomplete ${direction} port.`
             );
           }
           if (ids.has(id)) {
             throw new Error(
-              `Portable API contract '${operatorId}' contains duplicate ${direction} port '${id}'.`
+              `Portable API contract '${contractName}' contains duplicate ${direction} port '${id}'.`
             );
           }
           ids.add(id);
@@ -2070,10 +3514,62 @@
           ).trim();
           if (!requiredId || !ids.has(requiredId)) {
             throw new Error(
-              `Portable API contract '${operatorId}' does not declare required ${direction} port '${requiredId || "<missing>"}'.`
+              `Portable API contract '${contractName}' does not declare required ${direction} port '${requiredId || "<missing>"}'.`
             );
           }
         }
+      }
+      contract.requiredAssemblyReferences =
+        normalizedPortableAssemblyReferences(
+          contract.requiredAssemblyReferences
+        );
+      contract.baseAssemblyReferences =
+        normalizedPortableAssemblyReferences(
+          contract.baseAssemblyReferences ||
+          contract.requiredAssemblyReferences
+        );
+      const enumMetadataSafe =
+        contract.schemaVersion < 4 ||
+        contract.kind !== "enum" ||
+        portableEnumMetadataIsSafe(
+          contract
+        );
+      contract.enumValues =
+        normalizedPortableEnumValues(
+          contract.enumValues
+        );
+      if (
+        contract.schemaVersion >= 4 &&
+        !portableContractSpecialization(
+          contract,
+          contract
+        )
+      ) {
+        contract.portableSpecializationUnresolved = true;
+
+        contract.portableSpecializationDiagnostic =
+          `Portable API contract '${contractName}' has inconsistent generic bindings or specialized port types.`;
+      }
+      if (
+        contract.schemaVersion >= 4 &&
+        contract.kind === "enum" &&
+        (
+          !enumMetadataSafe ||
+          !portableEnumValueNames(
+            contract.enumValues
+          ).includes(
+            String(contract.enumDefaultValue || "")
+          ) ||
+          !portableEnumValueNames(
+            contract.enumValues
+          ).includes(
+            String(contract.enumValue || "")
+          )
+        )
+      ) {
+        throw new Error(
+          `Portable enum contract '${contractName}' has no exact declared value identity.`
+        );
       }
       return contract;
     };
@@ -2121,12 +3617,127 @@
       return `api.${slug}.${stableHash(normalized)}`;
     };
 
+    const stagingTypeIds = new Set();
+    const stagedTypeInformation = graphType =>
+      stagedTypes.get(graphType) ||
+      typeDefinitions[graphType] ||
+      null;
+    const canonicalGraphTypeId = graphType =>
+      String(
+        registry.canonicalType?.(
+          graphType
+        ) || graphType || ""
+      );
+    const uniqueGraphTypeForCsType = csType => {
+      const normalized =
+        normalizedPortableCsType(csType);
+      if (
+        portableCsTypesEqual(
+          normalized,
+          "System.Object"
+        )
+      ) {
+        const objectInformation =
+          stagedTypeInformation("object");
+        if (
+          !objectInformation ||
+          !portableCsTypesEqual(
+            objectInformation.csType,
+            normalized
+          )
+        ) {
+          throw new Error(
+            "The Builder's root 'object' graph type does not represent System.Object."
+          );
+        }
+        return "object";
+      }
+      const storedMatches = [
+        ...new Set(
+          portableTypeContractsByCsType.get(
+            normalized
+          ) || []
+        )
+      ];
+      if (storedMatches.length === 1) {
+        const exactGraphType =
+          storedMatches[0];
+        const information =
+          stagedTypeInformation(
+            exactGraphType
+          );
+        if (
+          information &&
+          !portableCsTypesEqual(
+            information.csType,
+            normalized
+          )
+        ) {
+          throw new Error(
+            `Portable C# type '${normalized}' represents a conflicting contract.`
+          );
+        }
+        return exactGraphType;
+      }
+      const matches = new Set();
+      for (const [id, information] of [
+        ...Object.entries(typeDefinitions),
+        ...stagedTypes
+      ]) {
+        if (
+          portableCsTypesEqual(
+            information?.csType,
+            normalized
+          )
+        ) {
+          matches.add(
+            canonicalGraphTypeId(id)
+          );
+        }
+      }
+      for (const id of storedMatches) {
+        matches.add(id);
+      }
+      if (matches.size > 1) {
+        throw new Error(
+          `Portable C# type '${normalized}' maps to multiple graph types.`
+        );
+      }
+      return [...matches][0] ||
+        graphTypeForCsType(normalized);
+    };
+
     const stageType = (
       type,
-      csType = ""
+      csType = "",
+      suppliedTypeContract = null
     ) => {
+      const typeContract =
+        suppliedTypeContract ||
+        portableTypeContractsById.get(type) ||
+        null;
       const normalizedCsType =
-        normalizedPortableCsType(csType);
+        normalizedPortableCsType(csType) ||
+        normalizedPortableCsType(
+          typeContract?.csType
+        );
+      const readableType =
+        catalogVisibleText(normalizedCsType) ||
+        "portable type";
+      if (
+        typeContract &&
+        (
+          typeContract.graphType !== type ||
+          !portableCsTypesEqual(
+            typeContract.csType,
+            normalizedCsType
+          )
+        )
+      ) {
+        throw new Error(
+          `Portable C# type '${readableType}' does not match its stored contract.`
+        );
+      }
       const alreadyStaged =
         stagedTypes.get(type);
       if (alreadyStaged) {
@@ -2144,7 +3755,7 @@
               .replace(/\s+/g, "")
         ) {
           throw new Error(
-            `Portable graph type '${type}' represents conflicting C# contracts.`
+            `Portable C# type '${readableType}' represents conflicting contracts.`
           );
         }
         return;
@@ -2156,7 +3767,170 @@
             type
         )
       ) {
+        const existingCsType =
+          normalizedPortableCsType(
+            typeDefinitions[type]?.csType
+          );
+        if (
+          normalizedCsType &&
+          existingCsType &&
+          !portableCsTypesEqual(
+            normalizedCsType,
+            existingCsType
+          )
+        ) {
+          throw new Error(
+            `Portable C# type '${readableType}' conflicts with the installed C# type '${existingCsType}'.`
+          );
+        }
+        if (typeContract) {
+          const information =
+            typeDefinitions[type];
+          const actualAssignable =
+            (Array.isArray(
+              information?.assignableTo
+            )
+              ? information.assignableTo
+              : [])
+              .filter(id =>
+                String(id || "") !== type
+              )
+              .map(id =>
+                canonicalPortableCsType(
+                  typeDefinitions[id]
+                    ?.csType || ""
+                )
+              )
+              .filter(actual =>
+                Boolean(actual) &&
+                (
+                  !normalizedCsType ||
+                  !portableCsTypesEqual(
+                    actual,
+                    normalizedCsType
+                  )
+                )
+              );
+          if (
+            typeContract.referenceType !==
+              (information?.referenceType ===
+                true) ||
+            (
+              typeContract.valueType === true &&
+              information?.valueType !== true
+            )
+          ) {
+            throw new Error(
+              `Portable C# type '${readableType}' conflicts with the installed inheritance contract.`
+            );
+          }
+          const missingBases =
+            typeContract.assignableToCsTypes
+              .filter(base =>
+                !actualAssignable.some(actual =>
+                  portableCsTypesEqual(
+                    actual,
+                    base
+                  )
+                )
+              );
+          const installedAssemblyReferences =
+            normalizedPortableAssemblyReferences(
+              information
+                ?.assemblyReferences
+            );
+          const mergedAssemblyReferences =
+            normalizedPortableAssemblyReferences([
+              ...installedAssemblyReferences,
+              ...typeContract
+                .assemblyReferences
+            ]);
+          const assemblyReferencesChanged =
+            JSON.stringify(
+              installedAssemblyReferences
+            ) !== JSON.stringify(
+              mergedAssemblyReferences
+            );
+          if (
+            missingBases.length > 0 ||
+            assemblyReferencesChanged
+          ) {
+            if (stagingTypeIds.has(type)) {
+              throw new Error(
+                `Portable C# type '${readableType}' has a cyclic inheritance contract.`
+              );
+            }
+            stagingTypeIds.add(type);
+            const assignableTo = new Set(
+              Array.isArray(
+                information?.assignableTo
+              )
+                ? information.assignableTo
+                : []
+            );
+            try {
+              for (const baseCsType of
+                missingBases) {
+                const baseGraphType =
+                  uniqueGraphTypeForCsType(
+                    baseCsType
+                  );
+                if (
+                  !typeDefinitions[baseGraphType] &&
+                  !stagedTypes.has(baseGraphType)
+                ) {
+                  stageType(
+                    baseGraphType,
+                    baseCsType,
+                    portableTypeContractsById.get(
+                      baseGraphType
+                    ) || null
+                  );
+                }
+                assignableTo.add(baseGraphType);
+              }
+              stagedTypes.set(type, {
+                ...information,
+                assignableTo:
+                  [...assignableTo],
+                assemblyReferences:
+                  mergedAssemblyReferences
+              });
+            } finally {
+              stagingTypeIds.delete(type);
+            }
+          }
+        }
         return;
+      }
+      if (stagingTypeIds.has(type)) {
+        throw new Error(
+          `Portable C# type '${readableType}' has a cyclic inheritance contract.`
+        );
+      }
+      stagingTypeIds.add(type);
+      const assignableTo = new Set(["object"]);
+      if (typeContract) {
+        for (const baseCsType of
+          typeContract.assignableToCsTypes) {
+          const baseGraphType =
+            uniqueGraphTypeForCsType(
+              baseCsType
+            );
+          if (
+            !typeDefinitions[baseGraphType] &&
+            !stagedTypes.has(baseGraphType)
+          ) {
+            stageType(
+              baseGraphType,
+              baseCsType,
+              portableTypeContractsById.get(
+                baseGraphType
+              ) || null
+            );
+          }
+          assignableTo.add(baseGraphType);
+        }
       }
       const elementCsType =
         portableEnumerableElementCsType(
@@ -2165,7 +3939,7 @@
       let elementGraphType = "";
       if (elementCsType) {
         elementGraphType =
-          graphTypeForCsType(
+          uniqueGraphTypeForCsType(
             elementCsType
           );
         if (
@@ -2186,20 +3960,36 @@
         }
       }
       stagedTypes.set(type, {
-        label: `Unavailable · ${type}`,
+        label: catalogUnavailableTypeLabel(
+          normalizedCsType
+        ),
         short: "API?",
         color: "#ff6f91",
         csType:
           normalizedCsType || "object",
-        defaultCs: "null!",
-        referenceType: true,
-        valueType: true,
+        defaultCs:
+          typeContract?.referenceType ===
+            false
+            ? `default(${normalizedCsType})`
+            : "null!",
+        referenceType:
+          typeContract
+            ? typeContract.referenceType
+            : true,
+        valueType:
+          typeContract
+            ? typeContract.valueType
+            : true,
         globalGenericCandidate: false,
         unavailableApiType: true,
-        assignableTo: ["object"],
+        assignableTo:
+          [...assignableTo],
         constraints: [
           "value",
-          "reference",
+          ...(typeContract?.referenceType ===
+            false
+            ? []
+            : ["reference"]),
           ...(elementGraphType
             ? [
                 "enumerable",
@@ -2207,6 +3997,9 @@
               ]
             : [])
         ],
+        assemblyReferences:
+          typeContract
+            ?.assemblyReferences || [],
         ...(elementGraphType
           ? {
               collectionType: true,
@@ -2217,6 +4010,1027 @@
             }
           : {})
       });
+      stagingTypeIds.delete(type);
+    };
+
+    for (const contract of
+      portableTypeContractsById.values()) {
+      stageType(
+        contract.graphType,
+        contract.csType,
+        contract
+      );
+    }
+
+    const portableHookTemplate =
+      definitions["harmony.typedPatchEvent"] ||
+      null;
+    const portableHookVisibility = value => [
+      "public",
+      "private",
+      "protected",
+      "internal",
+      "private-protected",
+      "protected-internal"
+    ].includes(String(value || ""));
+    const portableHookContractIsExecutable = (
+      operatorId,
+      contract
+    ) => {
+      if (
+        !portableHookTemplate ||
+        typeof portableHookTemplate
+          .codegenCollect !== "function" ||
+        typeof portableHookTemplate
+          .codegenExpression !== "function" ||
+        !String(operatorId).startsWith(
+          "api.hook."
+        ) ||
+        contract?.kind !== "hook-method" ||
+        Number(contract?.genericArity) !== 0 ||
+        !portableHookVisibility(
+          contract?.hookVisibility
+        ) ||
+        !isSafeCSharpTypeExpression(
+          contract?.ownerType
+        ) ||
+        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(
+          String(contract?.memberName || "")
+        ) ||
+        !isSafeCSharpTypeExpression(
+          contract?.returnType ||
+          "System.Void"
+        )
+      ) {
+        return false;
+      }
+      const parameters = Array.isArray(
+        contract?.parameters
+      ) ? contract.parameters : [];
+      if (
+        parameters.some(parameter =>
+          parameter?.isByRef === true ||
+          parameter?.isOut === true ||
+          !isSafeCSharpTypeExpression(
+            parameter?.type
+          )
+        )
+      ) {
+        return false;
+      }
+      const expectedOutputs = ["called"];
+      if (contract?.isStatic !== true) {
+        expectedOutputs.push("instance");
+      }
+      parameters.forEach((_parameter, index) =>
+        expectedOutputs.push(
+          `argument${index}`
+        )
+      );
+      if (
+        normalizedPortableCsType(
+          contract?.returnType
+        ) !== "System.Void" &&
+        normalizedPortableCsType(
+          contract?.returnType
+        ) !== "void"
+      ) {
+        expectedOutputs.push("result");
+      }
+      const actualOutputs =
+        (Array.isArray(contract?.outputPorts)
+          ? contract.outputPorts
+          : []).map(port =>
+          String(port?.id || "")
+        );
+      return (
+        expectedOutputs.length ===
+          actualOutputs.length &&
+        expectedOutputs.every(id =>
+          actualOutputs.includes(id)
+        )
+      );
+    };
+
+    const portableDirectKinds = new Set([
+      "method",
+      "constructor",
+      "property-get",
+      "property-set",
+      "field-get",
+      "field-set",
+      "type",
+      "enum"
+    ]);
+
+    const portableDefaultExpressionIsSafe =
+      value => {
+        const text = String(value || "").trim();
+        if (!text) return false;
+        if (
+          [
+            "null",
+            "default",
+            "true",
+            "false"
+          ].includes(text)
+        ) {
+          return true;
+        }
+        if (
+          /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?(?:[fFdDmMuUlL]{0,2})$/.test(
+            text
+          ) ||
+          /^0[xX][0-9A-Fa-f]+(?:[uUlL]{0,2})$/.test(
+            text
+          ) ||
+          /^"(?:[^"\\\r\n]|\\.)*"$/.test(
+            text
+          ) ||
+          /^'(?:[^'\\\r\n]|\\.)'$/.test(
+            text
+          )
+        ) {
+          return true;
+        }
+        const defaultMatch =
+          /^default\((.+)\)$/.exec(text);
+        if (defaultMatch) {
+          return isSafeCSharpTypeExpression(
+            defaultMatch[1]
+          );
+        }
+        return /^(?:@?[A-Za-z_][A-Za-z0-9_]*\.)+@?[A-Za-z_][A-Za-z0-9_]*$/.test(
+          text
+        );
+      };
+
+    const portableGenericRowsAreSafe =
+      contract => {
+        const rows = [
+          ...portableGenericParameterRows(
+            contract,
+            "ownerGenericParameters",
+            genericTypeParameterNames(
+              contract?.ownerType
+            )
+          ).map(row => ({
+            ...row,
+            genericScope: "owner"
+          })),
+          ...portableGenericParameterRows(
+            contract,
+            "methodGenericParameters"
+          ).map(row => ({
+            ...row,
+            genericScope: "method"
+          }))
+        ];
+        const identities = new Set();
+        for (const row of rows) {
+          const name = String(row?.name || "");
+          const position = Math.max(
+            0,
+            Number(row?.position) || 0
+          );
+          const identity =
+            `${row.genericScope}|${name}|${position}`;
+          if (
+            !isCSharpIdentifier(name) ||
+            identities.has(identity) ||
+            (Array.isArray(row?.constraints)
+              ? row.constraints
+              : []).some(constraint =>
+                !isSafeCSharpTypeExpression(
+                  constraint
+                )
+              )
+          ) {
+            return false;
+          }
+          identities.add(identity);
+        }
+        return true;
+      };
+
+    const portableDirectSpecialization = (
+      contract,
+      available = contract
+    ) => {
+      if (
+        Number(contract?.schemaVersion) !== 4 ||
+        contract?.directExecutable !== true ||
+        !portableDirectKinds.has(
+          String(contract?.kind || "")
+        ) ||
+        !portableBaseMetadataMatches(
+          contract,
+          available
+        ) ||
+        !portableGenericRowsAreSafe(contract)
+      ) {
+        return null;
+      }
+      const specialization =
+        portableContractSpecialization(
+          contract,
+          available
+        );
+      if (
+        !specialization ||
+        !isSafeCSharpTypeExpression(
+          specialization.ownerType
+        ) ||
+        isOpenTypeExpression(
+          specialization.ownerType
+        ) ||
+        !isSafeCSharpTypeExpression(
+          specialization.returnType ||
+          "System.Void"
+        ) ||
+        isOpenTypeExpression(
+          specialization.returnType ||
+          "System.Void"
+        )
+      ) {
+        return null;
+      }
+      const kind = String(contract.kind || "");
+      if (
+        !["type", "enum", "constructor"].includes(
+          kind
+        ) &&
+        !isCSharpIdentifier(
+          contract.memberName
+        )
+      ) {
+        return null;
+      }
+      const parameters = Array.isArray(
+        specialization.parameters
+      ) ? specialization.parameters : [];
+      for (
+        let index = 0;
+        index < parameters.length;
+        index += 1
+      ) {
+        const parameter = parameters[index];
+        const type = normalizedPortableCsType(
+          parameter?.elementType ||
+          parameter?.type
+        );
+        if (
+          Math.max(
+            0,
+            Number(parameter?.position) || index
+          ) !== index ||
+          !isCSharpIdentifier(
+            parameter?.name ||
+            `argument${index}`
+          ) ||
+          !isSafeCSharpTypeExpression(type) ||
+          isOpenTypeExpression(type) ||
+          (
+            parameter?.isOptional === true &&
+            (
+              parameter?.hasDefaultValue !== true ||
+              !portableDefaultExpressionIsSafe(
+                parameter?.defaultValueCSharp
+              )
+            )
+          )
+        ) {
+          return null;
+        }
+      }
+      if (kind === "enum") {
+        const values =
+          portableEnumValueNames(
+            contract.enumValues
+          );
+        if (
+          !portableEnumMetadataIsSafe(
+            contract
+          ) ||
+          !values.includes(
+            String(contract.enumDefaultValue || "")
+          ) ||
+          !values.includes(
+            String(contract.enumValue || "")
+          ) ||
+          !isSafeCSharpTypeExpression(
+            contract.enumUnderlyingType ||
+            "System.Int32"
+          )
+        ) {
+          return null;
+        }
+      }
+      return Object.freeze({
+        ...specialization,
+        requiredAssemblyReferences:
+          Object.freeze(
+            normalizedPortableAssemblyReferences(
+              contract.requiredAssemblyReferences
+            ).map(reference =>
+              Object.freeze(reference)
+            )
+          )
+      });
+    };
+
+    const portableOutputPortId = api =>
+      String(
+        api?.outputPortId ??
+        api?.outputId ??
+        api?.portId ??
+        api?.output?.id ??
+        api?.port?.id ??
+        api?.connection?.fromPort ??
+        ""
+      );
+
+    const portableOutputIsUsed = (api, id) => {
+      if (
+        typeof api?.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return false;
+      }
+      return typeof api?.isOutputConnected ===
+        "function"
+        ? api.isOutputConnected(id)
+        : true;
+    };
+
+    const portableActionFields = api => {
+      const token = api.token(api.node.id);
+      return {
+        result: `_apiResult${token}`,
+        success: `_apiSuccess${token}`,
+        exception: `_apiException${token}`,
+        out(position) {
+          return `_apiOut${Number(position)}${token}`;
+        }
+      };
+    };
+
+    const portableInputExpression = (
+      api,
+      id,
+      csType
+    ) =>
+      `((${csType})(${api.input(id).code}))`;
+
+    const portableCollectActionFields = (
+      api,
+      contract,
+      specialization
+    ) => {
+      const fields = portableActionFields(api);
+      if (portableOutputIsUsed(api, "success")) {
+        api.addRuntimeField(
+          `${api.node.id}.apiSuccess`,
+          fields.success,
+          "bool",
+          "false"
+        );
+      }
+      if (portableOutputIsUsed(api, "exception")) {
+        api.addRuntimeField(
+          `${api.node.id}.apiException`,
+          fields.exception,
+          "System.Exception?",
+          "null"
+        );
+      }
+      const kind = String(contract.kind || "");
+      const returnType = kind === "constructor"
+        ? specialization.ownerType
+        : specialization.returnType;
+      const isVoid = portableCsTypesEqual(
+        returnType,
+        "System.Void"
+      );
+      if (
+        !isVoid &&
+        portableOutputIsUsed(api, "result")
+      ) {
+        api.addRuntimeField(
+          `${api.node.id}.apiResult`,
+          fields.result,
+          returnType,
+          "default!"
+        );
+      }
+      for (const parameter of
+        specialization.parameters) {
+        if (
+          !(
+            parameter?.isOut === true ||
+            (
+              parameter?.isByRef === true &&
+              parameter?.isIn !== true
+            )
+          ) ||
+          !portableOutputIsUsed(
+            api,
+            `out${parameter.position}`
+          )
+        ) {
+          continue;
+        }
+        api.addRuntimeField(
+          `${api.node.id}.apiOut.${parameter.position}`,
+          fields.out(parameter.position),
+          normalizedPortableCsType(
+            parameter.elementType ||
+            parameter.type
+          ),
+          "default!"
+        );
+      }
+    };
+
+    const portableWrapAction = (api, body) => {
+      const fields = portableActionFields(api);
+      const keepSuccess =
+        portableOutputIsUsed(api, "success");
+      const keepException =
+        portableOutputIsUsed(api, "exception");
+      const success = [
+        keepSuccess
+          ? `    ${fields.success} = true;`
+          : "",
+        keepException
+          ? `    ${fields.exception} = null;`
+          : ""
+      ].filter(Boolean).join("\n");
+      const failure = [
+        keepSuccess
+          ? `    ${fields.success} = false;`
+          : "",
+        keepException
+          ? `    ${fields.exception} = exception;`
+          : ""
+      ].filter(Boolean).join("\n");
+      return (
+        `try\n{\n${String(body || "").trimEnd()}` +
+        `${success ? `\n${success}` : ""}\n}\n` +
+        "catch (System.Exception exception)\n{\n" +
+        `${keepException ? failure : "    throw;"}\n}`
+      );
+    };
+
+    const portableActionWithDone = (api, action) => {
+      const done = api.emit("done");
+      return `${String(action || "").trimEnd()}${
+        done ? `\n${done}();` : ""
+      }`;
+    };
+
+    const portableDirectArguments = (
+      api,
+      specialization
+    ) => {
+      const token = api.token(api.node.id);
+      const fields = portableActionFields(api);
+      const declarations = [];
+      const argumentsList = [];
+      const assignments = [];
+      for (const parameter of
+        specialization.parameters) {
+        const position = Math.max(
+          0,
+          Number(parameter?.position) || 0
+        );
+        const csType = normalizedPortableCsType(
+          parameter?.elementType ||
+          parameter?.type
+        );
+        const local =
+          `_apiArg${position}${token}`;
+        const inputId = `arg${position}`;
+        const input = parameter?.isOut === true
+          ? null
+          : api.input(inputId);
+        if (parameter?.isOut === true) {
+          declarations.push(
+            `${csType} ${local};`
+          );
+          argumentsList.push(`out ${local}`);
+        } else if (parameter?.isByRef === true) {
+          declarations.push(
+            `${csType} ${local} = ${
+              portableInputExpression(
+                api,
+                inputId,
+                csType
+              )
+            };`
+          );
+          argumentsList.push(
+            `${parameter?.isIn === true ? "in" : "ref"} ${local}`
+          );
+        } else if (
+          parameter?.isOptional === true &&
+          input?.connected !== true
+        ) {
+          argumentsList.push(
+            String(
+              parameter.defaultValueCSharp
+            ).trim()
+          );
+        } else {
+          argumentsList.push(
+            portableInputExpression(
+              api,
+              inputId,
+              csType
+            )
+          );
+        }
+        if (
+          (
+            parameter?.isOut === true ||
+            (
+              parameter?.isByRef === true &&
+              parameter?.isIn !== true
+            )
+          ) &&
+          portableOutputIsUsed(
+            api,
+            `out${position}`
+          )
+        ) {
+          assignments.push(
+            `${fields.out(position)} = ${local};`
+          );
+        }
+      }
+      return {
+        declarations,
+        arguments: argumentsList,
+        assignments
+      };
+    };
+
+    const portableActionOutputExpression = api => {
+      if (
+        typeof api?.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return "default!";
+      }
+      const fields = portableActionFields(api);
+      const output = portableOutputPortId(api);
+      if (output === "success") {
+        return fields.success;
+      }
+      if (output === "exception") {
+        return fields.exception;
+      }
+      if (output === "result") {
+        return fields.result;
+      }
+      const match = /^out(\d+)$/.exec(output);
+      return match
+        ? fields.out(Number(match[1]))
+        : fields.result;
+    };
+
+    const createPortableDirectDefinition = (
+      operatorId,
+      contract,
+      inputs,
+      outputs,
+      displayName
+    ) => {
+      const nodeContract = node => {
+        const requested =
+          node?.apiContract &&
+          typeof node.apiContract === "object" &&
+          !Array.isArray(node.apiContract)
+            ? node.apiContract
+            : contract;
+        return {
+          contract: requested,
+          specialization:
+            portableDirectSpecialization(
+              requested,
+              contract
+            )
+        };
+      };
+      const makeNodePorts = (
+        requested,
+        direction,
+        key
+      ) => (
+        Array.isArray(requested?.[key])
+          ? requested[key]
+          : []
+      ).map(port => registry.port(
+        String(port?.id || ""),
+        String(port?.label || port?.id || ""),
+        String(port?.type || "object"),
+        {
+          optional:
+            port?.optional === true,
+          semanticRole:
+            portablePortRole(
+              requested.kind,
+              direction,
+              port,
+              requested.parameters
+            ),
+          apiCsType:
+            portableStoredPortCsType(
+              requested,
+              direction,
+              port
+            )
+        }
+      ));
+      const genericParameters = [
+        ...portableGenericParameterRows(
+          contract,
+          "ownerGenericParameters",
+          genericTypeParameterNames(
+            contract.ownerType
+          )
+        ).map(row => ({
+          ...row,
+          prefix: "ownerGeneric"
+        })),
+        ...portableGenericParameterRows(
+          contract,
+          "methodGenericParameters"
+        ).map(row => ({
+          ...row,
+          prefix: "generic"
+        }))
+      ];
+      const parameters = genericParameters.map(row => ({
+        key:
+          `api${row.prefix.charAt(0).toUpperCase()}${row.prefix.slice(1)}${row.position}`,
+        label: `Compile-time type ${row.name}`,
+        kind: "text",
+        default: "",
+        affectsPorts: true,
+        affectsNode: true,
+        commitImmediately: true,
+        monospace: true,
+        spellcheck: false
+      }));
+      if (contract.kind === "enum") {
+        const enumValueNames =
+          portableEnumValueNames(
+            contract.enumValues
+          );
+        parameters.push({
+          key: "value",
+          label: "Value",
+          kind: "select",
+          options: enumValueNames.map(
+            value => [value, value]
+          ),
+          default: contract.enumDefaultValue
+        });
+      }
+
+      const definition = {
+        title: `Portable API · ${displayName}`,
+        group:
+          contract.kind === "enum" ||
+          contract.kind === "type"
+            ? API_GROUPS.types
+            : contract.kind.startsWith("property")
+              ? API_GROUPS.properties
+              : contract.kind.startsWith("field")
+                ? API_GROUPS.fields
+                : contract.kind === "constructor"
+                  ? API_GROUPS.constructors
+                  : API_GROUPS.methods,
+        symbol: "API",
+        description:
+          `Verified portable direct API contract for ${displayName}.`,
+        hiddenFromPalette: true,
+        expertOnly: false,
+        catalogGenerated: true,
+        portableApiExecutableContract: true,
+        preservedApiContract: contract,
+        apiVerification: Object.freeze(
+          structuredClone(contract)
+        ),
+        inputs,
+        outputs,
+        parameters,
+        catalogType: contract.ownerType,
+        catalogMember: contract.memberName,
+        apiStableContractId:
+          contract.stableContractId,
+        apiMemberKind: contract.kind,
+        apiSignature: contract.signature,
+        apiParameters: contract.parameters,
+        apiReturnType: contract.returnType,
+        apiIsStatic:
+          contract.isStatic === true,
+        apiGenericArity:
+          Math.max(
+            0,
+            Number(contract.genericArity) || 0
+          ),
+        apiOwnerGenericParameters:
+          contract.ownerGenericParameters,
+        apiMethodGenericParameters:
+          contract.methodGenericParameters,
+        apiEnumValues: contract.enumValues,
+        apiEnumDefaultValue:
+          contract.enumDefaultValue,
+        apiEnumUnderlyingType:
+          contract.enumUnderlyingType,
+        apiEnumIsFlags:
+          contract.enumIsFlags === true,
+        requiredAssemblyReferences:
+          contract.requiredAssemblyReferences,
+        runtimeBound: false,
+        apiThreadAffinity:
+          String(
+            contract.threadAffinity || "unknown"
+          ),
+        apiReloadSafety:
+          normalizeReloadSafety(
+            contract.reloadSafety
+          ),
+        apiReloadCleanupCapabilities:
+          Array.isArray(
+            contract.reloadCleanupCapabilities
+          )
+            ? contract.reloadCleanupCapabilities
+            : [],
+        apiReloadAutomaticCleanup:
+          Array.isArray(
+            contract.reloadAutomaticCleanup
+          )
+            ? contract.reloadAutomaticCleanup
+            : [],
+        apiGenericBindingParameters:
+          genericParameters,
+        resolveApiSpecialization(node) {
+          const resolved = nodeContract(node);
+          return resolved.specialization
+            ? {
+                ...resolved.specialization,
+                genericBindings:
+                  resolved.specialization
+                    .genericBindings
+              }
+            : null;
+        },
+        resolveDefinition(node) {
+          const resolved = nodeContract(node);
+          if (!resolved.specialization) {
+            return {};
+          }
+          return {
+            inputs: makeNodePorts(
+              resolved.contract,
+              "input",
+              "inputPorts"
+            ),
+            outputs: makeNodePorts(
+              resolved.contract,
+              "output",
+              "outputPorts"
+            ),
+            apiResolvedSpecialization:
+              resolved.specialization
+          };
+        },
+        codegenCollect(api) {
+          const resolved = nodeContract(api.node);
+          if (!resolved.specialization) {
+            api.diagnostic?.(
+              `Portable API contract '${displayName}' is inconsistent with its saved specialization.`
+            );
+            return;
+          }
+          if ([
+            "method",
+            "constructor",
+            "property-set",
+            "field-set"
+          ].includes(contract.kind)) {
+            portableCollectActionFields(
+              api,
+              resolved.contract,
+              resolved.specialization
+            );
+          }
+        },
+        codegenAction(api) {
+          const resolved = nodeContract(api.node);
+          const specialization =
+            resolved.specialization;
+          if (!specialization) {
+            api.diagnostic?.(
+              `Portable API contract '${displayName}' is inconsistent with its saved specialization.`
+            );
+            return "";
+          }
+          const kind = String(
+            resolved.contract.kind || ""
+          );
+          const fields = portableActionFields(api);
+          let body = "";
+          if (
+            kind === "method" ||
+            kind === "constructor"
+          ) {
+            const argumentsResult =
+              portableDirectArguments(
+                api,
+                specialization
+              );
+            const methodRows =
+              portableGenericParameterRows(
+                resolved.contract,
+                "methodGenericParameters"
+              );
+            const genericSuffix =
+              kind === "method" &&
+              methodRows.length > 0
+                ? `<${methodRows.map(row =>
+                    specialization
+                      .genericBindings[
+                        `generic${row.position}`
+                      ]
+                  ).join(", ")}>`
+                : "";
+            const host = kind === "constructor"
+              ? ""
+              : resolved.contract.isStatic === true
+                ? `${specialization.ownerType}.`
+                : `((${specialization.ownerType})(${api.input("target").code})).`;
+            const invocation = kind === "constructor"
+              ? `new ${specialization.ownerType}(${argumentsResult.arguments.join(", ")})`
+              : `${host}${escapeCSharpIdentifier(resolved.contract.memberName)}${genericSuffix}(${argumentsResult.arguments.join(", ")})`;
+            const returnType = kind === "constructor"
+              ? specialization.ownerType
+              : specialization.returnType;
+            const isVoid = portableCsTypesEqual(
+              returnType,
+              "System.Void"
+            );
+            const assignment = isVoid
+              ? `${invocation};`
+              : `${portableOutputIsUsed(api, "result") ? fields.result : "_"} = ${invocation};`;
+            body = [
+              ...argumentsResult.declarations,
+              assignment,
+              ...argumentsResult.assignments
+            ].map(line => `    ${line}`).join("\n");
+          } else if (kind === "property-set") {
+            const parameters =
+              specialization.parameters;
+            const indexes = parameters.slice(0, -1);
+            const valueParameter =
+              parameters.at(-1);
+            const host =
+              resolved.contract.isStatic === true
+                ? specialization.ownerType
+                : `((${specialization.ownerType})(${api.input("target").code}))`;
+            const indexValues = indexes.map(
+              parameter =>
+                portableInputExpression(
+                  api,
+                  `arg${parameter.position}`,
+                  normalizedPortableCsType(
+                    parameter.elementType ||
+                    parameter.type
+                  )
+                )
+            );
+            const access = indexValues.length > 0
+              ? `${host}[${indexValues.join(", ")}]`
+              : `${host}.${escapeCSharpIdentifier(resolved.contract.memberName)}`;
+            body = `    ${access} = ${portableInputExpression(
+              api,
+              "value",
+              normalizedPortableCsType(
+                valueParameter?.elementType ||
+                valueParameter?.type
+              )
+            )};`;
+          } else if (kind === "field-set") {
+            const valueParameter =
+              specialization.parameters.at(-1);
+            const host =
+              resolved.contract.isStatic === true
+                ? specialization.ownerType
+                : `((${specialization.ownerType})(${api.input("target").code}))`;
+            body = `    ${host}.${escapeCSharpIdentifier(resolved.contract.memberName)} = ${portableInputExpression(
+              api,
+              "value",
+              normalizedPortableCsType(
+                valueParameter?.elementType ||
+                valueParameter?.type
+              )
+            )};`;
+          } else {
+            return "";
+          }
+          return portableActionWithDone(
+            api,
+            portableWrapAction(api, body)
+          );
+        },
+        codegenExpression(api) {
+          const resolved = nodeContract(api.node);
+          const specialization =
+            resolved.specialization;
+          if (!specialization) {
+            api.diagnostic?.(
+              `Portable API contract '${displayName}' is inconsistent with its saved specialization.`
+            );
+            return "default!";
+          }
+          const kind = String(
+            resolved.contract.kind || ""
+          );
+          if (kind === "type") {
+            return `typeof(${specialization.ownerType})`;
+          }
+          if (kind === "enum") {
+            const selected = String(
+              api.node?.parameters?.value ||
+              resolved.contract.enumValue ||
+              resolved.contract.enumDefaultValue ||
+              ""
+            );
+            const enumEntry =
+              normalizedPortableEnumValues(
+                resolved.contract.enumValues
+              ).find(value =>
+                value.name === selected
+              );
+            const numericCast =
+              portableEnumCastExpression(
+                specialization.ownerType,
+                resolved.contract.enumUnderlyingType,
+                enumEntry?.value
+              );
+            return numericCast ||
+              `${specialization.ownerType}.${escapeCSharpIdentifier(selected)}`;
+          }
+          if (
+            kind === "method" ||
+            kind === "constructor" ||
+            kind === "property-set" ||
+            kind === "field-set"
+          ) {
+            return portableActionOutputExpression(api);
+          }
+          const valueType =
+            specialization.returnType;
+          const access = host => {
+            if (kind === "property-get") {
+              const indexes =
+                specialization.parameters.map(
+                  parameter =>
+                    portableInputExpression(
+                      api,
+                      `arg${parameter.position}`,
+                      normalizedPortableCsType(
+                        parameter.elementType ||
+                        parameter.type
+                      )
+                    )
+                );
+              return indexes.length > 0
+                ? `${host}[${indexes.join(", ")}]`
+                : `${host}.${escapeCSharpIdentifier(resolved.contract.memberName)}`;
+            }
+            return `${host}.${escapeCSharpIdentifier(resolved.contract.memberName)}`;
+          };
+          if (resolved.contract.isStatic === true) {
+            return access(
+              specialization.ownerType
+            );
+          }
+          const token = api.token(api.node.id);
+          const target = api.input("target").code;
+          return (
+            `(((object?)(${target})) is ${specialization.ownerType} ` +
+            `_apiTarget${token} ? ${access(`_apiTarget${token}`)} : ` +
+            `default(${valueType})!)`
+          );
+        }
+      };
+      return definition;
     };
 
     for (const requested of entries) {
@@ -2228,38 +5042,137 @@
           "A portable API contract has no operator id."
         );
       }
-      if (stagedDefinitions.has(operatorId)) {
-        throw new Error(
-          `Portable API operator '${operatorId}' occurs more than once in the installation plan.`
-        );
-      }
-      const existing = definitions[operatorId];
-      if (
-        existing &&
-        existing.unavailableApiContract !==
-          true
-      ) {
-        throw new Error(
-          `Portable API operator '${operatorId}' collides with a real or integrated registry definition.`
-        );
-      }
       const contract = normalizedContract(
         operatorId,
         requested?.apiContract,
         requested
       );
+      const alreadyStaged =
+        stagedDefinitions.get(operatorId);
+      if (alreadyStaged) {
+        const stagedContract =
+          alreadyStaged.preservedApiContract ||
+          alreadyStaged.apiVerification;
+        if (
+          exactApiSemanticContractKey(
+            stagedContract
+          ) !==
+          exactApiSemanticContractKey(
+            contract
+          ) ||
+          !portableBaseMetadataMatches(
+            contract,
+            stagedContract
+          ) ||
+          !portableContractSpecializationMatches(
+            contract,
+            stagedContract
+          )
+        ) {
+          throw new Error(
+            `Portable API node '${catalogContractDisplayName(contract, "Unnamed API node")}' represents multiple incompatible semantic contracts.`
+          );
+        }
+        for (const [direction, key] of [
+          ["input", "inputPorts"],
+          ["output", "outputPorts"]
+        ]) {
+          for (const port of contract[key]) {
+            stageType(
+              port.type,
+              portableStoredPortCsType(
+                contract,
+                direction,
+                port
+              )
+            );
+          }
+        }
+        if (
+          alreadyStaged
+            .portableApiExecutableContract ===
+              true
+        ) {
+          const references = new Map();
+          for (const reference of [
+            ...(Array.isArray(
+              alreadyStaged
+                .requiredAssemblyReferences
+            )
+              ? alreadyStaged
+                  .requiredAssemblyReferences
+              : []),
+            ...contract
+              .requiredAssemblyReferences
+          ]) {
+            references.set(
+              String(
+                reference.include
+              ).toLowerCase(),
+              reference
+            );
+          }
+          alreadyStaged
+            .requiredAssemblyReferences =
+              [...references.values()];
+        }
+        continue;
+      }
+      const existing = definitions[operatorId];
+      if (
+        existing &&
+        existing.unavailableApiContract !==
+          true &&
+        existing.portableApiHookContract !==
+          true &&
+        existing.portableApiExecutableContract !==
+          true
+      ) {
+        throw new Error(
+          `Portable API node '${catalogContractDisplayName(contract, "Unnamed API node")}' collides with a real or integrated registry definition.`
+        );
+      }
+      const projectContractMayExecute =
+        projectStoredContractMayExecute(
+          operatorId
+        );
+      const executablePortableHook =
+        projectContractMayExecute &&
+        portableHookContractIsExecutable(
+          operatorId,
+          contract
+        );
+      const executablePortableDirect =
+        projectContractMayExecute
+          ? portableDirectSpecialization(
+              contract,
+              contract
+            )
+          : null;
       const makePorts = (
         direction,
         key
       ) => contract[key].map(port => {
-        stageType(
-          port.type,
-          portableContractPortCsType(
+        const storedCsType =
+          portableStoredPortCsType(
             contract,
             direction,
             port
-          )
+          );
+
+        /*
+        * Unavailable/dead portable contracts are recovery data.
+        *
+        * Their stored C# specialization must NEVER be allowed to reject
+        * project import or redefine an already known graph type.
+        *
+        * The original C# type is deliberately retained as apiCsType.
+        */
+        stageType(
+          port.type,
+          ""
         );
+
         return registry.port(
           port.id,
           String(port.label || port.id),
@@ -2267,9 +5180,17 @@
           {
             optional:
               port.optional === true,
+
             unavailableApiPort: true,
+
+            deadApiPort:
+              contract.deadApiContract === true,
+
             semanticRole:
-              port.role
+              port.role,
+
+            apiCsType:
+              storedCsType
           }
         );
       });
@@ -2281,18 +5202,127 @@
         "output",
         "outputPorts"
       );
-      const displayName = [
-        contract.ownerType,
-        contract.memberName
-      ].filter(Boolean).join(".") ||
-        operatorId;
       const isApi =
         operatorId.startsWith("api.");
-      stagedDefinitions.set(
-        operatorId,
-        {
+      const displayName =
+        catalogContractDisplayName(
+          contract,
+          isApi
+            ? "Unavailable API"
+            : "Unavailable Operator"
+        );
+      let stagedDefinition;
+      if (executablePortableHook) {
+        const fixedMethod = Object.freeze({
+          id: "",
+          stableContractId: String(
+            contract.stableContractId || ""
+          ),
+          name: String(contract.memberName),
+          declaringType: String(
+            contract.ownerType
+          ),
+          signature: String(
+            contract.signature ||
+            contract.memberName
+          ),
+          returnType: String(
+            contract.returnType ||
+            "System.Void"
+          ),
+          isStatic:
+            contract.isStatic === true,
+          visibility: String(
+            contract.hookVisibility
+          ),
+          parameters: Object.freeze(
+            contract.parameters.map(
+              (parameter, index) =>
+                Object.freeze({
+                  ...parameter,
+                  name:
+                    parameter?.name ||
+                    `argument${index}`,
+                  elementType:
+                    parameter?.elementType ||
+                    parameter?.type
+                })
+            )
+          ),
+          attributes: Object.freeze([])
+        });
+        stagedDefinition = {
+          ...portableHookTemplate,
           title:
-            `${isApi ? "Unavailable API" : "Unavailable Operator"} · ${displayName}`,
+            `Hook · ${displayName}`,
+          group: API_GROUPS.hooks,
+          symbol: "H<T>",
+          description:
+            String(
+              contract.signature ||
+              `Typed Harmony hook for ${displayName}.`
+            ),
+          hiddenFromPalette: true,
+          expertOnly: false,
+          inputs,
+          outputs,
+          parameters:
+            (Array.isArray(
+              portableHookTemplate.parameters
+            )
+              ? portableHookTemplate.parameters
+              : []).filter(parameter =>
+                parameter?.key !==
+                  "hookContract"
+              ).map(parameter => ({
+                ...parameter
+              })),
+          catalogGenerated: true,
+          portableApiHookContract: true,
+          preservedApiContract:
+            contract,
+          apiVerification:
+            Object.freeze(
+              structuredClone(contract)
+            ),
+          catalogType:
+            contract.ownerType,
+          catalogMember:
+            contract.memberName,
+          apiStableContractId:
+            contract.stableContractId,
+          apiMemberKind: "hook-method",
+          apiSignature:
+            contract.signature,
+          apiParameters:
+            contract.parameters,
+          apiReturnType:
+            contract.returnType,
+          apiIsStatic:
+            contract.isStatic === true,
+          apiGenericArity: 0,
+          apiHookVisibility:
+            contract.hookVisibility,
+          apiHookMethod: fixedMethod,
+          runtimeBound: false
+        };
+        delete stagedDefinition.resolveDefinition;
+      } else if (executablePortableDirect) {
+        stagedDefinition =
+          createPortableDirectDefinition(
+            operatorId,
+            contract,
+            inputs,
+            outputs,
+            displayName
+          );
+      } else {
+        stagedDefinition = {
+          title:
+            catalogUnavailableTitle(
+              isApi,
+              displayName
+            ),
           group: UNAVAILABLE_GROUP,
           symbol: "API?",
           description:
@@ -2305,14 +5335,75 @@
           inputs,
           outputs,
           parameters: [],
+          resolveDefinition(node) {
+            const nodeContract =
+              node?.apiContract &&
+              typeof node.apiContract ===
+                "object" &&
+              !Array.isArray(
+                node.apiContract
+              )
+                ? node.apiContract
+                : contract;
+            const nodePorts = (
+              direction,
+              key
+            ) => (
+              Array.isArray(
+                nodeContract?.[key]
+              )
+                ? nodeContract[key]
+                : []
+            ).map(port =>
+              registry.port(
+                String(port?.id || ""),
+                String(
+                  port?.label ||
+                  port?.id ||
+                  ""
+                ),
+                String(
+                  port?.type || "object"
+                ),
+                {
+                  optional:
+                    port?.optional === true,
+                  unavailableApiPort: true,
+                  semanticRole:
+                    portablePortRole(
+                      nodeContract?.kind,
+                      direction,
+                      port,
+                      nodeContract?.parameters
+                    ),
+                  apiCsType:
+                    portableStoredPortCsType(
+                      nodeContract,
+                      direction,
+                      port
+                    )
+                }
+              )
+            );
+            return {
+              inputs: nodePorts(
+                "input",
+                "inputPorts"
+              ),
+              outputs: nodePorts(
+                "output",
+                "outputPorts"
+              )
+            };
+          },
           codegenCollect(api) {
             api.diagnostic?.(
-              `Unavailable API contract '${displayName}' (${operatorId}) must be resolved before export.`
+              `${isApi ? "Unavailable API" : "Unavailable node"} contract '${displayName}' must be resolved before export.`
             );
           },
           codegenExpression(api) {
             api.diagnostic?.(
-              `Unavailable API contract '${displayName}' (${operatorId}) must be resolved before export.`
+              `${isApi ? "Unavailable API" : "Unavailable node"} contract '${displayName}' must be resolved before export.`
             );
             return api.csDefault?.(
               api.type || "object"
@@ -2320,11 +5411,15 @@
           },
           codegenAction(api) {
             api.diagnostic?.(
-              `Unavailable API contract '${displayName}' (${operatorId}) must be resolved before export.`
+              `${isApi ? "Unavailable API" : "Unavailable node"} contract '${displayName}' must be resolved before export.`
             );
             return "";
           }
-        }
+        };
+      }
+      stagedDefinitions.set(
+        operatorId,
+        stagedDefinition
       );
       previousDefinitions.set(
         operatorId,
@@ -2515,8 +5610,14 @@
         .every(([operatorId, definition]) =>
           definitions[operatorId] ===
             definition &&
-          definition.unavailableApiContract ===
-            true &&
+          (
+            definition.unavailableApiContract ===
+              true ||
+            definition.portableApiHookContract ===
+              true ||
+            definition.portableApiExecutableContract ===
+              true
+          ) &&
           exactPortableContractKey(
             definition
               .preservedApiContract
@@ -2553,22 +5654,43 @@
               previous.present
           ) {
             throw new Error(
-              `Registry definition '${operatorId}' changed while the project import was pending.`
+              `Portable API definition '${catalogContractDisplayName(stagedDefinitions.get(operatorId)?.preservedApiContract, "Unnamed API node")}' changed while the project import was pending.`
             );
           }
           if (
             current &&
             current.unavailableApiContract !==
+              true &&
+            current.portableApiHookContract !==
+              true &&
+            current.portableApiExecutableContract !==
               true
           ) {
             throw new Error(
-              `Registry definition '${operatorId}' is no longer available for a portable placeholder.`
+              `Portable API definition '${catalogContractDisplayName(stagedDefinitions.get(operatorId)?.preservedApiContract, "Unnamed API node")}' is no longer available for a portable placeholder.`
             );
           }
         }
         for (const [type, information] of
           stagedTypes) {
-          if (!typeDefinitions[type]) {
+          const baseline =
+            ownedTypeBaselines.get(type);
+          if (baseline?.present) {
+            if (
+              typeDefinitions[type] !==
+                baseline.value
+            ) {
+              throw new Error(
+                `Portable C# type '${catalogVisibleText(information?.csType) || "portable type"}' changed while the project import was pending.`
+              );
+            }
+            typeDefinitions[type] =
+              information;
+            publishedTypes.set(
+              type,
+              information
+            );
+          } else if (!typeDefinitions[type]) {
             registry.registerType(
               type,
               information
@@ -2582,6 +5704,10 @@
         registry.registerGroup?.(
           UNAVAILABLE_GROUP,
           { after: ADVANCED_GROUP }
+        );
+        registry.registerGroup?.(
+          API_GROUPS.hooks,
+          { after: API_GROUPS.methods }
         );
         for (const [operatorId, definition] of
           stagedDefinitions) {
@@ -2640,7 +5766,7 @@
     admission = {}
   ) {
     return acquireFactoryOperationLease(
-      "portable-offline-install",
+      "portable-contract-install",
       (lease, releaseLease) =>
         stageUnavailableOperatorTransaction(
           requestedEntries,
@@ -2778,6 +5904,7 @@
     const previousLegacyOperatorResolver = legacyOperatorResolver;
     let catalogPublication = null;
     let registryMutationStarted = false;
+    let publicationNotificationStarted = false;
     const stagingRegistry = {
       ...registry,
       registerGroup(name, options) {
@@ -2804,9 +5931,30 @@
           ...(Array.isArray(information.assemblies) ? information.assemblies : []),
           information.assembly
         ].map(value => String(value || "").trim()).filter(Boolean))];
+        const readableLabel =
+          catalogVisibleText(
+            information.label,
+            [id]
+          ) ||
+          catalogVisibleText(
+            information.csType
+          ) ||
+          "Unknown type";
+        const readableShort =
+          catalogVisibleText(
+            information.short,
+            [id]
+          ) ||
+          readableLabel
+            .split(/[.<]/)
+            .filter(Boolean)
+            .pop()
+            ?.slice(0, 4)
+            .toUpperCase() ||
+          "TYPE";
         stagedTypes[id] = {
-          label: information.label || id,
-          short: information.short || id.slice(0, 4).toUpperCase(),
+          label: readableLabel,
+          short: readableShort,
           color: information.color || "#9da8b4",
           ...information,
           assemblies,
@@ -2955,7 +6103,7 @@
             true
         ) {
           throw new Error(
-            `Live API type '${id}' collides with a non-catalog graph type. The existing type was retained.`
+            `Live API type '${catalogVisibleText(stagedTypes[id]?.csType || stagedTypes[id]?.label, [id]) || "Unavailable API type"}' collides with a non-catalog graph type. The existing type was retained.`
           );
         }
       }
@@ -2980,6 +6128,8 @@
           typeof catalogPublication.verify !==
             "function" ||
           typeof catalogPublication.rollback !==
+            "function" ||
+          typeof catalogPublication.notify !==
             "function"
         ) {
           throw new Error(
@@ -3147,28 +6297,55 @@
         );
       }
 
-      try {
-        catalogPublication?.notify?.();
-      } catch (catalogEventError) {
-        console.error(
-          "The verified catalog event could not be delivered.",
-          catalogEventError
-        );
-      }
       await yieldToBrowser();
       assertNotCancelled(
         "announcing its completed publication"
       );
-      window.dispatchEvent(
-        new CustomEvent(
-          "rml-api-node-factory-ready",
-          { detail: report }
-        )
+      assertFactoryOperationLease(
+        lease,
+        "notifying the completed catalog publication"
       );
-
+      assertNotCancelled(
+        "notifying its completed publication"
+      );
+      if (
+        catalogPublication &&
+        catalogPublication.verify() !== true
+      ) {
+        throw new Error(
+          "The rebuilt API catalog changed before its final publication notification."
+        );
+      }
+      // From this point onward observers can see the new generation.  Every
+      // rollback-capable check has already completed synchronously.
+      publicationNotificationStarted = true;
       completeFactoryReady(report);
+      try {
+        window.dispatchEvent(
+          new CustomEvent(
+            "rml-api-node-factory-ready",
+            { detail: report }
+          )
+        );
+      } catch (factoryEventError) {
+        console.error(
+          "The verified API factory event could not be delivered.",
+          factoryEventError
+        );
+      }
+      // This is deliberately the final irreversible synchronous action.
+      // There must be no await, cancellation check, or rollback-capable work
+      // after observers have been told that this generation is committed.
+      if (catalogPublication) {
+        catalogPublication.notify();
+      }
       return report;
     } catch (error) {
+      if (publicationNotificationStarted) {
+        // Notification is irreversible.  Never manufacture a mixed
+        // generation by rolling the registry back after observers ran.
+        throw error;
+      }
       if (registryMutationStarted) {
         for (const id of
           Object.keys(definitions)) {
@@ -3501,7 +6678,8 @@
       [API_GROUPS.types, { after: window.RMLI18n.t("ui.auto.cb9729d42e95") }],
       [API_GROUPS.constructors, { after: API_GROUPS.types }],
       [API_GROUPS.methods, { after: API_GROUPS.constructors }],
-      [API_GROUPS.properties, { after: API_GROUPS.methods }],
+      [API_GROUPS.hooks, { after: API_GROUPS.methods }],
+      [API_GROUPS.properties, { after: API_GROUPS.hooks }],
       [API_GROUPS.fields, { after: API_GROUPS.properties }],
       [API_GROUPS.events, { after: API_GROUPS.fields }]
     ]) {
@@ -3514,6 +6692,13 @@
     const enumRows = Array.isArray(catalog.enums)
       ? catalog.enums.filter(Boolean)
       : [];
+    const enumTypeNames = new Set(
+      enumRows
+        .map(row =>
+          normalizeCsType(row?.fullName)
+        )
+        .filter(Boolean)
+    );
     const demandRequiredOperatorIds =
       catalog.catalogDemandPartial === true &&
       Array.isArray(
@@ -3528,6 +6713,17 @@
               .filter(Boolean)
           )
         : null;
+    const demandCompleteOwnerNames =
+      catalog.catalogDemandPartial === true &&
+      Array.isArray(
+        catalog.catalogDemandCompleteOwners
+      )
+        ? new Set(
+            catalog.catalogDemandCompleteOwners
+              .map(normalizeCsType)
+              .filter(Boolean)
+          )
+        : new Set();
     const definitions = getNodeDefinitions();
     const typeByName = new Map();
     const genericTypeRowsByShape = new Map();
@@ -3681,6 +6877,16 @@
         names.add(normalized);
       }
 
+      const genericRow =
+        genericTypeRowsByShape.get(
+          genericTypeShape(normalized)
+        );
+      if (genericRow?.fullName) {
+        names.add(
+          normalizeCsType(genericRow.fullName)
+        );
+      }
+
       for (const candidate of matches) {
         if (typeByName.has(candidate)) {
           names.add(candidate);
@@ -3688,6 +6894,17 @@
       }
 
       return [...names];
+    }
+
+    function catalogRowForType(csType) {
+      const normalized = normalizeCsType(csType);
+      return (
+        typeByName.get(normalized) ||
+        genericTypeRowsByShape.get(
+          genericTypeShape(normalized)
+        ) ||
+        null
+      );
     }
 
     function assemblyReferencesForCsType(
@@ -3713,7 +6930,10 @@
           information.assembly || ""
         ).trim();
 
-        if (!include) continue;
+        if (
+          !include ||
+          portableFrameworkAssembly(include)
+        ) continue;
 
         const assembly =
           assemblyByName.get(include);
@@ -3979,6 +7199,79 @@
       return null;
     }
 
+    function publishDynamicGraphType(
+      graphType,
+      information
+    ) {
+      const liveRegistry =
+        window.RMLModNodeRegistry;
+      if (
+        activeFactoryOperationLease ||
+        !liveRegistry ||
+        liveRegistry === registry ||
+        typeof liveRegistry.registerType !==
+          "function" ||
+        typeof liveRegistry.getTypeInformation !==
+          "function"
+      ) {
+        return;
+      }
+      const published = {
+          ...information,
+          assignableTo: Array.isArray(
+            information?.assignableTo
+          )
+            ? [...information.assignableTo]
+            : information?.assignableTo,
+          constraints: Array.isArray(
+            information?.constraints
+          )
+            ? [...information.constraints]
+            : information?.constraints,
+          assemblies: Array.isArray(
+            information?.assemblies
+          )
+            ? [...information.assemblies]
+            : information?.assemblies,
+          assemblyReferences: Array.isArray(
+            information?.assemblyReferences
+          )
+            ? information.assemblyReferences.map(
+                value => ({ ...value })
+              )
+            : information?.assemblyReferences
+        };
+      const existing =
+        liveRegistry.getTypeInformation(
+          graphType
+        );
+      if (existing) {
+        Object.assign(
+          existing,
+          published
+        );
+      } else {
+        liveRegistry.registerType(
+          graphType,
+          published
+        );
+      }
+    }
+
+    function ensureDynamicGraphTypePublished(
+      graphType
+    ) {
+      const information =
+        getTypeInformation(graphType);
+      if (information) {
+        publishDynamicGraphType(
+          graphType,
+          information
+        );
+      }
+      return information;
+    }
+
     function registerApiType(fullName, row = null) {
       const csType = normalizeCsType(fullName);
       if (!csType || csType === "System.Void" || csType === "void") {
@@ -3986,13 +7279,25 @@
       }
 
       const known = graphTypeByCs.get(csType);
-      if (known) {
+      if (
+        known &&
+        getTypeInformation(known)
+      ) {
+        ensureDynamicGraphTypePublished(
+          known
+        );
         enrichGraphTypeAssemblies(
           known,
           csType,
           row || typeByName.get(csType) || null
         );
         return known;
+      }
+      if (known) {
+        graphTypeByCs.delete(csType);
+        graphTypeByNormalizedCs.delete(
+          normalizeTypeForLookup(csType)
+        );
       }
 
       const normalizedLookup =
@@ -4001,7 +7306,13 @@
         graphTypeByNormalizedCs.get(
           normalizedLookup
         );
-      if (existing) {
+      if (
+        existing &&
+        getTypeInformation(existing)
+      ) {
+        ensureDynamicGraphTypePublished(
+          existing
+        );
         enrichGraphTypeAssemblies(
           existing,
           csType,
@@ -4009,18 +7320,35 @@
         );
         return existing;
       }
+      if (existing) {
+        graphTypeByNormalizedCs.delete(
+          normalizedLookup
+        );
+      }
 
       if (isOpenTypeExpression(csType)) {
         return "object";
       }
 
-      const graphType = apiGraphTypeId(csType);
-      const information = row || typeByName.get(csType) || {};
+      const information =
+        row || catalogRowForType(csType) || {};
+      const enumType =
+        information.kind === "enum" ||
+        enumTypeNames.has(csType);
+      const graphType = enumType
+        ? `apiEnum:${csType}`
+        : apiGraphTypeId(csType);
       const referenceType =
-        information.kind === "class" ||
-        information.kind === "interface" ||
-        information.kind === "static-class" ||
-        (!information.kind && !looksLikeValueType(csType));
+        !enumType &&
+        (
+          information.kind === "class" ||
+          information.kind === "interface" ||
+          information.kind === "static-class" ||
+          (
+            !information.kind &&
+            !looksLikeValueType(csType)
+          )
+        );
       const label =
         information.name ||
         shortTypeName(csType);
@@ -4031,7 +7359,7 @@
           information
         );
 
-      registerType(graphType, {
+      const graphTypeInformation = {
           label,
           short: shortBadge(label),
           color,
@@ -4044,14 +7372,14 @@
           globalGenericCandidate: false,
 
           enumType:
-              information.kind === "enum",
+              enumType,
 
           assignableTo: referenceType
               ? ["object"]
               : [],
 
           constraints:
-              information.kind === "enum"
+              enumType
                   ? ["value", "serializable", "enumOrString"]
                   : referenceType
                       ? ["reference", "serializable"]
@@ -4075,13 +7403,125 @@
                 csType,
                 information
               )
-      });
+      };
+      registerType(
+        graphType,
+        graphTypeInformation
+      );
+      publishDynamicGraphType(
+        graphType,
+        graphTypeInformation
+      );
 
       graphTypeByCs.set(csType, graphType);
       graphTypeByNormalizedCs.set(
         normalizeTypeForLookup(csType),
         graphType
       );
+
+      const assignable = new Set(
+        Array.isArray(
+          getTypeInformation(graphType)
+            ?.assignableTo
+        )
+          ? getTypeInformation(graphType)
+              .assignableTo
+          : []
+      );
+      const inheritanceQueue = [];
+      const enqueueCatalogSupertypes = (
+        catalogRow,
+        actualType
+      ) => {
+        if (!catalogRow) return;
+        const substitutions =
+          genericTypeSubstitutions(
+            catalogRow.fullName,
+            actualType
+          );
+        for (const candidate of [
+          catalogRow.baseType,
+          ...(Array.isArray(
+            catalogRow.interfaces
+          )
+            ? catalogRow.interfaces
+            : [])
+        ]) {
+          if (!candidate) continue;
+          inheritanceQueue.push(
+            substituteGenericTypeParameters(
+              candidate,
+              substitutions
+            )
+          );
+        }
+      };
+      enqueueCatalogSupertypes(
+        information,
+        csType
+      );
+      const visitedSupertypes = new Set();
+      while (inheritanceQueue.length > 0) {
+        const candidate = normalizeCsType(
+          inheritanceQueue.shift()
+        );
+        if (
+          !candidate ||
+          visitedSupertypes.has(candidate) ||
+          isOpenTypeExpression(candidate)
+        ) {
+          continue;
+        }
+        visitedSupertypes.add(candidate);
+        const candidateRow =
+          catalogRowForType(candidate);
+        const candidateGraphType =
+          registerApiType(
+            candidate,
+            candidateRow
+          );
+        if (
+          candidateGraphType &&
+          candidateGraphType !== graphType
+        ) {
+          assignable.add(candidateGraphType);
+        }
+        enqueueCatalogSupertypes(
+          candidateRow,
+          candidate
+        );
+      }
+      if (information.isComponent) {
+        assignable.add("component");
+      }
+      if (information.isMaterial) {
+        assignable.add("material");
+      }
+      if (information.isCommonMaterial) {
+        assignable.add("commonMaterial");
+      }
+      if (information.isMeshProvider) {
+        assignable.add("mesh");
+      }
+      if (information.isTextureProvider) {
+        assignable.add("texture");
+      }
+      if (information.isAudioClipProvider) {
+        assignable.add("audioClip");
+      }
+      if (information.isCollider) {
+        assignable.add("collider");
+      }
+      if (referenceType) {
+        assignable.add("object");
+      }
+      assignable.delete(graphType);
+      const registeredInformation =
+        getTypeInformation(graphType);
+      if (registeredInformation) {
+        registeredInformation.assignableTo =
+          [...assignable];
+      }
 
       if (
         enumerableElementCsType &&
@@ -4125,6 +7565,10 @@
             ])];
         }
       }
+
+      ensureDynamicGraphTypePublished(
+        graphType
+      );
 
       return graphType;
     }
@@ -4224,6 +7668,7 @@
       if (row.isCollider) assignable.add("collider");
       if (information.referenceType) assignable.add("object");
 
+      assignable.delete(graphType);
       information.assignableTo = [...assignable];
     }
 
@@ -4231,6 +7676,7 @@
     let enumNodeCount = 0;
     let constructorNodeCount = 0;
     let methodNodeCount = 0;
+    let hookMethodNodeCount = 0;
     let propertyNodeCount = 0;
     let fieldNodeCount = 0;
     let eventNodeCount = 0;
@@ -4241,10 +7687,15 @@
       if ((cooperativeWork += 1) % 120 === 0) {
         await yieldToBrowser();
       }
-      if (!isUsableCatalogType(row)) {
+      if (!isUsableCatalogMemberOwner(row)) {
         continue;
       }
       const csType = normalizeCsType(row.fullName);
+      const typeGenericParameters =
+        genericTypeParameterNames(csType);
+      const openGeneric =
+        isOpenTypeExpression(csType) &&
+        typeGenericParameters.length > 0;
       const id = `api.type.${stableHash(csType)}`;
       if (
         demandRequiredOperatorIds &&
@@ -4256,19 +7707,52 @@
         title: `${row.kind === "enum" ? "Enum type" : "Type"} · ${displayTypeName(row)}`,
         group: groupForType(row, API_GROUPS.types),
         symbol: "TYPE",
-        description: `Exact System.Type constant for ${csType}.`,
+        description: openGeneric
+          ? `Constructs an exact closed System.Type for ${csType}.`
+          : `Exact System.Type constant for ${csType}.`,
+        inputs: openGeneric
+          ? genericTypeInputPorts(
+              typeGenericParameters,
+              "generic"
+            )
+          : [],
         outputs: [port("value", window.RMLI18n.t("ui.auto.c9b8f9dc7b1e"), "type")],
-        codegenExpression() {
-          return `typeof(${csType})`;
+        codegenExpression(api) {
+          if (!openGeneric) {
+            return `typeof(${csType})`;
+          }
+          return genericTypeTokenExpression(
+            api,
+            csType,
+            typeGenericParameters,
+            "generic"
+          );
         },
         catalogGenerated: true,
         catalogType: csType,
         apiStableContractId:
           String(row.stableContractId || ""),
+        apiStableContractIds:
+          stableContractAliasValues(
+            row.stableContractId,
+            row.stableContractIds,
+            row.contractId,
+            row.contractIds
+          ),
         apiMemberKind: "type",
         apiSignature: `typeof(${csType})`,
         apiParameters: [],
         apiReturnType: "System.Type",
+        apiGenericArity:
+          typeGenericParameters.length,
+        apiTypeGenericParameters:
+          ownerGenericParameters(
+            csType,
+            row
+          ),
+        compileTimeSpecializable:
+          openGeneric,
+        runtimeBound: openGeneric,
         apiSearchText: `${csType} type typeof`
       }, row,
       row.typeTokenReloadSafety ||
@@ -4281,14 +7765,13 @@
       if ((cooperativeWork += 1) % 120 === 0) {
         await yieldToBrowser();
       }
-      if (!enumRow || enumRow.isObsolete || !enumRow.fullName) {
+      if (!enumRow || !enumRow.fullName) {
         continue;
       }
       const values = Array.isArray(enumRow.values)
         ? enumRow.values.filter(value =>
             value &&
-            value.name &&
-            isCSharpIdentifier(value.name)
+            String(value.name || "").trim()
           )
         : [];
       if (values.length === 0) {
@@ -4305,13 +7788,18 @@
       const id = `api.enum.${stableHash(csType)}`;
       const options = values.map(value => [value.name, value.name]);
       const defaultValue = values[0].name;
+      const enumUnderlyingType = normalizeCsType(
+        enumRow.underlyingType || "System.Int32"
+      );
 
       registerGeneratedNode(id, withReloadContract({
         title: `Enum · ${shortTypeName(csType)}`,
-        group: groupForType(
-          { fullName: csType },
-          API_GROUPS.types
-        ),
+        group: enumRow.isObsolete === true
+          ? API_GROUPS.advanced
+          : groupForType(
+              { fullName: csType },
+              API_GROUPS.types
+            ),
         symbol: "ENUM",
         description: `Typed constant for ${csType}.`,
         parameters: [{
@@ -4327,7 +7815,17 @@
         outputs: [port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), graphType || "object")],
         codegenExpression(api) {
           const selected = String(api.node.parameters?.value || defaultValue);
-          return `${csType}.${escapeCSharpIdentifier(selected)}`;
+          const selectedRow = values.find(value =>
+            String(value?.name || "") === selected
+          );
+          const numericCast = portableEnumCastExpression(
+            csType,
+            enumUnderlyingType,
+            selectedRow?.value ??
+              selectedRow?.numericValue
+          );
+          return numericCast ||
+            `${csType}.${escapeCSharpIdentifier(selected)}`;
         },
         catalogGenerated: true,
         catalogType: csType,
@@ -4335,7 +7833,19 @@
         apiSignature: csType,
         apiParameters: [],
         apiReturnType: csType,
-        apiSearchText: `${csType} ${values.map(value => value.name).join(" ")}`
+        apiEnumValues:
+          values.map(value => ({
+            name: String(value.name),
+            value:
+              value.value ??
+              value.numericValue ??
+              null
+          })),
+        apiEnumDefaultValue: defaultValue,
+        apiEnumUnderlyingType: enumUnderlyingType,
+        apiEnumIsFlags:
+          enumRow.isFlags === true,
+        apiSearchText: `${csType} ${enumUnderlyingType} ${enumRow.isFlags === true ? "flags" : "enum"} ${values.map(value => `${value.name} ${value.value ?? value.numericValue ?? ""}`).join(" ")}`
       }, enumRow,
       enumRow.valueReloadSafety,
       { member: enumRow }));
@@ -4350,12 +7860,15 @@
           eventTemplateDefinition
         ]
       : null;
+    const hookTemplate =
+      definitions["harmony.typedPatchEvent"] ||
+      null;
 
     for (const owner of typeRows) {
       if ((cooperativeWork += 1) % 12 === 0) {
         await yieldToBrowser();
       }
-      if (!isUsableCatalogType(owner)) {
+      if (!isUsableCatalogMemberOwner(owner)) {
         continue;
       }
 
@@ -4395,9 +7908,10 @@
         }
       });
 
-      const methods = Array.isArray(owner.methods)
-        ? owner.methods
-        : [];
+      const methods = catalogMembersForOwner(
+        owner,
+        "methods"
+      );
       for (const method of methods) {
         if (!method || method.isObsolete || !method.name) {
           skippedCount += 1;
@@ -4418,11 +7932,75 @@
         if (registerGeneratedNode(id, definition)) {
           methodNodeCount += 1;
         }
+        if (
+          method.isHookable === true &&
+          method.apiInheritedProjection !== true &&
+          method.id
+        ) {
+          const hookDefinition =
+            createHookMethodDefinition(
+              owner,
+              {
+                ...method,
+                stableContractId:
+                  `contract.hook.method.${method.id}`,
+                visibility: "public"
+              },
+              hookTemplate
+            );
+          const hookId = hookDefinition
+            ? canonicalMemberNodeId(
+                "api.hook.",
+                hookDefinition
+              )
+            : "";
+          if (
+            hookId &&
+            registerGeneratedNode(
+              hookId,
+              hookDefinition
+            )
+          ) {
+            hookMethodNodeCount += 1;
+          } else {
+            skippedCount += 1;
+          }
+        }
       }
 
-      const properties = Array.isArray(owner.properties)
-        ? owner.properties
-        : [];
+      const hookMethods = Array.isArray(
+        owner.hookMethods
+      ) ? owner.hookMethods : [];
+      for (const method of hookMethods) {
+        const definition =
+          createHookMethodDefinition(
+            owner,
+            method,
+            hookTemplate
+          );
+        const id = definition
+          ? canonicalMemberNodeId(
+              "api.hook.",
+              definition
+            )
+          : "";
+        if (
+          id &&
+          registerGeneratedNode(
+            id,
+            definition
+          )
+        ) {
+          hookMethodNodeCount += 1;
+        } else {
+          skippedCount += 1;
+        }
+      }
+
+      const properties = catalogMembersForOwner(
+        owner,
+        "properties"
+      );
       properties.forEach((property, index) => {
         if (!property || property.isObsolete || !property.name) {
           skippedCount += 1;
@@ -4452,13 +8030,15 @@
             )
           ) {
             propertyNodeCount += 1;
-            registerLegacyMember(
-              prefix,
-              legacyBase,
-              index,
-              properties.length,
-              id
-            );
+            if (!property.apiInheritedProjection) {
+              registerLegacyMember(
+                prefix,
+                legacyBase,
+                index,
+                properties.length,
+                id
+              );
+            }
           } else {
             skippedCount += 1;
           }
@@ -4485,22 +8065,25 @@
             )
           ) {
             propertyNodeCount += 1;
-            registerLegacyMember(
-              prefix,
-              legacyBase,
-              index,
-              properties.length,
-              id
-            );
+            if (!property.apiInheritedProjection) {
+              registerLegacyMember(
+                prefix,
+                legacyBase,
+                index,
+                properties.length,
+                id
+              );
+            }
           } else {
             skippedCount += 1;
           }
         }
       });
 
-      const fields = Array.isArray(owner.fields)
-        ? owner.fields
-        : [];
+      const fields = catalogMembersForOwner(
+        owner,
+        "fields"
+      );
       fields.forEach((field, index) => {
         if (!field || field.isObsolete || !field.name) {
           skippedCount += 1;
@@ -4528,13 +8111,15 @@
           )
         ) {
           fieldNodeCount += 1;
-          registerLegacyMember(
-            getPrefix,
-            legacyBase,
-            index,
-            fields.length,
-            getId
-          );
+          if (!field.apiInheritedProjection) {
+            registerLegacyMember(
+              getPrefix,
+              legacyBase,
+              index,
+              fields.length,
+              getId
+            );
+          }
         } else {
           skippedCount += 1;
         }
@@ -4561,13 +8146,15 @@
             )
           ) {
             fieldNodeCount += 1;
-            registerLegacyMember(
-              setPrefix,
-              legacyBase,
-              index,
-              fields.length,
-              setId
-            );
+            if (!field.apiInheritedProjection) {
+              registerLegacyMember(
+                setPrefix,
+                legacyBase,
+                index,
+                fields.length,
+                setId
+              );
+            }
           } else {
             skippedCount += 1;
           }
@@ -4578,6 +8165,14 @@
         ? owner.events
         : [];
       for (const eventInfo of events) {
+        if (
+          ownerGenericParameters(
+            normalizeCsType(owner.fullName)
+          ).length > 0
+        ) {
+          skippedCount += 1;
+          continue;
+        }
         if (!eventInfo || eventInfo.isObsolete || !eventInfo.name) {
           skippedCount += 1;
           continue;
@@ -4725,9 +8320,24 @@
         const conflictingFamilyIds =
           new Set(
             [...requirementFamiliesById]
-              .filter(([, values]) =>
-                values.length > 1
-              )
+              .filter(([, values]) => {
+                if (values.length <= 1) {
+                  return false;
+                }
+                const semanticKeys = new Set(
+                  values.map(value =>
+                    typeof value === "string"
+                      ? ""
+                      : exactApiSemanticContractKey(
+                          value?.apiContract
+                        )
+                  )
+                );
+                return (
+                  semanticKeys.has("") ||
+                  semanticKeys.size > 1
+                );
+              })
               .map(([id]) => id)
           );
         const requested =
@@ -4750,6 +8360,23 @@
           }));
         };
         const requiredPortMigration = (requiredContract, availableContract, inputIds, outputIds) => {
+          if (
+            Number(
+              requiredContract?.schemaVersion
+            ) >= 4 &&
+            (
+              !portableBaseMetadataMatches(
+                requiredContract,
+                availableContract
+              ) ||
+              !portableContractSpecializationMatches(
+                requiredContract,
+                availableContract
+              )
+            )
+          ) {
+            return null;
+          }
           const result = { input: {}, output: {} };
           for (const [direction, requiredIds] of [["input", inputIds], ["output", outputIds]]) {
             const oldRows = portRows(requiredContract, direction);
@@ -5344,7 +8971,7 @@
                 ) === false
               ) {
                 throw new Error(
-                  `The compatible API alias '${id}' changed before publication.`
+                  `The compatible API alias '${catalogDefinitionDisplayName(definition, id)}' changed before publication.`
                 );
               }
               committedAliases.push([
@@ -5462,6 +9089,7 @@
       enumNodes: enumNodeCount,
       constructorNodes: constructorNodeCount,
       methodNodes: methodNodeCount,
+      hookMethodNodes: hookMethodNodeCount,
       runtimeBoundMethods: runtimeBoundMethodCount,
       propertyNodes: propertyNodeCount,
       fieldNodes: fieldNodeCount,
@@ -5719,6 +9347,18 @@
         return definition;
       }
       const genericArity = Math.max(0, Number(definition.apiGenericArity) || 0);
+      const ownerGenericParameters =
+        Array.isArray(
+          definition.apiOwnerGenericParameters
+        )
+          ? definition.apiOwnerGenericParameters
+          : [];
+      const typeGenericParameters =
+        Array.isArray(
+          definition.apiTypeGenericParameters
+        )
+          ? definition.apiTypeGenericParameters
+          : [];
       const input = (
         context,
         id,
@@ -5734,12 +9374,43 @@
         if (parameter?.isByRef === true) return `${parameter?.isIn === true ? "in" : "ref"} ${value}`;
         return value;
       };
+      const specializeOwner = context => {
+        if (ownerGenericParameters.length === 0) {
+          return owner;
+        }
+        const substitutions = new Map(
+          ownerGenericParameters.map(
+            (name, index) => [
+              name,
+              genericBindingType(
+                context.node,
+                "ownerGeneric",
+                index
+              ) ||
+              input(
+                context,
+                `ownerGeneric${index}`,
+                "type"
+              ) || "object"
+            ]
+          )
+        );
+        return substituteGenericTypeParameters(
+          owner,
+          substitutions
+        );
+      };
       const host = context => definition.apiIsStatic === true
-        ? String(context.node?.parameters?.customCSharpStaticTarget || owner)
+        ? String(context.node?.parameters?.customCSharpStaticTarget || specializeOwner(context))
         : input(context, "target");
       const genericSuffix = context => {
         if (genericArity === 0) return "";
         const types = Array.from({ length: genericArity }, (_, index) =>
+          genericBindingType(
+            context.node,
+            "generic",
+            index
+          ) ||
           input(
             context,
             `generic${index}`,
@@ -5758,9 +9429,27 @@
               : "done";
       definition.syntaxRender = context => {
         if (kind === "type") {
+          const renderedType =
+            typeGenericParameters.length > 0
+              ? substituteGenericTypeParameters(
+                  owner,
+                  new Map(
+                    typeGenericParameters.map(
+                      (name, index) => [
+                        name,
+                        input(
+                          context,
+                          `generic${index}`,
+                          "type"
+                        ) || "object"
+                      ]
+                    )
+                  )
+                )
+              : owner;
           return context.renderMode === "type"
-            ? owner
-            : `typeof(${owner})`;
+            ? renderedType
+            : `typeof(${renderedType})`;
         }
         if (kind === "enum") {
           const defaultValue = String(
@@ -5776,7 +9465,7 @@
           return `${owner}.${escapeCSharpIdentifier(selected)}`;
         }
         if (kind === "constructor") {
-          const type = String(context.node?.parameters?.customCSharpTypeText || owner);
+          const type = String(context.node?.parameters?.customCSharpTypeText || specializeOwner(context));
           return `new ${type}(${parameters.filter(parameter => parameter?.isOut !== true).map(parameter => argument(context, parameter)).join(", ")})`;
         }
         if (kind === "method") {
@@ -5808,13 +9497,70 @@
       return definition;
     }
 
+    function enrichDefinitionAssemblyReferences(
+      definition
+    ) {
+      const dependencyReferences = [
+        definition?.catalogType,
+        definition?.apiReturnType,
+        ...(Array.isArray(
+          definition?.apiParameters
+        )
+          ? definition.apiParameters
+              .flatMap(parameter => [
+                parameter?.type,
+                parameter?.elementType
+              ])
+          : [])
+      ].flatMap(type => {
+        const normalized =
+          normalizeCsType(type || "");
+        if (!normalized) return [];
+        return assemblyReferencesForCsType(
+          normalized,
+          typeByName.get(normalized) || null
+        );
+      });
+      const references = new Map();
+      for (const reference of [
+        ...(Array.isArray(
+          definition?.requiredAssemblyReferences
+        )
+          ? definition.requiredAssemblyReferences
+          : []),
+        ...dependencyReferences
+      ]) {
+        const include = String(
+          reference?.include || ""
+        ).trim();
+        if (!include) continue;
+        references.set(
+          include.toLowerCase(),
+          {
+            include,
+            hintPath: String(
+              reference?.hintPath || ""
+            ).trim(),
+            private:
+              reference?.private === true
+          }
+        );
+      }
+      definition.requiredAssemblyReferences =
+        [...references.values()];
+    }
+
     function registerGeneratedNode(id, definition) {
       if (!definition) {
         rejectedGeneratedNodeIds.add(id);
         return false;
       }
 
+      installCompileTimePortSpecialization(definition);
       installCustomCSharpSyntaxContract(definition);
+      enrichDefinitionAssemblyReferences(
+        definition
+      );
 
       const verification =
         createApiVerificationContract(
@@ -5825,10 +9571,19 @@
       if (!verification.ok) {
         rejectedGeneratedNodeIds.add(id);
         verificationErrors.push(
-          `API node '${id}' was rejected: ${verification.errors.join("; ")}`
+          `API node '${catalogDefinitionDisplayName(definition, id)}' was rejected: ${verification.errors.join("; ")}`
         );
         return false;
       }
+
+      /*
+       * This marker is applied only inside the verified factory build that
+       * consumes the active scanner catalog. Portable project placeholders
+       * never pass through this registration path.
+       */
+      definition.scannerCatalogGenerated = true;
+      definition.apiDefinitionSource =
+        "scanner-catalog";
 
       const existing = definitions[id];
       if (generatedNodeIds.has(id) || existing) {
@@ -5849,7 +9604,7 @@
 
         rejectedGeneratedNodeIds.add(id);
         verificationErrors.push(
-          `API node id '${id}' represents two different contracts or collides with a non-catalog graph node.`
+          `API node '${catalogDefinitionDisplayName(definition, id)}' represents two different contracts or collides with a non-catalog graph node.`
         );
         return false;
       }
@@ -5873,62 +9628,522 @@
           )} This scanner-generated node executes as a low-level runtime call in the main mod project. It does not create or deploy an early rml_libs patch assembly automatically.`;
       }
 
-      const dependencyReferences = [
-        definition?.catalogType,
-        definition?.apiReturnType,
-        ...(Array.isArray(
-          definition?.apiParameters
-        )
-          ? definition.apiParameters
-              .flatMap(parameter => [
-                parameter?.type,
-                parameter?.elementType
-              ])
-          : [])
-      ].flatMap(type => {
-        const normalized =
-          normalizeCsType(type || "");
-        if (!normalized) return [];
-        return assemblyReferencesForCsType(
-          normalized,
-          typeByName.get(normalized) || null
-        );
-      });
-
-      if (dependencyReferences.length > 0) {
-        const references = new Map();
-        for (const reference of [
-          ...(Array.isArray(
-            definition.requiredAssemblyReferences
-          )
-            ? definition.requiredAssemblyReferences
-            : []),
-          ...dependencyReferences
-        ]) {
-          const include = String(
-            reference?.include || ""
-          ).trim();
-          if (!include) continue;
-          references.set(
-            include.toLowerCase(),
-            reference
-          );
-        }
-        definition.requiredAssemblyReferences =
-          [...references.values()];
-      }
-
       const registered =
         registerNode(id, definition);
       if (registered === false) {
         rejectedGeneratedNodeIds.add(id);
         verificationErrors.push(
-          `API node '${id}' was rejected by the central graph registry.`
+          `API node '${catalogDefinitionDisplayName(definition, id)}' was rejected by the central graph registry.`
         );
         return false;
       }
       generatedNodeIds.add(id);
       return true;
+    }
+
+    function genericBindingParameterKey(
+      prefix,
+      position
+    ) {
+      const normalized = String(prefix || "generic");
+      return `api${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}${Math.max(0, Number(position) || 0)}`;
+    }
+
+    function normalizedGenericParameterRows(
+      values
+    ) {
+      return (Array.isArray(values) ? values : [])
+        .map((value, index) => ({
+          ...(
+            value &&
+            typeof value === "object" &&
+            !Array.isArray(value)
+              ? value
+              : {}
+          ),
+          name: String(
+            value?.name || value || ""
+          ).trim(),
+          position: Math.max(
+            0,
+            Number(value?.position) || index
+          )
+        }))
+        .filter(value => value.name);
+    }
+
+    function genericBindingType(
+      node,
+      prefix,
+      position
+    ) {
+      const portId = `${prefix}${Math.max(0, Number(position) || 0)}`;
+      const parameterKey =
+        genericBindingParameterKey(
+          prefix,
+          position
+        );
+      const raw =
+        node?.parameters?.[parameterKey] ??
+        node?.apiContract?.genericBindings?.[portId] ??
+        "";
+      const text = String(raw || "").trim();
+      if (!text) return "";
+      const registered =
+        getTypeInformation(text);
+      const csType = normalizeCsType(
+        registered?.csType || text
+      );
+      return (
+        csType &&
+        !isGenericParameterName(csType) &&
+        !isOpenTypeExpression(csType) &&
+        canDirectlyReferenceType(csType)
+      )
+        ? csType
+        : "";
+    }
+
+    function genericBindingRowsForDefinition(
+      definition
+    ) {
+      return [
+        ...normalizedGenericParameterRows(
+          definition?.apiOwnerGenericParameters
+        ).map(value => ({
+          ...value,
+          prefix: "ownerGeneric"
+        })),
+        ...normalizedGenericParameterRows(
+          definition?.apiMethodGenericParameters ||
+          definition?.apiTypeGenericParameters
+        ).map(value => ({
+          ...value,
+          prefix: "generic"
+        }))
+      ];
+    }
+
+    function genericBindingSatisfiesConstraints(
+      row,
+      selected,
+      substitutions
+    ) {
+      const selectedGraph =
+        graphTypeFor(selected);
+      const selectedInformation =
+        getTypeInformation(selectedGraph);
+      const selectedRow =
+        catalogRowForType(selected);
+      const referenceType =
+        selectedInformation
+          ?.referenceType === true;
+      if (
+        row?.referenceTypeConstraint === true &&
+        !referenceType
+      ) {
+        return false;
+      }
+      if (
+        row?.valueTypeConstraint === true &&
+        referenceType
+      ) {
+        return false;
+      }
+      if (
+        row?.defaultConstructorConstraint === true &&
+        referenceType &&
+        selectedRow?.isAbstract === true
+      ) {
+        return false;
+      }
+      for (const template of
+        Array.isArray(row?.constraints)
+          ? row.constraints
+          : []) {
+        const constraint =
+          substituteGenericTypeParameters(
+            template,
+            substitutions
+          );
+        if (
+          !constraint ||
+          isOpenTypeExpression(constraint) ||
+          isGenericParameterName(constraint)
+        ) {
+          return false;
+        }
+        if (
+          portableCsTypesEqual(
+            selected,
+            constraint
+          )
+        ) {
+          continue;
+        }
+        const constraintGraph =
+          graphTypeFor(constraint);
+        if (
+          !constraintGraph ||
+          !Array.isArray(
+            selectedInformation?.assignableTo
+          ) ||
+          !selectedInformation.assignableTo
+            .includes(constraintGraph)
+        ) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    function apiDefinitionSpecialization(
+      definition,
+      node
+    ) {
+      const rows =
+        genericBindingRowsForDefinition(
+          definition
+        );
+      if (rows.length === 0) {
+        return null;
+      }
+      const ownerSubstitutions = new Map();
+      const methodSubstitutions = new Map();
+      const genericBindings = {};
+      for (const row of rows) {
+        const selected = genericBindingType(
+          node,
+          row.prefix,
+          row.position
+        );
+        if (!selected) return null;
+        genericBindings[
+          `${row.prefix}${row.position}`
+        ] = selected;
+        (
+          row.prefix === "ownerGeneric"
+            ? ownerSubstitutions
+            : methodSubstitutions
+        ).set(row.name, selected);
+      }
+      const substitutions =
+        mergeGenericSubstitutions(
+          ownerSubstitutions,
+          methodSubstitutions
+        );
+      for (const row of rows) {
+        const selected = genericBindings[
+          `${row.prefix}${row.position}`
+        ];
+        if (
+          !genericBindingSatisfiesConstraints(
+            row,
+            selected,
+            substitutions
+          )
+        ) {
+          return null;
+        }
+      }
+      const ownerType =
+        substituteGenericTypeParameters(
+          definition.catalogType || "System.Object",
+          definition.apiMemberKind === "type"
+            ? substitutions
+            : ownerSubstitutions
+        );
+      const returnType =
+        substituteGenericTypeParameters(
+          definition.apiReturnType || "System.Void",
+          substitutions
+        );
+      const parameters = (
+        Array.isArray(definition.apiParameters)
+          ? definition.apiParameters
+          : []
+      ).map(parameter =>
+        substituteCatalogParameter(
+          parameter,
+          substitutions
+        )
+      );
+      const references = new Map();
+      for (const reference of [
+        ...(Array.isArray(
+          definition.requiredAssemblyReferences
+        )
+          ? definition.requiredAssemblyReferences
+          : []),
+        ...[
+          ...Object.values(genericBindings),
+          ownerType,
+          returnType,
+          ...parameters.flatMap(parameter => [
+            parameter?.type,
+            parameter?.elementType
+          ])
+        ].flatMap(type =>
+          assemblyReferencesForCsType(
+            normalizeCsType(type || ""),
+            catalogRowForType(type || "")
+          )
+        )
+      ]) {
+        const include = String(
+          reference?.include || ""
+        ).trim();
+        if (!include) continue;
+        references.set(
+          include.toLowerCase(),
+          {
+            include,
+            hintPath: String(
+              reference?.hintPath || ""
+            ).trim(),
+            private:
+              reference?.private === true
+          }
+        );
+      }
+      return Object.freeze({
+        ownerType,
+        returnType,
+        parameters: Object.freeze(parameters),
+        substitutions,
+        ownerSubstitutions,
+        methodSubstitutions,
+        genericBindings: Object.freeze(
+          genericBindings
+        ),
+        requiredAssemblyReferences:
+          Object.freeze([
+            ...references.values()
+          ].map(reference =>
+            Object.freeze(reference)
+          ))
+      });
+    }
+
+    function specializedApiPortCsType(
+      definition,
+      specialization,
+      direction,
+      specification
+    ) {
+      const id = String(
+        specification?.id || ""
+      );
+      if (
+        specification?.type === "impulse" ||
+        ["success", "exception"].includes(id) ||
+        /^ownerGeneric\d+$/.test(id) ||
+        /^generic\d+$/.test(id)
+      ) {
+        return "";
+      }
+      if (
+        direction === "input" &&
+        id === "target"
+      ) {
+        return specialization.ownerType;
+      }
+      if (
+        direction === "output" &&
+        (
+          id === "result" ||
+          id === "value"
+        )
+      ) {
+        return definition.apiMemberKind ===
+          "constructor"
+          ? specialization.ownerType
+          : specialization.returnType;
+      }
+      const match = /^(?:arg|out)(\d+)$/.exec(id);
+      if (match) {
+        const position = Number(match[1]);
+        const parameter =
+          specialization.parameters.find(
+            (value, index) =>
+              Math.max(
+                0,
+                Number(value?.position) || index
+              ) === position
+          );
+        return normalizeCsType(
+          parameter?.elementType ||
+          parameter?.type ||
+          ""
+        );
+      }
+      if (
+        direction === "input" &&
+        id === "value" &&
+        ["property-set", "field-set"].includes(
+          String(definition.apiMemberKind || "")
+        )
+      ) {
+        const parameter =
+          specialization.parameters.at(-1);
+        return normalizeCsType(
+          parameter?.elementType ||
+          parameter?.type ||
+          ""
+        );
+      }
+      return String(
+        specification?.apiCsType || ""
+      );
+    }
+
+    function specializedApiPorts(
+      definition,
+      specialization,
+      direction
+    ) {
+      const source =
+        direction === "input"
+          ? definition.inputs
+          : definition.outputs;
+      return (Array.isArray(source) ? source : [])
+        .map(specification => {
+          const csType =
+            specializedApiPortCsType(
+              definition,
+              specialization,
+              direction,
+              specification
+            );
+          if (!csType) {
+            return { ...specification };
+          }
+          const graphType = graphTypeFor(csType);
+          return {
+            ...specification,
+            type: graphType ||
+              specification.type ||
+              "object",
+            apiCsType: csType
+          };
+        });
+    }
+
+    function installCompileTimePortSpecialization(
+      definition
+    ) {
+      if (
+        definition?.compileTimeSpecializable !== true
+      ) {
+        return definition;
+      }
+      const rows =
+        genericBindingRowsForDefinition(
+          definition
+        );
+      if (rows.length === 0) {
+        return definition;
+      }
+
+      const existingParameters =
+        Array.isArray(definition.parameters)
+          ? definition.parameters
+          : [];
+      const existingKeys = new Set(
+        existingParameters.map(value =>
+          String(value?.key || "")
+        )
+      );
+      definition.parameters = [
+        ...existingParameters,
+        ...rows
+          .filter(row =>
+            !existingKeys.has(
+              genericBindingParameterKey(
+                row.prefix,
+                row.position
+              )
+            )
+          )
+          .map(row => ({
+            key: genericBindingParameterKey(
+              row.prefix,
+              row.position
+            ),
+            label:
+              `Compile-time type ${row.name}`,
+            kind: "text",
+            default: "",
+            help:
+              `Exact closed C# type for ${row.name}. This makes generic result, argument, ref and out ports concrete and portable without reflection.`,
+            affectsPorts: true,
+            affectsNode: true,
+            commitImmediately: true,
+            monospace: true,
+            spellcheck: false
+          }))
+      ];
+      definition.inputs = (
+        Array.isArray(definition.inputs)
+          ? definition.inputs
+          : []
+      ).map(specification =>
+        /^ownerGeneric\d+$/.test(
+          String(specification?.id || "")
+        ) ||
+        /^generic\d+$/.test(
+          String(specification?.id || "")
+        )
+          ? {
+              ...specification,
+              optional: true
+            }
+          : specification
+      );
+      definition.apiGenericBindingParameters =
+        Object.freeze(
+          rows.map(row => Object.freeze({
+            prefix: row.prefix,
+            name: row.name,
+            position: row.position,
+            portId:
+              `${row.prefix}${row.position}`,
+            parameterKey:
+              genericBindingParameterKey(
+                row.prefix,
+                row.position
+              )
+          }))
+        );
+      definition.resolveApiSpecialization =
+        node =>
+          apiDefinitionSpecialization(
+            definition,
+            node
+          );
+      definition.resolveDefinition = node => {
+        const specialization =
+          apiDefinitionSpecialization(
+            definition,
+            node
+          );
+        if (!specialization) return {};
+        return {
+          inputs: specializedApiPorts(
+            definition,
+            specialization,
+            "input"
+          ),
+          outputs: specializedApiPorts(
+            definition,
+            specialization,
+            "output"
+          ),
+          apiResolvedSpecialization:
+            specialization
+        };
+      };
+      return definition;
     }
 
     function createApiVerificationContract(
@@ -5960,6 +10175,39 @@
       const outputs = Array.isArray(
         definition?.outputs
       ) ? definition.outputs : [];
+      const semanticContract = {
+        ownerType,
+        kind,
+        memberName: String(
+          definition?.catalogMember || ""
+        ),
+        parameters,
+        returnType: catalogExactType(
+          definition?.apiReturnType ||
+          "System.Void"
+        ),
+        isStatic:
+          definition?.apiIsStatic === true,
+        genericArity: Math.max(
+          0,
+          Number(
+            definition?.apiGenericArity
+          ) || 0
+        ),
+        hookVisibility:
+          kind === "hook-method"
+            ? String(
+                definition?.apiHookVisibility ||
+                ""
+              )
+            : ""
+      };
+      const stableContractIds =
+        stableContractAliasValues(
+          definition?.apiStableContractId,
+          definition?.apiStableContractIds,
+          stableContractId(semanticContract)
+        );
 
       if (!definition?.catalogGenerated) {
         errors.push(
@@ -6058,7 +10306,7 @@
             )
           ) {
             errors.push(
-              `${direction} port '${portId || "<unnamed>"}' uses unregistered graph type '${specification.type}'`
+              `${direction} port '${portId || "<unnamed>"}' uses an unregistered graph type`
             );
           }
           ids.add(portId);
@@ -6093,8 +10341,70 @@
             definition?.apiGenericArity
           ) || 0
         ),
+        ownerGenericParameters:
+          Object.freeze(
+            normalizedGenericParameterRows(
+              definition?.apiOwnerGenericParameters
+            ).map(value => Object.freeze(
+              portableGenericParameterContract(
+                value
+              )
+            ))
+          ),
+        methodGenericParameters:
+          Object.freeze(
+            normalizedGenericParameterRows(
+              definition?.apiMethodGenericParameters ||
+              definition?.apiTypeGenericParameters
+            ).map(value => Object.freeze(
+              portableGenericParameterContract(
+                value
+              )
+            ))
+          ),
+        hookVisibility:
+          kind === "hook-method"
+            ? String(
+                definition?.apiHookVisibility ||
+                ""
+              )
+            : "",
         runtimeBound:
           definition?.runtimeBound === true,
+        requiredAssemblyReferences:
+          Object.freeze(
+            normalizedPortableAssemblyReferences(
+              definition
+                ?.requiredAssemblyReferences
+            ).map(reference =>
+              Object.freeze(reference)
+            )
+          ),
+        baseAssemblyReferences:
+          Object.freeze(
+            normalizedPortableAssemblyReferences(
+              definition
+                ?.requiredAssemblyReferences
+            ).map(reference =>
+              Object.freeze(reference)
+            )
+          ),
+        enumValues:
+          Object.freeze(
+            normalizedPortableEnumValues(
+              definition?.apiEnumValues
+            )
+          ),
+        enumDefaultValue: String(
+          definition?.apiEnumDefaultValue || ""
+        ),
+        enumUnderlyingType:
+          catalogExactType(
+            definition
+              ?.apiEnumUnderlyingType || ""
+          ),
+        enumIsFlags:
+          definition?.apiEnumIsFlags === true,
         threadAffinity:
           String(
             definition?.apiThreadAffinity ||
@@ -6133,19 +10443,51 @@
             )].sort()
           ),
         stableContractId:
-          String(
-            definition?.apiStableContractId ||
-            stableContractId({
-              ownerType,
-              kind,
-              memberName: String(definition?.catalogMember || ""),
-              isStatic: definition?.apiIsStatic === true,
-              genericArity: Math.max(0, Number(definition?.apiGenericArity) || 0)
-            })
+          stableContractIds[0] || "",
+        stableContractIds:
+          Object.freeze(
+            [...stableContractIds]
           ),
+        ...(kind === "event"
+          ? {
+              eventOperationStableContractIds:
+                Object.freeze({
+                  event:
+                    stableContractIds[0] || "",
+                  add: String(
+                    definition
+                      ?.apiEventAddStableContractId ||
+                    ""
+                  ).trim(),
+                  remove: String(
+                    definition
+                      ?.apiEventRemoveStableContractId ||
+                    ""
+                  ).trim()
+                })
+            }
+          : {}),
         inputPorts: Object.freeze(inputs.map(specification => ({
           id: String(specification?.id || ""),
           type: String(specification?.type || "object"),
+          csType: String(
+            specification?.apiCsType ||
+            portableContractPortCsType(
+              {
+                kind,
+                ownerType,
+                returnType:
+                  catalogExactType(
+                    definition?.apiReturnType ||
+                    "System.Void"
+                  ),
+                parameters
+              },
+              "input",
+              specification
+            ) ||
+            ""
+          ),
           typeVar: String(specification?.typeVar || ""),
           optional: specification?.optional === true,
           role: portablePortRole(kind, "input", specification, parameters)
@@ -6153,6 +10495,24 @@
         outputPorts: Object.freeze(outputs.map(specification => ({
           id: String(specification?.id || ""),
           type: String(specification?.type || "object"),
+          csType: String(
+            specification?.apiCsType ||
+            portableContractPortCsType(
+              {
+                kind,
+                ownerType,
+                returnType:
+                  catalogExactType(
+                    definition?.apiReturnType ||
+                    "System.Void"
+                  ),
+                parameters
+              },
+              "output",
+              specification
+            ) ||
+            ""
+          ),
           typeVar: String(specification?.typeVar || ""),
           optional: specification?.optional === true,
           role: portablePortRole(kind, "output", specification, parameters)
@@ -6180,6 +10540,13 @@
           0,
           Number(parameter?.position) || 0
         ),
+        name: String(
+          parameter?.name ||
+          `argument${Math.max(
+            0,
+            Number(parameter?.position) || 0
+          )}`
+        ),
         type: catalogExactType(
           parameter?.elementType ||
           parameter?.type ||
@@ -6193,13 +10560,590 @@
         isOut:
           parameter?.isOut === true,
         isOptional:
-          parameter?.isOptional === true
+          parameter?.isOptional === true,
+        hasDefaultValue:
+          parameter?.hasDefaultValue === true,
+        defaultValueCSharp: String(
+          parameter?.defaultValueCSharp || ""
+        )
       });
+    }
+
+    function substituteCatalogParameter(
+      parameter,
+      substitutions
+    ) {
+      if (!parameter || typeof parameter !== "object") {
+        return parameter;
+      }
+      const result = { ...parameter };
+      for (const key of [
+        "type",
+        "elementType"
+      ]) {
+        if (result[key]) {
+          result[key] =
+            substituteGenericTypeParameters(
+              result[key],
+              substitutions
+            );
+        }
+      }
+      return result;
+    }
+
+    function inheritedStableContractId(
+      sourceStableContractId,
+      contract
+    ) {
+      const semantic =
+        exactApiSemanticContractKey(contract);
+      if (!semantic) return "";
+      return `contract.inherited.${stableHash(
+        JSON.stringify({
+          version: 1,
+          sourceStableContractId: String(
+            sourceStableContractId || ""
+          ),
+          semantic
+        })
+      )}`;
+    }
+
+    function projectInheritedCatalogMember(
+      member,
+      kind,
+      substitutions,
+      declaringType,
+      projectedOwnerType
+    ) {
+      const effectiveSubstitutions =
+        new Map(substitutions);
+      if (kind === "methods") {
+        for (const generic of
+          Array.isArray(member.genericParameters)
+            ? member.genericParameters
+            : []) {
+          effectiveSubstitutions.delete(
+            String(generic?.name || "")
+          );
+        }
+      }
+
+      const projected = {
+        ...member,
+        signature: "",
+        stableContractId: "",
+        stableContractIds: [],
+        contractId: "",
+        readStableContractId: "",
+        readStableContractIds: [],
+        writeStableContractId: "",
+        writeStableContractIds: [],
+        readContractId: "",
+        writeContractId: "",
+        declaringType,
+        apiInheritedProjection: true,
+        inheritedFrom:
+          normalizeCsType(
+            member.declaringType ||
+            declaringType
+          )
+      };
+      if (member.returnType) {
+        projected.returnType =
+          substituteGenericTypeParameters(
+            member.returnType,
+            effectiveSubstitutions
+          );
+      }
+      if (member.type) {
+        projected.type =
+          substituteGenericTypeParameters(
+            member.type,
+            effectiveSubstitutions
+          );
+      }
+      if (Array.isArray(member.parameters)) {
+        projected.parameters =
+          member.parameters.map(parameter =>
+            substituteCatalogParameter(
+              parameter,
+              effectiveSubstitutions
+            )
+          );
+      }
+      if (Array.isArray(member.indexParameters)) {
+        projected.indexParameters =
+          member.indexParameters.map(parameter =>
+            substituteCatalogParameter(
+              parameter,
+              effectiveSubstitutions
+            )
+          );
+      }
+      if (
+        kind === "methods" &&
+        Array.isArray(member.genericParameters)
+      ) {
+        projected.genericParameters =
+          member.genericParameters.map(
+            (generic, index) => ({
+              ...generic,
+              name: String(
+                generic?.name || `T${index}`
+              ),
+              position: Math.max(
+                0,
+                Number(generic?.position) || index
+              ),
+              constraints: (
+                Array.isArray(
+                  generic?.constraints
+                )
+                  ? generic.constraints
+                  : []
+              ).map(constraint =>
+                substituteGenericTypeParameters(
+                  constraint,
+                  effectiveSubstitutions
+                )
+              )
+            })
+          );
+      }
+
+      const ownerType = normalizeCsType(
+        projectedOwnerType || declaringType
+      );
+      const sourceOwnerType = normalizeCsType(
+        member.declaringType ||
+        declaringType
+      );
+      const genericArity = Array.isArray(
+        projected.genericParameters
+      )
+        ? projected.genericParameters.length
+        : 0;
+      const identity = (
+        memberKind,
+        parameters,
+        returnType
+      ) => ({
+        ownerType,
+        kind: memberKind,
+        memberName: String(
+          projected.name || ""
+        ),
+        parameters,
+        returnType,
+        isStatic:
+          projected.isStatic === true,
+        genericArity
+      });
+      const sourceIdentity = (
+        memberKind,
+        parameters,
+        returnType
+      ) => ({
+        ownerType: sourceOwnerType,
+        kind: memberKind,
+        memberName: String(
+          member.name || ""
+        ),
+        parameters,
+        returnType,
+        isStatic:
+          member.isStatic === true,
+        genericArity:
+          Array.isArray(
+            member.genericParameters
+          )
+            ? member.genericParameters.length
+            : 0
+      });
+      const inheritedAliases = (
+        canonical,
+        legacy,
+        additional,
+        sourceContract,
+        projectedContract
+      ) => {
+        const source =
+          stableContractAliasRecord(
+            canonical,
+            legacy,
+            sourceContract,
+            additional
+          );
+        const aliases =
+          stableContractAliasValues(
+            source.aliases.map(value =>
+              inheritedStableContractId(
+                value,
+                projectedContract
+              )
+            )
+          );
+        return {
+          primary:
+            inheritedStableContractId(
+              source.primary,
+              projectedContract
+            ),
+          legacy:
+            inheritedStableContractId(
+              source.legacy,
+              projectedContract
+            ),
+          aliases
+        };
+      };
+
+      if (kind === "methods") {
+        const projectedContract = identity(
+          "method",
+          projected.parameters || [],
+          projected.returnType ||
+            "System.Void"
+        );
+        const aliases = inheritedAliases(
+          member.stableContractId,
+          member.contractId,
+          [
+            member.stableContractIds,
+            member.contractIds
+          ],
+          sourceIdentity(
+            "method",
+            member.parameters || [],
+            member.returnType ||
+              "System.Void"
+          ),
+          projectedContract
+        );
+        projected.stableContractId =
+          aliases.primary;
+        projected.contractId =
+          aliases.legacy;
+        projected.stableContractIds =
+          aliases.aliases;
+      } else if (kind === "properties") {
+        const indexes =
+          projected.indexParameters || [];
+        const sourceIndexes =
+          member.indexParameters || [];
+        const projectedRead = identity(
+          "property-get",
+          indexes,
+          projected.type ||
+            "System.Object"
+        );
+        const readAliases = inheritedAliases(
+          member.readStableContractId,
+          member.readContractId,
+          [
+            member.readStableContractIds,
+            member.readContractIds
+          ],
+          sourceIdentity(
+            "property-get",
+            sourceIndexes,
+            member.type ||
+              "System.Object"
+          ),
+          projectedRead
+        );
+        projected.readStableContractId =
+          readAliases.primary;
+        projected.readContractId =
+          readAliases.legacy;
+        projected.readStableContractIds =
+          readAliases.aliases;
+        const projectedWriteParameters = [
+          ...indexes,
+          {
+            position: indexes.length,
+            type:
+              projected.type ||
+              "System.Object",
+            isByRef: false,
+            isIn: false,
+            isOut: false,
+            isOptional: false
+          }
+        ];
+        const sourceWriteParameters = [
+          ...sourceIndexes,
+          {
+            position: sourceIndexes.length,
+            type:
+              member.type ||
+              "System.Object",
+            isByRef: false,
+            isIn: false,
+            isOut: false,
+            isOptional: false
+          }
+        ];
+        const writeAliases = inheritedAliases(
+          member.writeStableContractId,
+          member.writeContractId,
+          [
+            member.writeStableContractIds,
+            member.writeContractIds
+          ],
+          sourceIdentity(
+            "property-set",
+            sourceWriteParameters,
+            "System.Void"
+          ),
+          identity(
+            "property-set",
+            projectedWriteParameters,
+            "System.Void"
+          )
+        );
+        projected.writeStableContractId =
+          writeAliases.primary;
+        projected.writeContractId =
+          writeAliases.legacy;
+        projected.writeStableContractIds =
+          writeAliases.aliases;
+      } else if (kind === "fields") {
+        const readAliases = inheritedAliases(
+          member.readStableContractId,
+          member.readContractId,
+          [
+            member.readStableContractIds,
+            member.readContractIds
+          ],
+          sourceIdentity(
+            "field-get",
+            [],
+            member.type ||
+              "System.Object"
+          ),
+          identity(
+            "field-get",
+            [],
+            projected.type ||
+              "System.Object"
+          )
+        );
+        projected.readStableContractId =
+          readAliases.primary;
+        projected.readContractId =
+          readAliases.legacy;
+        projected.readStableContractIds =
+          readAliases.aliases;
+        const projectedWriteParameters = [{
+          position: 0,
+          type:
+            projected.type ||
+            "System.Object",
+          isByRef: false,
+          isIn: false,
+          isOut: false,
+          isOptional: false
+        }];
+        const sourceWriteParameters = [{
+          position: 0,
+          type:
+            member.type ||
+            "System.Object",
+          isByRef: false,
+          isIn: false,
+          isOut: false,
+          isOptional: false
+        }];
+        const writeAliases = inheritedAliases(
+          member.writeStableContractId,
+          member.writeContractId,
+          [
+            member.writeStableContractIds,
+            member.writeContractIds
+          ],
+          sourceIdentity(
+            "field-set",
+            sourceWriteParameters,
+            "System.Void"
+          ),
+          identity(
+            "field-set",
+            projectedWriteParameters,
+            "System.Void"
+          )
+        );
+        projected.writeStableContractId =
+          writeAliases.primary;
+        projected.writeContractId =
+          writeAliases.legacy;
+        projected.writeStableContractIds =
+          writeAliases.aliases;
+      }
+      return projected;
+    }
+
+    function inheritedCatalogMemberKey(
+      member,
+      kind
+    ) {
+      if (kind === "methods") {
+        return JSON.stringify({
+          name: String(member?.name || ""),
+          isStatic: member?.isStatic === true,
+          genericArity:
+            Array.isArray(
+              member?.genericParameters
+            )
+              ? member.genericParameters.length
+              : 0,
+          parameters:
+            (Array.isArray(member?.parameters)
+              ? member.parameters
+              : []).map(parameter => ({
+                type: normalizeCsType(
+                  parameter?.elementType ||
+                  parameter?.type ||
+                  "System.Object"
+                ),
+                isByRef:
+                  parameter?.isByRef === true ||
+                  parameter?.isOut === true,
+                isOut:
+                  parameter?.isOut === true
+              }))
+        });
+      }
+      if (kind === "properties") {
+        return JSON.stringify({
+          name: String(member?.name || ""),
+          isStatic: member?.isStatic === true,
+          indexes:
+            (Array.isArray(
+              member?.indexParameters
+            )
+              ? member.indexParameters
+              : []).map(parameter =>
+                normalizeCsType(
+                  parameter?.elementType ||
+                  parameter?.type ||
+                  "System.Object"
+                )
+              )
+        });
+      }
+      return JSON.stringify({
+        name: String(member?.name || ""),
+        isStatic: member?.isStatic === true
+      });
+    }
+
+    function catalogMembersForOwner(
+      owner,
+      kind
+    ) {
+      const declared = Array.isArray(owner?.[kind])
+        ? owner[kind]
+        : [];
+      const ownerCs = normalizeCsType(
+        owner?.fullName
+      );
+      const genericFamily = Boolean(
+        owner?.isGeneric === true ||
+        ownerCs.includes("<") ||
+        [
+          owner?.baseType,
+          ...(Array.isArray(owner?.interfaces)
+            ? owner.interfaces
+            : [])
+        ].some(type =>
+          normalizeCsType(type).includes("<")
+        )
+      );
+      const completeDemandOwner =
+        demandCompleteOwnerNames.has(ownerCs);
+      if (
+        !genericFamily &&
+        !completeDemandOwner
+      ) {
+        return declared;
+      }
+
+      const result = [...declared];
+      const keys = new Set(
+        declared.map(member =>
+          inheritedCatalogMemberKey(
+            member,
+            kind
+          )
+        )
+      );
+      const queue = [owner?.baseType]
+        .filter(Boolean)
+        .map(normalizeCsType);
+      const visited = new Set();
+
+      while (queue.length > 0) {
+        const actualType = normalizeCsType(
+          queue.shift()
+        );
+        if (!actualType || visited.has(actualType)) {
+          continue;
+        }
+        visited.add(actualType);
+        const row = catalogRowForType(actualType);
+        if (!row) continue;
+        const substitutions =
+          genericTypeSubstitutions(
+            row.fullName,
+            actualType
+          );
+
+        for (const member of
+          Array.isArray(row[kind])
+            ? row[kind]
+            : []) {
+          if (!member || typeof member !== "object") {
+            continue;
+          }
+          const projected =
+            projectInheritedCatalogMember(
+              member,
+              kind,
+              substitutions,
+              actualType,
+              ownerCs
+            );
+          const key = inheritedCatalogMemberKey(
+            projected,
+            kind
+          );
+          if (keys.has(key)) continue;
+          keys.add(key);
+          result.push(projected);
+        }
+
+        for (const next of [row.baseType]) {
+          if (!next) continue;
+          queue.push(
+            substituteGenericTypeParameters(
+              next,
+              substitutions
+            )
+          );
+        }
+      }
+
+      return result;
     }
 
     function createConstructorDefinition(owner, constructor) {
       const ownerCs = normalizeCsType(owner.fullName);
       const ownerGraph = registerApiType(ownerCs, owner) || "object";
+      const ownerGenerics =
+        ownerGenericParameters(ownerCs, owner);
       const parameters = constructor.parameters || [];
       if (
         owner.isAbstract === true ||
@@ -6214,13 +11158,15 @@
       const direct =
         !owner.isAbstract &&
         !owner.isInterface &&
-        !owner.isGeneric &&
         canDirectlyReferenceType(ownerCs) &&
-        !parameters.some(parameter =>
-          parameter.isOptional === true
-        ) &&
         parameters.every(canDirectlyPassParameter);
       const inputs = [port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse")];
+      inputs.push(
+        ...genericTypeInputPorts(
+          ownerGenerics,
+          "ownerGeneric"
+        )
+      );
       for (const parameter of parameters) {
         if (parameter.isOut) continue;
         inputs.push(parameterPort(parameter));
@@ -6261,6 +11207,13 @@
         catalogType: ownerCs,
         apiStableContractId:
           String(constructor.stableContractId || ""),
+        apiStableContractIds:
+          stableContractAliasValues(
+            constructor.stableContractId,
+            constructor.stableContractIds,
+            constructor.contractId,
+            constructor.contractIds
+          ),
         apiMemberKind: "constructor",
         apiSignature:
           constructor.signature ||
@@ -6269,16 +11222,44 @@
         apiReturnType: ownerCs,
         apiIsStatic: false,
         apiGenericArity: 0,
+        apiOwnerGenericParameters:
+          ownerGenerics,
+        compileTimeSpecializable:
+          ownerGenerics.length > 0,
         apiSearchText: `${ownerCs} ${constructor.signature || "constructor new"}`,
         runtimeBound: !direct,
         codegenCollect(api) {
+          const specialization =
+            ownerSpecialization(
+              api,
+              ownerCs
+            );
+          const compileTimeDirect = Boolean(
+            specialization &&
+            !owner.isAbstract &&
+            !owner.isInterface &&
+            canDirectlyReferenceType(
+              specialization.type
+            ) &&
+            parameters.every(parameter =>
+              canDirectlyPassParameter(
+                parameter,
+                specialization.substitutions
+              )
+            )
+          );
           collectActionFields(api, {
-            resultCs: direct ? ownerCs : "object",
+            resultCs: compileTimeDirect
+              ? specialization.type
+              : "object",
             resultGraph: direct ? ownerGraph : "object",
             outParameters,
-            direct
+            direct: compileTimeDirect,
+            substitutions:
+              specialization?.substitutions ||
+              new Map()
           });
-          if (!direct) {
+          if (!compileTimeDirect) {
             ensureApiReflectionRuntime(api);
             collectReflectiveSignatureFields(
               api,
@@ -6287,8 +11268,32 @@
           }
         },
         codegenAction(api) {
-          const action = direct
-            ? directConstructorAction(api, ownerCs, parameters)
+          const specialization =
+            ownerSpecialization(
+              api,
+              ownerCs
+            );
+          const compileTimeDirect = Boolean(
+            specialization &&
+            !owner.isAbstract &&
+            !owner.isInterface &&
+            canDirectlyReferenceType(
+              specialization.type
+            ) &&
+            parameters.every(parameter =>
+              canDirectlyPassParameter(
+                parameter,
+                specialization.substitutions
+              )
+            )
+          );
+          const action = compileTimeDirect
+            ? directConstructorAction(
+                api,
+                specialization.type,
+                parameters,
+                specialization.substitutions
+              )
             : reflectiveConstructorAction(api, ownerCs, parameters);
           return actionWithDoneImpulse(api, action);
         },
@@ -6308,6 +11313,8 @@
     function createMethodDefinition(owner, method) {
       const ownerCs = normalizeCsType(owner.fullName || method.declaringType);
       const ownerGraph = registerApiType(ownerCs, owner) || "object";
+      const ownerGenerics =
+        ownerGenericParameters(ownerCs, owner);
       const parameters = Array.isArray(method.parameters)
         ? method.parameters
         : [];
@@ -6348,21 +11355,24 @@
         : null;
       const inputs = [port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse")];
 
+      inputs.push(
+        ...genericTypeInputPorts(
+          ownerGenerics,
+          "ownerGeneric"
+        )
+      );
+
       if (!method.isStatic) {
         inputs.push(port("target", window.RMLI18n.t("ui.auto.ba52d97729b9"), ownerGraph));
       }
 
-      if (!direct && method.isGenericMethodDefinition) {
-        for (const generic of genericParameters) {
-          inputs.push(port(
-            `generic${generic.position}`,
-            `Type ${generic.name}`,
-            "type",
-            {
-              help: genericConstraintHelp(generic)
-            }
-          ));
-        }
+      if (method.isGenericMethodDefinition) {
+        inputs.push(
+          ...genericTypeInputPorts(
+            genericParameters,
+            "generic"
+          )
+        );
       }
 
       for (const parameter of parameters) {
@@ -6409,8 +11419,19 @@
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: method.name,
+        apiInheritedProjection:
+          method.apiInheritedProjection === true,
+        apiInheritedFrom:
+          String(method.inheritedFrom || ""),
         apiStableContractId:
           String(method.stableContractId || ""),
+        apiStableContractIds:
+          stableContractAliasValues(
+            method.stableContractId,
+            method.stableContractIds,
+            method.contractId,
+            method.contractIds
+          ),
         apiMemberKind: "method",
         apiSignature:
           method.signature ||
@@ -6421,17 +11442,45 @@
         apiIsStatic: method.isStatic === true,
         apiGenericArity:
           genericParameters.length,
+        apiMethodGenericParameters:
+          genericParameters,
+        apiOwnerGenericParameters:
+          ownerGenerics,
+        compileTimeSpecializable:
+          ownerGenerics.length > 0 ||
+          genericParameters.length > 0,
         apiSearchText: `${ownerCs} ${method.name} ${method.signature || ""}`,
         runtimeBound: !direct,
         codegenCollect(api) {
+          const specialization =
+            methodSpecialization(
+              api,
+              ownerCs,
+              method,
+              parameters
+            );
+          const compileTimeDirect =
+            Boolean(specialization);
+          const specializedResultCs =
+            specialization && !isVoid
+              ? substituteGenericTypeParameters(
+                  returnCs,
+                  specialization.substitutions
+                )
+              : resultCs;
           collectActionFields(api, {
-            resultCs,
+            resultCs: compileTimeDirect
+              ? specializedResultCs
+              : resultCs,
             resultGraph,
             isVoid,
             outParameters,
-            direct
+            direct: compileTimeDirect,
+            substitutions:
+              specialization?.substitutions ||
+              new Map()
           });
-          if (!direct) {
+          if (!compileTimeDirect) {
             ensureApiReflectionRuntime(api);
             collectReflectiveSignatureFields(
               api,
@@ -6440,8 +11489,22 @@
           }
         },
         codegenAction(api) {
-          const action = direct
-            ? directMethodAction(api, ownerCs, method, parameters, isVoid)
+          const specialization =
+            methodSpecialization(
+              api,
+              ownerCs,
+              method,
+              parameters
+            );
+          const action = specialization
+            ? directMethodAction(
+                api,
+                specialization.ownerType,
+                method,
+                parameters,
+                isVoid,
+                specialization
+              )
             : reflectiveMethodAction(api, ownerCs, method, parameters, isVoid);
           return actionWithDoneImpulse(api, action);
         },
@@ -6459,11 +11522,200 @@
       });
     }
 
+    function createHookMethodDefinition(
+      owner,
+      method,
+      template
+    ) {
+      if (
+        !template ||
+        !method ||
+        !method.name ||
+        method.isHookable === false
+      ) {
+        return null;
+      }
+      const ownerCs = normalizeCsType(
+        owner.fullName ||
+        method.declaringType
+      );
+      const parameters = Array.isArray(
+        method.parameters
+      ) ? method.parameters : [];
+      const returnCs = normalizeCsType(
+        method.returnType || "System.Void"
+      );
+      if (
+        !ownerCs ||
+        ownerGenericParameters(ownerCs).length > 0 ||
+        parameters.some(parameter =>
+          !isSupportedApiParameter(parameter) ||
+          parameter?.isByRef === true ||
+          parameter?.isOut === true
+        ) ||
+        !isSupportedApiReturnType(returnCs)
+      ) {
+        return null;
+      }
+      const stableHookContract = String(
+        method.stableContractId ||
+        (
+          method.id
+            ? `contract.hook.method.${method.id}`
+            : ""
+        )
+      );
+      if (!stableHookContract) return null;
+
+      const visibility = String(
+        method.visibility || "public"
+      );
+      const fixedMethod = Object.freeze({
+        id: String(method.id || ""),
+        stableContractId:
+          stableHookContract,
+        name: String(method.name),
+        declaringType: ownerCs,
+        signature: String(
+          method.signature ||
+          `${method.name}(${parameters.map(apiParameterSignature).join(",")}) : ${returnCs}`
+        ),
+        returnType: returnCs,
+        returnTypeIsValueType:
+          method.returnTypeIsValueType === true,
+        isStatic:
+          method.isStatic === true,
+        visibility,
+        parameters: Object.freeze(
+          parameters.map(parameter =>
+            Object.freeze({ ...parameter })
+          )
+        ),
+        attributes: Object.freeze([
+          ...(Array.isArray(method.attributes)
+            ? method.attributes
+            : [])
+        ])
+      });
+      const outputs = [
+        port(
+          "called",
+          window.RMLI18n.t("ui.auto.6e8b938b82e2"),
+          "impulse"
+        )
+      ];
+      if (fixedMethod.isStatic !== true) {
+        outputs.push(
+          port(
+            "instance",
+            "Instance",
+            graphTypeFor(ownerCs)
+          )
+        );
+      }
+      fixedMethod.parameters.forEach(
+        (parameter, index) => {
+          outputs.push(
+            port(
+              `argument${index}`,
+              parameter.name ||
+                `Argument ${index + 1}`,
+              graphTypeFor(
+                parameter.elementType ||
+                parameter.type ||
+                "System.Object"
+              )
+            )
+          );
+        }
+      );
+      if (
+        returnCs !== "System.Void" &&
+        returnCs !== "void"
+      ) {
+        outputs.push(
+          port(
+            "result",
+            "Result",
+            graphTypeFor(returnCs)
+          )
+        );
+      }
+
+      const definition = {
+        ...template,
+        title:
+          `Hook · ${displayTypeName(owner)}.${fixedMethod.name}`,
+        group: API_GROUPS.hooks,
+        symbol: "H<T>",
+        description:
+          fixedMethod.signature,
+        hiddenFromPalette: false,
+        expertOnly: false,
+        inputs: [],
+        outputs,
+        parameters:
+          (Array.isArray(template.parameters)
+            ? template.parameters
+            : []).filter(parameter =>
+              parameter?.key !==
+                "hookContract"
+            ).map(parameter => ({
+              ...parameter
+            })),
+        catalogGenerated: true,
+        customCSharpCatalogNode: false,
+        catalogType: ownerCs,
+        catalogMember:
+          fixedMethod.name,
+        apiStableContractId:
+          stableHookContract,
+        apiMemberKind: "hook-method",
+        apiSignature:
+          fixedMethod.signature,
+        apiParameters:
+          fixedMethod.parameters,
+        apiReturnType: returnCs,
+        apiIsStatic:
+          fixedMethod.isStatic,
+        apiGenericArity: 0,
+        apiHookVisibility: visibility,
+        apiHookMethod: fixedMethod,
+        apiSearchText:
+          `${ownerCs} ${fixedMethod.name} ${fixedMethod.signature} Harmony hook ${visibility}`,
+        runtimeBound: false,
+        apiThreadAffinity:
+          normalizeThreadAffinity(
+            method,
+            owner
+          ),
+        apiReloadSafety:
+          normalizeReloadSafety({
+            level: "unsafe",
+            confidence: "certain",
+            operation: "runtime-patch",
+            reasons: [
+              "runtime-code-patching"
+            ],
+            requiredCleanup: [
+              "process-restart"
+            ],
+            retainsCallerObjects: true
+          })
+      };
+      delete definition.resolveDefinition;
+      return definition;
+    }
+
     function createPropertyGetDefinition(owner, property) {
       const ownerCs = normalizeCsType(owner.fullName);
       const ownerGraph = registerApiType(ownerCs, owner) || "object";
+      const ownerGenerics =
+        ownerGenericParameters(ownerCs, owner);
       const valueCs = normalizeCsType(property.type || "System.Object");
-      const valueGraph = graphTypeFor(valueCs);
+      const valueGraph = ownerGenerics.length > 0
+        ? "object"
+        : graphTypeFor(valueCs);
       const indexes = property.indexParameters || [];
       if (
         property.getterIsPublic === false ||
@@ -6479,7 +11731,10 @@
       ) {
         return null;
       }
-      const inputs = [];
+      const inputs = genericTypeInputPorts(
+        ownerGenerics,
+        "ownerGeneric"
+      );
       if (!property.isStatic) {
         inputs.push(port("target", window.RMLI18n.t("ui.auto.ba52d97729b9"), ownerGraph));
       }
@@ -6497,8 +11752,19 @@
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: property.name,
+        apiInheritedProjection:
+          property.apiInheritedProjection === true,
+        apiInheritedFrom:
+          String(property.inheritedFrom || ""),
         apiStableContractId:
-          String(property.readContractId || ""),
+          readStableContractId(property),
+        apiStableContractIds:
+          stableContractAliasValues(
+            property.readStableContractId,
+            property.readStableContractIds,
+            property.readContractId,
+            property.readContractIds
+          ),
         apiMemberKind: "property-get",
         apiSignature:
           `${ownerCs}.${property.name}[${indexes.map(apiParameterSignature).join(",")}] -> ${catalogExactType(property.type || valueCs)}`,
@@ -6507,14 +11773,37 @@
           property.type || valueCs,
         apiIsStatic: property.isStatic === true,
         apiGenericArity: 0,
+        apiOwnerGenericParameters:
+          ownerGenerics,
+        compileTimeSpecializable:
+          ownerGenerics.length > 0,
+        runtimeBound:
+          ownerGenerics.length > 0,
         apiSearchText: `${ownerCs} ${property.name} property get read ${valueCs}`,
         codegenExpression(api) {
+          const specialization =
+            ownerSpecialization(
+              api,
+              ownerCs
+            );
+          if (!specialization) {
+            return requiredCompileTimeOwnerExpression(
+              ownerCs,
+              property.name
+            );
+          }
+          const specializedValueCs =
+            substituteGenericTypeParameters(
+              valueCs,
+              specialization.substitutions
+            );
           return propertyReadExpression(
             api,
-            ownerCs,
-            valueCs,
+            specialization.type,
+            specializedValueCs,
             property,
-            indexes
+            indexes,
+            specialization.substitutions
           );
         }
       }, owner, property.readReloadSafety, {
@@ -6525,6 +11814,8 @@
     function createPropertySetDefinition(owner, property) {
       const ownerCs = normalizeCsType(owner.fullName);
       const ownerGraph = registerApiType(ownerCs, owner) || "object";
+      const ownerGenerics =
+        ownerGenericParameters(ownerCs, owner);
       const valueCs = normalizeCsType(property.type || "System.Object");
       const indexes = property.indexParameters || [];
       if (
@@ -6542,13 +11833,25 @@
         return null;
       }
       const inputs = [port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse")];
+      inputs.push(
+        ...genericTypeInputPorts(
+          ownerGenerics,
+          "ownerGeneric"
+        )
+      );
       if (!property.isStatic) {
         inputs.push(port("target", window.RMLI18n.t("ui.auto.ba52d97729b9"), ownerGraph));
       }
       for (const parameter of indexes) {
         inputs.push(parameterPort(parameter));
       }
-      inputs.push(port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), graphTypeFor(valueCs)));
+      inputs.push(port(
+        "value",
+        window.RMLI18n.t("ui.auto.3b53ce63a0cc"),
+        ownerGenerics.length > 0
+          ? "object"
+          : graphTypeFor(valueCs)
+      ));
 
       return withReloadContract({
         title: `Set · ${displayTypeName(owner)}.${property.name}`,
@@ -6564,8 +11867,19 @@
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: property.name,
+        apiInheritedProjection:
+          property.apiInheritedProjection === true,
+        apiInheritedFrom:
+          String(property.inheritedFrom || ""),
         apiStableContractId:
-          String(property.writeContractId || ""),
+          writeStableContractId(property),
+        apiStableContractIds:
+          stableContractAliasValues(
+            property.writeStableContractId,
+            property.writeStableContractIds,
+            property.writeContractId,
+            property.writeContractIds
+          ),
         apiMemberKind: "property-set",
         apiSignature:
           `${ownerCs}.${property.name}[${indexes.map(apiParameterSignature).join(",")}] <- ${catalogExactType(property.type || valueCs)}`,
@@ -6579,15 +11893,53 @@
         apiReturnType: "System.Void",
         apiIsStatic: property.isStatic === true,
         apiGenericArity: 0,
+        apiOwnerGenericParameters:
+          ownerGenerics,
+        compileTimeSpecializable:
+          ownerGenerics.length > 0,
+        runtimeBound:
+          ownerGenerics.length > 0,
         apiSearchText: `${ownerCs} ${property.name} property set write ${valueCs}`,
         codegenCollect(api) {
           collectActionFields(api, { isVoid: true, outParameters: [] });
         },
         codegenAction(api) {
-          const access = propertyAccessExpression(api, ownerCs, property, indexes);
+          const specialization =
+            ownerSpecialization(
+              api,
+              ownerCs
+            );
+          if (!specialization) {
+            return actionWithDoneImpulse(
+              api,
+              wrapApiAction(
+                api,
+                `    throw new System.InvalidOperationException("${escapeString(
+                  compileTimeOwnerMessage(
+                    ownerCs,
+                    property.name
+                  )
+                )}");`
+              )
+            );
+          }
+          const access = propertyAccessExpression(
+            api,
+            specialization.type,
+            property,
+            indexes,
+            specialization.substitutions
+          );
+          const value =
+            specializedInputExpression(
+              api,
+              "value",
+              valueCs,
+              specialization.substitutions
+            );
           const action = wrapApiAction(
             api,
-            `    ${access} = ${api.input("value").code};`
+            `    ${access} = ${value};`
           );
           return actionWithDoneImpulse(api, action);
         },
@@ -6602,10 +11954,20 @@
     function createFieldGetDefinition(owner, field) {
       const ownerCs = normalizeCsType(owner.fullName);
       const ownerGraph = registerApiType(ownerCs, owner) || "object";
+      const ownerGenerics =
+        ownerGenericParameters(ownerCs, owner);
       const valueCs = normalizeCsType(field.type || "System.Object");
-      const inputs = field.isStatic
-        ? []
-        : [port("target", window.RMLI18n.t("ui.auto.ba52d97729b9"), ownerGraph)];
+      const inputs = genericTypeInputPorts(
+        ownerGenerics,
+        "ownerGeneric"
+      );
+      if (!field.isStatic) {
+        inputs.push(port(
+          "target",
+          window.RMLI18n.t("ui.auto.ba52d97729b9"),
+          ownerGraph
+        ));
+      }
       if (
         field.isPublic === false ||
         !isCSharpIdentifier(field.name) ||
@@ -6620,12 +11982,29 @@
         symbol: "fld",
         description: `Reads field ${ownerCs}.${field.name} (${valueCs}).`,
         inputs,
-        outputs: [port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), graphTypeFor(valueCs))],
+        outputs: [port(
+          "value",
+          window.RMLI18n.t("ui.auto.3b53ce63a0cc"),
+          ownerGenerics.length > 0
+            ? "object"
+            : graphTypeFor(valueCs)
+        )],
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: field.name,
+        apiInheritedProjection:
+          field.apiInheritedProjection === true,
+        apiInheritedFrom:
+          String(field.inheritedFrom || ""),
         apiStableContractId:
-          String(field.readContractId || ""),
+          readStableContractId(field),
+        apiStableContractIds:
+          stableContractAliasValues(
+            field.readStableContractId,
+            field.readStableContractIds,
+            field.readContractId,
+            field.readContractIds
+          ),
         apiMemberKind: "field-get",
         apiSignature:
           `${ownerCs}.${field.name} -> ${catalogExactType(field.type || valueCs)}`,
@@ -6634,17 +12013,39 @@
           field.type || valueCs,
         apiIsStatic: field.isStatic === true,
         apiGenericArity: 0,
+        apiOwnerGenericParameters:
+          ownerGenerics,
+        compileTimeSpecializable:
+          ownerGenerics.length > 0,
+        runtimeBound:
+          ownerGenerics.length > 0,
         apiSearchText: `${ownerCs} ${field.name} field read get ${valueCs}`,
         codegenExpression(api) {
+          const specialization =
+            ownerSpecialization(
+              api,
+              ownerCs
+            );
+          if (!specialization) {
+            return requiredCompileTimeOwnerExpression(
+              ownerCs,
+              field.name
+            );
+          }
+          const specializedValueCs =
+            substituteGenericTypeParameters(
+              valueCs,
+              specialization.substitutions
+            );
           const access = host =>
             `${host}.${escapeCSharpIdentifier(field.name)}`;
 
           return field.isStatic
-            ? access(ownerCs)
+            ? access(specialization.type)
             : nullSafeInstanceReadExpression(
                 api,
-                ownerCs,
-                valueCs,
+                specialization.type,
+                specializedValueCs,
                 access
               );
         }
@@ -6656,6 +12057,8 @@
     function createFieldSetDefinition(owner, field) {
       const ownerCs = normalizeCsType(owner.fullName);
       const ownerGraph = registerApiType(ownerCs, owner) || "object";
+      const ownerGenerics =
+        ownerGenericParameters(ownerCs, owner);
       const valueCs = normalizeCsType(field.type || "System.Object");
       const inputs = [port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse")];
       if (
@@ -6665,10 +12068,22 @@
       ) {
         return null;
       }
+      inputs.push(
+        ...genericTypeInputPorts(
+          ownerGenerics,
+          "ownerGeneric"
+        )
+      );
       if (!field.isStatic) {
         inputs.push(port("target", window.RMLI18n.t("ui.auto.ba52d97729b9"), ownerGraph));
       }
-      inputs.push(port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), graphTypeFor(valueCs)));
+      inputs.push(port(
+        "value",
+        window.RMLI18n.t("ui.auto.3b53ce63a0cc"),
+        ownerGenerics.length > 0
+          ? "object"
+          : graphTypeFor(valueCs)
+      ));
 
       return withReloadContract({
         title: `Write · ${displayTypeName(owner)}.${field.name}`,
@@ -6684,8 +12099,19 @@
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: field.name,
+        apiInheritedProjection:
+          field.apiInheritedProjection === true,
+        apiInheritedFrom:
+          String(field.inheritedFrom || ""),
         apiStableContractId:
-          String(field.writeContractId || ""),
+          writeStableContractId(field),
+        apiStableContractIds:
+          stableContractAliasValues(
+            field.writeStableContractId,
+            field.writeStableContractIds,
+            field.writeContractId,
+            field.writeContractIds
+          ),
         apiMemberKind: "field-set",
         apiSignature:
           `${ownerCs}.${field.name} <- ${catalogExactType(field.type || valueCs)}`,
@@ -6693,17 +12119,49 @@
         apiReturnType: "System.Void",
         apiIsStatic: field.isStatic === true,
         apiGenericArity: 0,
+        apiOwnerGenericParameters:
+          ownerGenerics,
+        compileTimeSpecializable:
+          ownerGenerics.length > 0,
+        runtimeBound:
+          ownerGenerics.length > 0,
         apiSearchText: `${ownerCs} ${field.name} field write set ${valueCs}`,
         codegenCollect(api) {
           collectActionFields(api, { isVoid: true, outParameters: [] });
         },
         codegenAction(api) {
+          const specialization =
+            ownerSpecialization(
+              api,
+              ownerCs
+            );
+          if (!specialization) {
+            return actionWithDoneImpulse(
+              api,
+              wrapApiAction(
+                api,
+                `    throw new System.InvalidOperationException("${escapeString(
+                  compileTimeOwnerMessage(
+                    ownerCs,
+                    field.name
+                  )
+                )}");`
+              )
+            );
+          }
           const host = field.isStatic
-            ? ownerCs
-            : `((${ownerCs})(${api.input("target").code}))`;
+            ? specialization.type
+            : `((${specialization.type})(${api.input("target").code}))`;
+          const value =
+            specializedInputExpression(
+              api,
+              "value",
+              valueCs,
+              specialization.substitutions
+            );
           const action = wrapApiAction(
             api,
-            `    ${host}.${escapeCSharpIdentifier(field.name)} = ${api.input("value").code};`
+            `    ${host}.${escapeCSharpIdentifier(field.name)} = ${value};`
           );
           return actionWithDoneImpulse(api, action);
         },
@@ -6734,6 +12192,23 @@
         catalogMember: eventInfo.name,
         apiStableContractId:
           String(eventInfo.stableContractId || ""),
+        apiStableContractIds:
+          stableContractAliasValues(
+            eventInfo.stableContractId,
+            eventInfo.stableContractIds,
+            eventInfo.contractId,
+            eventInfo.contractIds
+          ),
+        apiEventAddStableContractId:
+          String(
+            eventInfo.addStableContractId ||
+            ""
+          ),
+        apiEventRemoveStableContractId:
+          String(
+            eventInfo.removeStableContractId ||
+            ""
+          ),
         apiMemberKind: "event",
         apiSignature:
           `${ownerCs}.${eventInfo.name}:${normalizeCsType(eventInfo.handlerType || "System.Delegate")}`,
@@ -6791,6 +12266,278 @@
       return definition;
     }
 
+    function genericTypeInputPorts(
+      genericParameters,
+      prefix
+    ) {
+      return (genericParameters || []).map(
+        (generic, index) => {
+          const name = String(
+            generic?.name || generic || `T${index}`
+          );
+          const position = Math.max(
+            0,
+            Number(generic?.position) || index
+          );
+          return port(
+            `${prefix}${position}`,
+            `Type ${name}`,
+            "type",
+            {
+              help: generic &&
+                typeof generic === "object"
+                ? genericConstraintHelp(generic)
+                : `Select the concrete type argument for ${name}.`
+            }
+          );
+        }
+      );
+    }
+
+    function compileTimeTypeFromExpression(
+      value
+    ) {
+      let expression = String(value || "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .trim();
+      while (
+        expression.startsWith("(") &&
+        expression.endsWith(")")
+      ) {
+        let depth = 0;
+        let wrapsEntireExpression = true;
+        for (
+          let index = 0;
+          index < expression.length;
+          index += 1
+        ) {
+          if (expression[index] === "(") {
+            depth += 1;
+          } else if (expression[index] === ")") {
+            depth -= 1;
+            if (
+              depth === 0 &&
+              index < expression.length - 1
+            ) {
+              wrapsEntireExpression = false;
+              break;
+            }
+          }
+        }
+        if (!wrapsEntireExpression || depth !== 0) {
+          break;
+        }
+        expression = expression.slice(1, -1).trim();
+      }
+
+      const match = /^typeof\((.+)\)$/s.exec(
+        expression
+      );
+      if (!match) return "";
+      const type = normalizeCsType(match[1]);
+      return canDirectlyReferenceType(type)
+        ? type
+        : "";
+    }
+
+    function resolveGenericSpecialization(
+      api,
+      templateType,
+      genericParameters,
+      prefix
+    ) {
+      const substitutions = new Map();
+      const argumentsList = [];
+      for (
+        let index = 0;
+        index < genericParameters.length;
+        index += 1
+      ) {
+        const generic = genericParameters[index];
+        const name = String(
+          generic?.name || generic || ""
+        ).trim();
+        const position = Math.max(
+          0,
+          Number(generic?.position) || index
+        );
+        const explicit = genericBindingType(
+          api.node,
+          prefix,
+          position
+        );
+        const input = api.input(
+          `${prefix}${position}`
+        );
+        if (!explicit && input?.connected !== true) {
+          return null;
+        }
+        const selected =
+          explicit ||
+          compileTimeTypeFromExpression(
+            input.code
+          );
+        if (!name || !selected) {
+          return null;
+        }
+        substitutions.set(name, selected);
+        argumentsList.push(selected);
+      }
+
+      const specializedType =
+        substituteGenericTypeParameters(
+          templateType,
+          substitutions
+        );
+      if (
+        templateType &&
+        !canDirectlyReferenceType(
+          specializedType
+        )
+      ) {
+        return null;
+      }
+
+      return {
+        substitutions,
+        arguments: argumentsList,
+        type: specializedType
+      };
+    }
+
+    function mergeGenericSubstitutions(
+      ...sources
+    ) {
+      const result = new Map();
+      for (const source of sources) {
+        for (const [name, value] of
+          source instanceof Map
+            ? source
+            : []) {
+          result.set(name, value);
+        }
+      }
+      return result;
+    }
+
+    function ownerGenericParameters(
+      ownerCs,
+      owner = null
+    ) {
+      const declared = new Map(
+        (Array.isArray(owner?.genericParameters)
+          ? owner.genericParameters
+          : []).map((value, index) => [
+          String(value?.name || ""),
+          {
+            ...value,
+            position: Math.max(
+              0,
+              Number(value?.position) || index
+            )
+          }
+        ])
+      );
+      return genericTypeParameterNames(
+        ownerCs
+      ).map((name, position) => ({
+        ...(declared.get(name) || {}),
+        name,
+        position
+      }));
+    }
+
+    function ownerSpecialization(api, ownerCs) {
+      const genericParameters =
+        ownerGenericParameters(ownerCs);
+      if (genericParameters.length === 0) {
+        return {
+          substitutions: new Map(),
+          arguments: [],
+          type: ownerCs
+        };
+      }
+      return resolveGenericSpecialization(
+        api,
+        ownerCs,
+        genericParameters,
+        "ownerGeneric"
+      );
+    }
+
+    function genericTypeTokenExpression(
+      api,
+      templateType,
+      genericParameters,
+      prefix
+    ) {
+      const specialization =
+        resolveGenericSpecialization(
+          api,
+          templateType,
+          genericParameters,
+          prefix
+        );
+      if (specialization) {
+        return `typeof(${specialization.type})`;
+      }
+
+      const openType =
+        openGenericDefinitionCsType(
+          templateType
+        );
+      const argumentsList = genericParameters.map(
+        (generic, index) => {
+          const position = Math.max(
+            0,
+            Number(generic?.position) || index
+          );
+          return api.input(
+            `${prefix}${position}`
+          ).code;
+        }
+      );
+      return (
+        `typeof(${openType}).MakeGenericType(` +
+        `new System.Type[] { ${argumentsList.join(", ")} })`
+      );
+    }
+
+    function apiRuntimeOwnerTypeExpression(
+      api,
+      ownerCs
+    ) {
+      const genericParameters =
+        ownerGenericParameters(ownerCs);
+      if (genericParameters.length === 0) {
+        return apiRuntimeTypeExpression(ownerCs);
+      }
+      return genericTypeTokenExpression(
+        api,
+        ownerCs,
+        genericParameters,
+        "ownerGeneric"
+      );
+    }
+
+    function specializedInputExpression(
+      api,
+      inputId,
+      templateType,
+      substitutions
+    ) {
+      const input = api.input(inputId);
+      const specializedType =
+        substituteGenericTypeParameters(
+          templateType,
+          substitutions
+        );
+      return specializedType !==
+        normalizeCsType(templateType)
+        ? `((${specializedType})(${input.code}))`
+        : input.code;
+    }
+
     function parameterPort(parameter) {
       const csType = normalizeCsType(parameter.elementType || parameter.type || "System.Object");
       return port(
@@ -6823,16 +12570,36 @@
         return "object";
       }
       const known = graphTypeByCs.get(csType);
-      if (known) return known;
+      if (
+        known &&
+        getTypeInformation(known)
+      ) {
+        return known;
+      }
+      if (known) {
+        graphTypeByCs.delete(csType);
+        graphTypeByNormalizedCs.delete(
+          normalizeTypeForLookup(csType)
+        );
+      }
       if (isGenericParameterName(csType) || isOpenTypeExpression(csType)) {
         return "object";
       }
       return registerApiType(csType, typeByName.get(csType)) || "object";
     }
 
-    function directConstructorAction(api, ownerCs, parameters) {
+    function directConstructorAction(
+      api,
+      ownerCs,
+      parameters,
+      substitutions = new Map()
+    ) {
       const fields = actionFieldNames(api);
-      const argumentState = buildDirectArguments(api, parameters);
+      const argumentState = buildDirectArguments(
+        api,
+        parameters,
+        substitutions
+      );
       const resultTarget = generatedApiOutputIsUsed(api, "result")
         ? fields.result
         : "_";
@@ -6880,17 +12647,71 @@
         : "_";
       return wrapApiAction(
         api,
-        `    System.Type apiType = ${apiRuntimeTypeExpression(ownerCs)};\n    object?[] apiArguments = new object?[] { ${args.join(", ")} };\n    System.Reflection.ConstructorInfo apiConstructor = ResolveApiCatalogConstructor(apiType, ${signature.parameterTypes}, ${signature.byRef}, ${signature.out}) ?? throw new System.MissingMethodException(apiType.FullName, ".ctor");\n    ${resultTarget} = apiConstructor.Invoke(apiArguments)!;\n${outAssignments ? `    ${outAssignments}\n` : ""}`
+        `    System.Type apiType = ${apiRuntimeOwnerTypeExpression(api, ownerCs)};\n    object?[] apiArguments = new object?[] { ${args.join(", ")} };\n    System.Reflection.ConstructorInfo apiConstructor = ResolveApiCatalogConstructor(apiType, ${signature.parameterTypes}, ${signature.byRef}, ${signature.out}) ?? throw new System.MissingMethodException(apiType.FullName, ".ctor");\n    ${resultTarget} = apiConstructor.Invoke(apiArguments)!;\n${outAssignments ? `    ${outAssignments}\n` : ""}`
       );
     }
 
-    function directMethodAction(api, ownerCs, method, parameters, isVoid) {
+    function directMethodAction(
+      api,
+      ownerCs,
+      method,
+      parameters,
+      isVoid,
+      specialization = null
+    ) {
       const fields = actionFieldNames(api);
-      const argumentState = buildDirectArguments(api, parameters);
+      const substitutions =
+        specialization?.substitutions ||
+        new Map();
+      const argumentState = buildDirectArguments(
+        api,
+        parameters,
+        substitutions
+      );
       const host = method.isStatic
         ? ownerCs
         : `((${ownerCs})(${api.input("target").code}))`;
-      const call = `${host}.${escapeCSharpIdentifier(method.name)}(${argumentState.arguments.join(", ")})`;
+      const genericArguments =
+        specialization?.methodArguments || [];
+      const genericSuffix =
+        genericArguments.length > 0
+          ? `<${genericArguments.join(", ")}>`
+          : "";
+      const operator =
+        directOperatorDescriptor(
+          method,
+          parameters
+        );
+      let call;
+      if (operator?.kind === "unary") {
+        const expression =
+          `${operator.token}(${argumentState.arguments[0]})`;
+        call = operator.checked
+          ? `checked(${expression})`
+          : expression;
+      } else if (operator?.kind === "binary") {
+        const expression =
+          `((${argumentState.arguments[0]}) ${operator.token} (${argumentState.arguments[1]}))`;
+        call = operator.checked
+          ? `checked(${expression})`
+          : expression;
+      } else if (
+        operator?.kind === "conversion"
+      ) {
+        const returnType =
+          substituteGenericTypeParameters(
+            method.returnType ||
+              "System.Object",
+            substitutions
+          );
+        const expression =
+          `((${returnType})(${argumentState.arguments[0]}))`;
+        call = operator.checked
+          ? `checked(${expression})`
+          : expression;
+      } else {
+        call = `${host}.${escapeCSharpIdentifier(method.name)}${genericSuffix}(${argumentState.arguments.join(", ")})`;
+      }
       const invocation = isVoid
         ? `${call};`
         : `${generatedApiOutputIsUsed(api, "result") ? fields.result : "_"} = ${call};`;
@@ -6949,7 +12770,7 @@
 
       return wrapApiAction(
         api,
-        `    System.Type apiDeclaringType = ${apiRuntimeTypeExpression(ownerCs)};\n    object? apiTarget = ${target};\n    object?[] apiArguments = new object?[] { ${supplied.join(", ")} };\n${genericArgumentDeclaration}    System.Reflection.MethodInfo apiMethod = ResolveApiCatalogMethod(apiDeclaringType, "${escapeString(normalizeCsType(method.declaringType || ownerCs))}", "${escapeString(method.name)}", ${signature.parameterTypes}, ${signature.byRef}, ${signature.out}, ${(method.genericParameters || []).length}, ${method.isStatic ? "true" : "false"}) ?? throw new System.MissingMethodException(apiDeclaringType.FullName, "${escapeString(method.name)}");\n${genericInputs.length > 0 ? "    apiMethod = apiMethod.MakeGenericMethod(apiGenericArguments);\n" : ""}    ${resultAssignment}\n${outAssignments ? `    ${outAssignments}\n` : ""}`
+        `    System.Type apiDeclaringType = ${apiRuntimeOwnerTypeExpression(api, ownerCs)};\n    object? apiTarget = ${target};\n    object?[] apiArguments = new object?[] { ${supplied.join(", ")} };\n${genericArgumentDeclaration}    System.Reflection.MethodInfo apiMethod = ResolveApiCatalogMethod(apiDeclaringType, "${escapeString(normalizeCsType(method.declaringType || ownerCs))}", "${escapeString(method.name)}", ${signature.parameterTypes}, ${signature.byRef}, ${signature.out}, ${(method.genericParameters || []).length}, ${method.isStatic ? "true" : "false"}) ?? throw new System.MissingMethodException(apiDeclaringType.FullName, "${escapeString(method.name)}");\n${genericInputs.length > 0 ? "    apiMethod = apiMethod.MakeGenericMethod(apiGenericArguments);\n" : ""}    ${resultAssignment}\n${outAssignments ? `    ${outAssignments}\n` : ""}`
       );
     }
 
@@ -7063,17 +12884,65 @@
       );
     }
 
-    function buildDirectArguments(api, parameters) {
+    function buildDirectArguments(
+      api,
+      parameters,
+      substitutions = new Map()
+    ) {
       const token = api.token(api.node.id);
       const declarations = [];
       const assignments = [];
       const argumentsList = [];
       const fields = actionFieldNames(api);
+      const supplied = parameters.map(parameter =>
+        parameter.isOut === true ||
+        parameter.isOptional !== true ||
+        api.input(
+          `arg${Number(parameter.position || 0)}`
+        ).connected === true
+      );
+      const lastSuppliedIndex =
+        supplied.lastIndexOf(true);
 
-      for (const parameter of parameters) {
+      for (
+        let parameterIndex = 0;
+        parameterIndex < parameters.length;
+        parameterIndex += 1
+      ) {
+        const parameter = parameters[parameterIndex];
         const position = Number(parameter.position || 0);
-        const csType = normalizeCsType(parameter.elementType || parameter.type || "System.Object");
+        const templateType = normalizeCsType(
+          parameter.elementType ||
+          parameter.type ||
+          "System.Object"
+        );
+        const csType =
+          substituteGenericTypeParameters(
+            templateType,
+            substitutions
+          );
         const local = `_apiArg${position}${token}`;
+        const inputId = `arg${position}`;
+        const input = parameter.isOut
+          ? null
+          : api.input(inputId);
+        if (
+          parameter.isOptional === true &&
+          input?.connected !== true
+        ) {
+          if (parameterIndex < lastSuppliedIndex) {
+            const declaredDefault =
+              substituteGenericTypeParameters(
+                parameter.defaultValueCSharp ||
+                  `default(${csType})`,
+                substitutions
+              );
+            argumentsList.push(
+              declaredDefault
+            );
+          }
+          continue;
+        }
         if (parameter.isOut) {
           declarations.push(`${csType} ${local};`);
           argumentsList.push(`out ${local}`);
@@ -7081,7 +12950,14 @@
             assignments.push(`${fields.out(position)} = ${local};`);
           }
         } else if (parameter.isByRef) {
-          declarations.push(`${csType} ${local} = ${api.input(`arg${position}`).code};`);
+          const inputValue =
+            specializedInputExpression(
+              api,
+              inputId,
+              templateType,
+              substitutions
+            );
+          declarations.push(`${csType} ${local} = ${inputValue};`);
           argumentsList.push(
             `${parameter.isIn === true ? "in" : "ref"} ${local}`
           );
@@ -7095,7 +12971,14 @@
             assignments.push(`${fields.out(position)} = ${local};`);
           }
         } else {
-          argumentsList.push(api.input(`arg${position}`).code);
+          argumentsList.push(
+            specializedInputExpression(
+              api,
+              inputId,
+              templateType,
+              substitutions
+            )
+          );
         }
       }
 
@@ -7106,13 +12989,51 @@
       };
     }
 
-    function propertyAccessExpression(api, ownerCs, property, indexes) {
+    function compileTimeOwnerMessage(
+      ownerCs,
+      memberName
+    ) {
+      return (
+        `API member ${ownerCs}.${memberName} requires ` +
+        "compile-time System.Type constants for all owner generic arguments."
+      );
+    }
+
+    function requiredCompileTimeOwnerExpression(
+      ownerCs,
+      memberName
+    ) {
+      return (
+        "(throw new System.InvalidOperationException(" +
+        `"${escapeString(
+          compileTimeOwnerMessage(
+            ownerCs,
+            memberName
+          )
+        )}"))`
+      );
+    }
+
+    function propertyAccessExpression(
+      api,
+      ownerCs,
+      property,
+      indexes,
+      substitutions = new Map()
+    ) {
       const host = property.isStatic
         ? ownerCs
         : `((${ownerCs})(${api.input("target").code}))`;
       if (indexes.length > 0) {
         const indexValues = indexes.map(parameter =>
-          api.input(`arg${parameter.position}`).code
+          specializedInputExpression(
+            api,
+            `arg${parameter.position}`,
+            parameter.elementType ||
+              parameter.type ||
+              "System.Object",
+            substitutions
+          )
         );
         return `${host}[${indexValues.join(", ")}]`;
       }
@@ -7138,15 +13059,21 @@
       ownerCs,
       valueCs,
       property,
-      indexes
+      indexes,
+      substitutions = new Map()
     ) {
       const access = host => {
         if (indexes.length > 0) {
           const indexValues = indexes.map(
             parameter =>
-              api.input(
-                `arg${parameter.position}`
-              ).code
+              specializedInputExpression(
+                api,
+                `arg${parameter.position}`,
+                parameter.elementType ||
+                  parameter.type ||
+                  "System.Object",
+                substitutions
+              )
           );
           return `${host}[${indexValues.join(", ")}]`;
         }
@@ -7197,7 +13124,13 @@
           continue;
         }
         const csType = descriptor.direct
-          ? normalizeCsType(parameter.elementType || parameter.type || "System.Object")
+          ? substituteGenericTypeParameters(
+              parameter.elementType ||
+              parameter.type ||
+              "System.Object",
+              descriptor.substitutions ||
+                new Map()
+            )
           : "object";
         api.addRuntimeField(
           `${api.node.id}.apiOut.${parameter.position}`,
@@ -7292,23 +13225,246 @@
       api.addMember("api.catalog.runtime", globalThis.RMLCodeTemplates.text("api", "API_catalog_reflection_helpers", []));
     }
 
-    function canDirectlyCallMethod(ownerCs, method, parameters) {
+    function methodSpecialization(
+      api,
+      ownerCs,
+      method,
+      parameters
+    ) {
+      const owner = ownerSpecialization(
+        api,
+        ownerCs
+      );
+      if (!owner) return null;
+
+      const methodGenerics = Array.isArray(
+        method.genericParameters
+      )
+        ? method.genericParameters
+        : [];
+      const methodSpecialization =
+        methodGenerics.length > 0
+          ? resolveGenericSpecialization(
+              api,
+              "",
+              methodGenerics,
+              "generic"
+            )
+          : {
+              substitutions: new Map(),
+              arguments: []
+            };
+      if (!methodSpecialization) return null;
+
+      const substitutions =
+        mergeGenericSubstitutions(
+          owner.substitutions,
+          methodSpecialization.substitutions
+        );
+      if (
+        !canDirectlyCallMethod(
+          owner.type,
+          method,
+          parameters,
+          substitutions
+        )
+      ) {
+        return null;
+      }
+
+      return {
+        ownerType: owner.type,
+        ownerArguments: owner.arguments,
+        methodArguments:
+          methodSpecialization.arguments,
+        substitutions
+      };
+    }
+
+    function canDirectlyCallMethod(
+      ownerCs,
+      method,
+      parameters,
+      substitutions = new Map()
+    ) {
+      const returnType =
+        substituteGenericTypeParameters(
+          method.returnType ||
+          "System.Void",
+          substitutions
+        );
+      const genericParameters =
+        Array.isArray(
+          method.genericParameters
+        )
+          ? method.genericParameters
+          : [];
       return (
         canDirectlyReferenceType(ownerCs) &&
         method.isPublic !== false &&
-        method.isSpecialName !== true &&
-        !method.isGenericMethodDefinition &&
-        !parameters.some(parameter =>
-          parameter.isOptional === true
+        (
+          method.isSpecialName !== true ||
+          method.isOperator === true
         ) &&
-        canDirectlyReferenceType(method.returnType || "System.Void") &&
-        parameters.every(canDirectlyPassParameter) &&
+        (
+          method.isOperator !== true ||
+          canDirectlyEmitOperator(
+            method,
+            parameters
+          )
+        ) &&
+        genericParameters.every(generic =>
+          substitutions.has(
+            String(generic?.name || "")
+          )
+        ) &&
+        canDirectlyReferenceType(returnType) &&
+        parameters.every(parameter =>
+          canDirectlyPassParameter(
+            parameter,
+            substitutions
+          )
+        ) &&
         /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(method.name || ""))
       );
     }
 
-    function canDirectlyPassParameter(parameter) {
-      const type = normalizeCsType(parameter.elementType || parameter.type || "");
+    function directOperatorDescriptor(
+      method,
+      parameters
+    ) {
+      if (
+        method?.isOperator !== true ||
+        method?.isStatic !== true ||
+        !Array.isArray(parameters) ||
+        parameters.some(parameter =>
+          parameter?.isByRef === true ||
+          parameter?.isOut === true ||
+          parameter?.isOptional === true
+        )
+      ) {
+        return null;
+      }
+
+      const unary = new Map([
+        ["op_UnaryPlus", "+"],
+        ["op_UnaryNegation", "-"],
+        ["op_LogicalNot", "!"],
+        ["op_OnesComplement", "~"],
+        ["op_Increment", "++"],
+        ["op_Decrement", "--"]
+      ]);
+      const checkedUnary = new Map([
+        ["op_CheckedUnaryNegation", "-"],
+        ["op_CheckedIncrement", "++"],
+        ["op_CheckedDecrement", "--"]
+      ]);
+      const binary = new Map([
+        ["op_Addition", "+"],
+        ["op_Subtraction", "-"],
+        ["op_Multiply", "*"],
+        ["op_Division", "/"],
+        ["op_Modulus", "%"],
+        ["op_BitwiseAnd", "&"],
+        ["op_BitwiseOr", "|"],
+        ["op_ExclusiveOr", "^"],
+        ["op_LeftShift", "<<"],
+        ["op_RightShift", ">>"],
+        ["op_UnsignedRightShift", ">>>"],
+        ["op_Equality", "=="],
+        ["op_Inequality", "!="],
+        ["op_GreaterThan", ">"],
+        ["op_LessThan", "<"],
+        ["op_GreaterThanOrEqual", ">="],
+        ["op_LessThanOrEqual", "<="]
+      ]);
+      const checkedBinary = new Map([
+        ["op_CheckedAddition", "+"],
+        ["op_CheckedSubtraction", "-"],
+        ["op_CheckedMultiply", "*"]
+      ]);
+      const name = String(method.name || "");
+      if (
+        parameters.length === 1 &&
+        unary.has(name)
+      ) {
+        return {
+          kind: "unary",
+          token: unary.get(name),
+          checked: false
+        };
+      }
+      if (
+        parameters.length === 1 &&
+        checkedUnary.has(name)
+      ) {
+        return {
+          kind: "unary",
+          token: checkedUnary.get(name),
+          checked: true
+        };
+      }
+      if (
+        parameters.length === 2 &&
+        binary.has(name)
+      ) {
+        return {
+          kind: "binary",
+          token: binary.get(name),
+          checked: false
+        };
+      }
+      if (
+        parameters.length === 2 &&
+        checkedBinary.has(name)
+      ) {
+        return {
+          kind: "binary",
+          token: checkedBinary.get(name),
+          checked: true
+        };
+      }
+      if (
+        parameters.length === 1 &&
+        [
+          "op_Implicit",
+          "op_Explicit",
+          "op_CheckedImplicit",
+          "op_CheckedExplicit"
+        ].includes(name)
+      ) {
+        return {
+          kind: "conversion",
+          checked:
+            name.startsWith("op_Checked")
+        };
+      }
+      return null;
+    }
+
+    function canDirectlyEmitOperator(
+      method,
+      parameters
+    ) {
+      return Boolean(
+        directOperatorDescriptor(
+          method,
+          parameters
+        )
+      );
+    }
+
+    function canDirectlyPassParameter(
+      parameter,
+      substitutions = new Map()
+    ) {
+      const type =
+        substituteGenericTypeParameters(
+          parameter.elementType ||
+          parameter.type ||
+          "",
+          substitutions
+        );
       return canDirectlyReferenceType(type);
     }
 
@@ -7425,7 +13581,6 @@
         !row ||
         row.isPublic === false ||
         row.isByRefLike === true ||
-        row.isGeneric === true ||
         !row.fullName
       ) return false;
       if (row.isObsolete || row.isLegacyNamed) return false;
@@ -7436,6 +13591,34 @@
         isSafeCSharpTypeExpression(fullName) &&
         !fullName.includes("<>") &&
         !isOpenTypeExpression(fullName)
+      );
+    }
+
+    function isUsableCatalogMemberOwner(row) {
+      if (
+        !row ||
+        row.isPublic === false ||
+        row.isByRefLike === true ||
+        !row.fullName ||
+        row.isObsolete ||
+        row.isLegacyNamed
+      ) {
+        return false;
+      }
+
+      const fullName = normalizeCsType(
+        row.fullName
+      );
+      return Boolean(
+        fullName &&
+        fullName !== "System.Void" &&
+        isSafeCSharpTypeExpression(fullName) &&
+        !fullName.includes("<>") &&
+        (
+          !isOpenTypeExpression(fullName) ||
+          genericTypeParameterNames(fullName)
+            .length > 0
+        )
       );
     }
 
@@ -7504,56 +13687,208 @@
     };
   }
 
-  function genericTypeShape(value) {
-    const parsed = firstGenericTypeParts(value);
-    if (!parsed) return "";
+  function genericTypeParameterNames(value) {
+    const result = [];
+    const seen = new Set();
+    const visit = candidate => {
+      const text = normalizeCsType(candidate);
+      if (isGenericParameterName(text)) {
+        if (!seen.has(text)) {
+          seen.add(text);
+          result.push(text);
+        }
+        return;
+      }
+      const array = text.match(
+        /^(.*)\[(?:,*)\]$/
+      );
+      if (array) {
+        visit(array[1]);
+        return;
+      }
+      const parsed = firstGenericTypeParts(text);
+      if (!parsed) return;
+      for (const argument of parsed.arguments) {
+        visit(argument);
+      }
+      if (parsed.suffix.includes("<")) {
+        visit(`Nested${parsed.suffix}`);
+      }
+    };
 
-    return (
-      `${parsed.head.replace(/\s+/g, "")}` +
-      `${parsed.suffix.replace(/\s+/g, "")}` +
-      `|${parsed.arguments.length}`
-    );
+    visit(value);
+
+    return result;
+  }
+
+  function openGenericDefinitionCsType(value) {
+    const text = normalizeCsType(value);
+    let result = "";
+    let cursor = 0;
+    let replaced = false;
+
+    while (cursor < text.length) {
+      const open = text.indexOf("<", cursor);
+      if (open < 0) {
+        result += text.slice(cursor);
+        break;
+      }
+      result += text.slice(cursor, open);
+      let depth = 0;
+      let close = -1;
+      for (
+        let index = open;
+        index < text.length;
+        index += 1
+      ) {
+        if (text[index] === "<") depth += 1;
+        if (text[index] === ">") {
+          depth -= 1;
+          if (depth === 0) {
+            close = index;
+            break;
+          }
+        }
+      }
+      if (close < 0) return "";
+      const argumentsList =
+        splitTopLevelTypeArguments(
+          text.slice(open + 1, close)
+        );
+      if (
+        argumentsList.length > 0 &&
+        argumentsList.every(
+          isGenericParameterName
+        )
+      ) {
+        result += `<${",".repeat(
+          argumentsList.length - 1
+        )}>`;
+        replaced = true;
+      } else {
+        result += text.slice(open, close + 1);
+      }
+      cursor = close + 1;
+    }
+
+    return replaced ? result : "";
+  }
+
+  function genericTypeShape(value) {
+    const text = normalizeCsType(value)
+      .replace(/\s+/g, "");
+    let result = "";
+    let cursor = 0;
+    let found = false;
+
+    while (cursor < text.length) {
+      const open = text.indexOf("<", cursor);
+      if (open < 0) {
+        result += text.slice(cursor);
+        break;
+      }
+      result += text.slice(cursor, open);
+      let depth = 0;
+      let close = -1;
+      for (
+        let index = open;
+        index < text.length;
+        index += 1
+      ) {
+        if (text[index] === "<") depth += 1;
+        if (text[index] === ">") {
+          depth -= 1;
+          if (depth === 0) {
+            close = index;
+            break;
+          }
+        }
+      }
+      if (close < 0) return "";
+      const argumentsList =
+        splitTopLevelTypeArguments(
+          text.slice(open + 1, close)
+        );
+      result += `\`${argumentsList.length}`;
+      found = true;
+      cursor = close + 1;
+    }
+
+    return found ? result : "";
   }
 
   function genericTypeSubstitutions(
     templateType,
     actualType
   ) {
-    const template =
-      firstGenericTypeParts(templateType);
-    const actual =
-      firstGenericTypeParts(actualType);
     const result = new Map();
 
-    if (
-      !template ||
-      !actual ||
-      genericTypeShape(templateType) !==
-        genericTypeShape(actualType) ||
-      template.arguments.length !==
-        actual.arguments.length
-    ) {
-      return result;
-    }
+    const visit = (templateValue, actualValue) => {
+      const templateText =
+        normalizeCsType(templateValue);
+      const actualText =
+        normalizeCsType(actualValue);
+      if (isGenericParameterName(templateText)) {
+        const existing = result.get(templateText);
+        if (!existing || existing === actualText) {
+          result.set(templateText, actualText);
+        }
+        return;
+      }
 
-    for (
-      let index = 0;
-      index < template.arguments.length;
-      index += 1
-    ) {
-      const parameter =
-        normalizeCsType(
-          template.arguments[index]
-        );
+      const templateArray = templateText.match(
+        /^(.*)\[(?:,*)\]$/
+      );
+      const actualArray = actualText.match(
+        /^(.*)\[(?:,*)\]$/
+      );
+      if (templateArray && actualArray) {
+        visit(templateArray[1], actualArray[1]);
+        return;
+      }
 
-      if (isGenericParameterName(parameter)) {
-        result.set(
-          parameter,
-          normalizeCsType(
-            actual.arguments[index]
-          )
+      const template =
+        firstGenericTypeParts(templateText);
+      const actual =
+        firstGenericTypeParts(actualText);
+      if (
+        !template ||
+        !actual ||
+        template.head.replace(/\s+/g, "") !==
+          actual.head.replace(/\s+/g, "") ||
+        template.arguments.length !==
+          actual.arguments.length
+      ) {
+        return;
+      }
+
+      for (
+        let index = 0;
+        index < template.arguments.length;
+        index += 1
+      ) {
+        visit(
+          template.arguments[index],
+          actual.arguments[index]
         );
       }
+
+      if (
+        template.suffix.includes("<") &&
+        actual.suffix.includes("<")
+      ) {
+        visit(
+          `Nested${template.suffix}`,
+          `Nested${actual.suffix}`
+        );
+      }
+    };
+
+    if (
+      genericTypeShape(templateType) ===
+        genericTypeShape(actualType)
+    ) {
+      visit(templateType, actualType);
     }
 
     return result;
@@ -7765,13 +14100,24 @@
     const text = normalizeCsType(value);
     if (!text) return true;
     if (/`\d+/.test(text)) return true;
-    const genericBody = text.match(/<(.+)>/g);
-    if (!genericBody) return false;
-    return /(?:^|[<, ])(?:T|T[A-Z][A-Za-z0-9_]*)(?:[>, ]|$)/.test(text);
+    const parsed = firstGenericTypeParts(text);
+    if (!parsed) return false;
+    return (
+      parsed.arguments.some(argument =>
+        isGenericParameterName(argument) ||
+        isOpenTypeExpression(argument)
+      ) ||
+      (
+        parsed.suffix.includes("<") &&
+        isOpenTypeExpression(
+          `Nested${parsed.suffix}`
+        )
+      )
+    );
   }
 
   function isGenericParameterName(value) {
-    return /^(?:T|T[A-Z][A-Za-z0-9_]*)$/.test(normalizeCsType(value));
+    return /^(?:[A-Z]|T[A-Za-z0-9_]*)$/.test(normalizeCsType(value));
   }
 
   function looksLikeValueType(value) {

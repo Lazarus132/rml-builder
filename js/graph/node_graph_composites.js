@@ -6,6 +6,120 @@ const SAVED_API_COMPOSITE_NESTING_LIMIT =
       ? API_COMPOSITE_MAX_NESTING_DEPTH
       : 32;
 
+function savedApiCompositeVisibleText(
+    value,
+    forbiddenValues = []
+  ) {
+    const text = String(value ?? "").trim();
+    if (!text) return "";
+    const forbidden = (Array.isArray(forbiddenValues)
+      ? forbiddenValues
+      : [forbiddenValues]
+    )
+      .map(candidate => String(candidate || "").trim())
+      .filter(Boolean);
+    if (
+      forbidden.some(candidate =>
+        text === candidate ||
+        text.includes(candidate)
+      ) ||
+      /^(?:unavailable\.preserved\.|api\.)/.test(text) ||
+      /^(?:graph-node|wire|boundary)-[A-Za-z0-9_.:-]+$/.test(text) ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)
+    ) {
+      return "";
+    }
+    return text;
+  }
+
+function savedApiCompositeContractName(
+    contract,
+    fallback = "Unavailable API"
+  ) {
+    const source =
+      contract &&
+      typeof contract === "object" &&
+      !Array.isArray(contract)
+        ? contract
+        : {};
+    const ownerType =
+      savedApiCompositeVisibleText(
+        source.ownerType || source.catalogType
+      );
+    const memberName =
+      savedApiCompositeVisibleText(
+        source.memberName ||
+        source.catalogMember ||
+        source.name
+      );
+    const qualifiedName = [
+      ownerType,
+      memberName
+    ].filter(Boolean).join(".");
+    const signature =
+      savedApiCompositeVisibleText(
+        source.signature || source.apiSignature
+      );
+    return qualifiedName ||
+      signature ||
+      ownerType ||
+      fallback;
+  }
+
+function savedApiCompositeHumanNodeName(
+    node,
+    definition = null,
+    fallback = "Unknown node"
+  ) {
+    let resolvedDefinition = definition;
+    if (!resolvedDefinition && node) {
+      try {
+        resolvedDefinition = nodeDefinition(node);
+      } catch {
+        resolvedDefinition = null;
+      }
+    }
+    const contract = [
+      resolvedDefinition?.apiVerification,
+      node?.apiContract,
+      resolvedDefinition?.preservedApiContract
+    ].find(candidate =>
+      candidate &&
+      typeof candidate === "object" &&
+      !Array.isArray(candidate)
+    ) || null;
+    const contractName =
+      savedApiCompositeContractName(
+        contract,
+        ""
+      );
+    const unavailable =
+      resolvedDefinition
+        ?.unavailableApiContract === true ||
+      Boolean(node?.apiContract);
+    const forbidden = [
+      node?.id,
+      node?.operatorId
+    ];
+    for (const candidate of [
+      node?.label,
+      node?.parameters?.title,
+      unavailable && contractName,
+      resolvedDefinition?.title,
+      contractName
+    ]) {
+      const readable =
+        savedApiCompositeVisibleText(
+          candidate,
+          forbidden
+        );
+      if (readable) return readable;
+    }
+    return unavailable
+      ? "Unavailable API"
+      : fallback;
+  }
+
 function apiCompositeStoredNodeSupported(
     node,
     ownedGraphs = {}
@@ -398,7 +512,7 @@ function savedApiCompositeGraphStats(
         );
         if (!nodeId || nodeIds.has(nodeId)) {
           throw new Error(
-            `${path} contains duplicate node identity '${nodeId || "<unnamed>"}'.`
+            `${path} contains an invalid or duplicate node identity.`
           );
         }
         nodeIds.add(nodeId);
@@ -413,7 +527,7 @@ function savedApiCompositeGraphStats(
           connectionIds.has(connectionId)
         ) {
           throw new Error(
-            `${path} contains duplicate connection identity '${connectionId || "<unnamed>"}'.`
+            `${path} contains an invalid or duplicate connection identity.`
           );
         }
         connectionIds.add(connectionId);
@@ -479,7 +593,7 @@ function savedApiCompositeGraphStats(
         Object.entries(customRegistry)) {
         if (!customOwners.has(ownerId)) {
           throw new Error(
-            `${path} contains an orphaned Custom C# graph '${ownerId || "<unnamed>"}'.`
+            `${path} contains an orphaned Custom C# graph.`
           );
         }
         if (
@@ -493,7 +607,7 @@ function savedApiCompositeGraphStats(
           visited.has(customGraph)
         ) {
           throw new Error(
-            `${path} contains an invalid or recursive Custom C# graph '${ownerId || "<unnamed>"}'.`
+            `${path} contains an invalid or recursive Custom C# graph.`
           );
         }
         visited.add(customGraph);
@@ -507,7 +621,7 @@ function savedApiCompositeGraphStats(
             customNodeIds.has(nodeId)
           ) {
             throw new Error(
-              `${path} contains duplicate Custom C# node identity '${nodeId || "<unnamed>"}'.`
+              `${path} contains an invalid or duplicate Custom C# node identity.`
             );
           }
           customNodeIds.add(nodeId);
@@ -525,7 +639,7 @@ function savedApiCompositeGraphStats(
             )
           ) {
             throw new Error(
-              `${path} contains duplicate Custom C# connection identity '${connectionId || "<unnamed>"}'.`
+              `${path} contains an invalid or duplicate Custom C# connection identity.`
             );
           }
           customConnectionIds.add(
@@ -564,7 +678,7 @@ function savedApiCompositeGraphStats(
         Object.keys(registry)) {
         if (!owners.has(ownerId)) {
           throw new Error(
-            `${path} contains an orphaned nested API Composite '${ownerId || "<unnamed>"}'.`
+            `${path} contains an orphaned nested API Composite.`
           );
         }
       }
@@ -573,7 +687,7 @@ function savedApiCompositeGraphStats(
         const nested = registry[ownerId];
         if (!nested) {
           throw new Error(
-            `${path} contains API Composite node '${ownerId || "<unnamed>"}' without an owned graph.`
+            `${path} contains an API Composite node without an owned graph.`
           );
         }
         stats.composites += 1;
@@ -583,7 +697,7 @@ function savedApiCompositeGraphStats(
           `${path}/${String(
             owner.label ||
             owner.parameters?.title ||
-            ownerId
+            "Unnamed Composite"
           )}`
         );
       }
@@ -676,7 +790,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.24.31-compile-only-on-zip";
+    "1.24.90-reliable-folder-direct-dll-build";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -911,7 +1025,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.24.31-compile-only-on-zip&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.24.90-reliable-folder-direct-dll-build&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -3474,6 +3588,15 @@ function savedApiCompositePreSanitizeRemovalPlans(
         plans.push({
           path,
           nodeId: String(node.id || ""),
+          nodeName:
+            savedApiCompositeHumanNodeName(
+              node,
+              null,
+              "Unavailable API"
+            ),
+          operatorId: String(
+            node.operatorId || ""
+          ),
           removeNode: true
         });
       }
@@ -3564,10 +3687,11 @@ function savedApiCompositeOmissionDetails(
         nodeName: String(
           existing?.nodeName ||
           raw?.nodeName ||
-          raw?.label ||
-          nodeId ||
-          raw?.operatorId ||
-          "Unavailable API node"
+          savedApiCompositeVisibleText(
+            raw?.label,
+            [nodeId, raw?.operatorId]
+          ) ||
+          "Unavailable API"
         ),
         operatorId: String(
           existing?.operatorId ||
@@ -8163,7 +8287,7 @@ function buildApiCompositeExtensionCandidate(
         ];
       if (!owned) {
         throw new Error(
-          `The nested API Composite '${peerId}' has no complete owned graph.`
+          "A nested API Composite has no complete owned graph."
         );
       }
       internalOwnedGraphs[peerId] =
@@ -8195,7 +8319,7 @@ function buildApiCompositeExtensionCandidate(
         )
       ) {
         throw new Error(
-          `The extended API Composite would contain an invalid or duplicate node identity '${nodeId || "<unnamed>"}'.`
+          "The extended API Composite would contain an invalid or duplicate node identity."
         );
       }
       internalNodeById.set(nodeId, node);
@@ -8249,7 +8373,7 @@ function buildApiCompositeExtensionCandidate(
         )
       ) {
         throw new Error(
-          `The existing API Composite boundary '${boundary.id}' no longer resolves to an internal port.`
+          `The existing API Composite boundary '${savedApiCompositeVisibleText(boundary.label, [boundary.id]) || "Unnamed port"}' no longer resolves to an internal port.`
         );
       }
       boundaryByEndpoint.set(
@@ -8303,7 +8427,7 @@ function buildApiCompositeExtensionCandidate(
       );
       if (!node || !specification) {
         throw new Error(
-          `Cannot expose missing ${direction} port '${nodeId}.${portId}'.`
+          `Cannot expose missing ${direction} port '${savedApiCompositeHumanNodeName(node, definition)} · ${savedApiCompositeVisibleText(portId) || "Port"}'.`
         );
       }
       const concreteType =
@@ -8323,7 +8447,7 @@ function buildApiCompositeExtensionCandidate(
         ),
         direction,
         label:
-          `${node.label || definition?.title || node.operatorId} · ${specification.label || portId}`
+          `${savedApiCompositeHumanNodeName(node, definition)} · ${savedApiCompositeVisibleText(specification.label || portId) || "Port"}`
             .slice(0, 160),
         type: String(
           concreteType || ""
@@ -8415,7 +8539,7 @@ function buildApiCompositeExtensionCandidate(
         )
       ) {
         throw new Error(
-          `The extended API Composite would contain a duplicate connection identity '${connectionId || "<unnamed>"}'.`
+          "The extended API Composite would contain an invalid or duplicate connection identity."
         );
       }
       materializedById.set(
@@ -8451,7 +8575,7 @@ function buildApiCompositeExtensionCandidate(
         )
       ) {
         throw new Error(
-          `The API Composite branch route '${connectionId}' is invalid.`
+          "An API Composite branch route is invalid."
         );
       }
       connection.branchFrom = {
@@ -9088,7 +9212,7 @@ function createApiCompositeFromSelection() {
         );
       if (!boundary) {
         throw new Error(
-          `Cannot expose missing ${direction} port '${nodeId}.${portId}'.`
+          `Cannot expose a missing ${direction} port.`
         );
       }
       boundaries.push(boundary);
@@ -10480,7 +10604,7 @@ function savedApiCompositeRecordsFromJson(
       }
       if (importedIds.has(record.id)) {
         throw new Error(
-          `Saved API Composite JSON contains duplicate template identity '${record.id}'. Nothing was imported.`
+          "Saved API Composite JSON contains a duplicate template identity. Nothing was imported."
         );
       }
       importedIds.add(record.id);
@@ -10540,7 +10664,7 @@ async function confirmSavedApiCompositeUpdate(
               ? window.RMLI18n.t("ui.literal.53a401cc672c")
             : window.RMLI18n.t("ui.literal.b74ddf09775f"),
         details:
-          `Existing: ${existing.composite.nodes.length.toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${existing.composite.connections.length.toLocaleString(window.RMLI18n?.language || undefined)} connections. Imported: ${incoming.composite.nodes.length.toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${incoming.composite.connections.length.toLocaleString(window.RMLI18n?.language || undefined)} connections.${matchedByName ? ` Existing identity: ${existing.id}. Imported identity: ${incoming.id}.` : ""}${legacyFingerprint ? ` Generated fingerprint: ${incoming.contentFingerprint}.` : ""}${duplicateCount > 0 ? ` ${duplicateCount.toLocaleString(window.RMLI18n?.language || undefined)} duplicate Saved Composite entr${duplicateCount === 1 ? "y" : "ies"} with this exact normalized name will be consolidated into the retained identity.` : ""} After the library update, matching placed graph instances are offered for replacement separately.`,
+          `Existing: ${existing.composite.nodes.length.toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${existing.composite.connections.length.toLocaleString(window.RMLI18n?.language || undefined)} connections. Imported: ${incoming.composite.nodes.length.toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${incoming.composite.connections.length.toLocaleString(window.RMLI18n?.language || undefined)} connections.${duplicateCount > 0 ? ` ${duplicateCount.toLocaleString(window.RMLI18n?.language || undefined)} duplicate Saved Composite entr${duplicateCount === 1 ? "y" : "ies"} with this exact normalized name will be consolidated into the retained identity.` : ""} After the library update, matching placed graph instances are offered for replacement separately.`,
         confirmLabel:
           window.RMLI18n.t("ui.literal.fdc53a8e7d75"),
         cancelLabel:
@@ -11116,9 +11240,7 @@ function scheduleSavedApiCompositeCatalogReconciliation() {
             nodeName:
               String(
                 omitted?.nodeName ||
-                omitted?.nodeId ||
-                omitted?.operatorId ||
-                "Unavailable API node"
+                "Unavailable API"
               ),
             operatorId:
               String(
@@ -12441,7 +12563,7 @@ function remapSavedApiCompositeGraph(
         !remappedOwner
       ) {
         throw new Error(
-          `Nested API Composite '${ownerId || "<unnamed>"}' has no matching owner node.`
+          "A nested API Composite has no matching owner node."
         );
       }
       const remappedNested =
@@ -13848,7 +13970,7 @@ function pruneSavedApiCompositeDanglingAncestorBoundaries(
               )
             ) {
               throw new Error(
-                `Exact Library replacement would remove connected Composite ${boundary.direction} port '${boundary.label || boundary.id}'. The confirmed topology-removal mode is required before its outward wires can be removed. Nothing was replaced.`
+                `Exact Library replacement would remove connected Composite ${boundary.direction} port '${savedApiCompositeVisibleText(boundary.label, [boundary.id]) || "Unnamed port"}'. The confirmed topology-removal mode is required before its outward wires can be removed. Nothing was replaced.`
               );
             }
             removed += 1;
@@ -14171,7 +14293,7 @@ function buildSavedApiCompositeReplacementCandidate(
         !previousComposite
       ) {
         throw new Error(
-          `Placed Composite '${sourceOwner.label || sourceOwner.id}' no longer has a complete owned graph. Nothing was replaced.`
+          `Placed Composite '${savedApiCompositeHumanNodeName(sourceOwner, null, "Unnamed Composite")}' no longer has a complete owned graph. Nothing was replaced.`
         );
       }
 
@@ -14307,6 +14429,11 @@ function buildSavedApiCompositeReplacementCandidate(
           node => [node.id, node]
         )
       );
+      const previousNodeById = new Map(
+        previousComposite.nodes.map(
+          node => [node.id, node]
+        )
+      );
       const replacementBoundaryIndex =
         savedApiCompositeReplacementBoundaryIndex(
           replacement.composite
@@ -14355,7 +14482,7 @@ function buildSavedApiCompositeReplacementCandidate(
           replacementNodeById.get(newNodeId);
         if (!newNode) {
           throw new Error(
-            `A connected node '${previousNodeId}' cannot be mapped losslessly. Nothing was replaced.`
+            `Connected node '${savedApiCompositeHumanNodeName(previousNodeById.get(previousNodeId), null, "Unknown node")}' cannot be mapped losslessly. Nothing was replaced.`
           );
         }
         const endpointKey =
@@ -14369,7 +14496,7 @@ function buildSavedApiCompositeReplacementCandidate(
           !allowTopologyDisconnects
         ) {
           throw new Error(
-            `Exact Library replacement would remove connected Composite ${direction} port '${preferredBoundary?.label || preferredBoundary?.id || portId}'. The confirmed topology-removal mode is required before its outward wires can be removed. Nothing was replaced.`
+            `Exact Library replacement would remove connected Composite ${direction} port '${savedApiCompositeVisibleText(preferredBoundary?.label, [preferredBoundary?.id, portId]) || "Unnamed port"}'. The confirmed topology-removal mode is required before its outward wires can be removed. Nothing was replaced.`
           );
         }
         if (!boundary) return null;
@@ -14413,14 +14540,14 @@ function buildSavedApiCompositeReplacementCandidate(
             return null;
           }
           throw new Error(
-            `API Composite ${direction} '${boundaryId}' is unavailable. Nothing was replaced.`
+            `An API Composite ${direction} port is unavailable. Nothing was replaced.`
           );
         }
         if (allowTopologyDisconnects) {
           return null;
         }
         throw new Error(
-          `Exact Library replacement cannot preserve connected Composite ${direction} port '${boundary.label || boundary.id}' because the new real contract does not contain it. Nothing was replaced.`
+          `Exact Library replacement cannot preserve connected Composite ${direction} port '${savedApiCompositeVisibleText(boundary.label, [boundary.id]) || "Unnamed port"}' because the new real contract does not contain it. Nothing was replaced.`
         );
       };
 
@@ -14645,7 +14772,7 @@ function buildSavedApiCompositeReplacementCandidate(
               )
           ) {
             throw new Error(
-              `Mapped Saved Composite connection '${connectionId}' is unavailable after remapping. Nothing was replaced.`
+              "A mapped Saved Composite connection is unavailable after remapping. Nothing was replaced."
             );
           }
           continue;
@@ -14764,7 +14891,7 @@ function buildSavedApiCompositeReplacementCandidate(
             )
           ) {
             throw new Error(
-              `Branch route '${oldChildId}' cannot be mapped losslessly. Nothing was replaced.`
+              "A branch route cannot be mapped losslessly. Nothing was replaced."
             );
           }
           continue;
@@ -14782,7 +14909,7 @@ function buildSavedApiCompositeReplacementCandidate(
             )
           ) {
             throw new Error(
-              `Branch point '${oldChildId}' cannot be restored in its parent graph. Nothing was replaced.`
+              "A branch point cannot be restored in its parent graph. Nothing was replaced."
             );
           }
           childConnection.branchFrom = {
@@ -14831,7 +14958,7 @@ function buildSavedApiCompositeReplacementCandidate(
                 )
               ) {
                 throw new Error(
-                  `Branch point '${oldChildId}' cannot be mapped losslessly. Nothing was replaced.`
+                  "A branch point cannot be mapped losslessly. Nothing was replaced."
                 );
               }
               continue;
@@ -14881,7 +15008,7 @@ function buildSavedApiCompositeReplacementCandidate(
             if (!oldBoundary) {
               if (!allowTopologyDisconnects) {
                 throw new Error(
-                  `Composite ${boundary.direction} port '${boundary.label || boundary.id}' points to a missing child port. Confirm the replacement warning before its outward chain is disconnected. Nothing was replaced.`
+                  `Composite ${boundary.direction} port '${savedApiCompositeVisibleText(boundary.label, [boundary.id]) || "Unnamed port"}' points to a missing child port. Confirm the replacement warning before its outward chain is disconnected. Nothing was replaced.`
                 );
               }
               return null;
@@ -14894,7 +15021,7 @@ function buildSavedApiCompositeReplacementCandidate(
             if (!endpoint) {
               if (!allowTopologyDisconnects) {
                 throw new Error(
-                  `Exact Library replacement removes Composite ${boundary.direction} port '${boundary.label || boundary.id}'. Confirm the replacement warning before its outward chain is disconnected. Nothing was replaced.`
+                  `Exact Library replacement removes Composite ${boundary.direction} port '${savedApiCompositeVisibleText(boundary.label, [boundary.id]) || "Unnamed port"}'. Confirm the replacement warning before its outward chain is disconnected. Nothing was replaced.`
                 );
               }
               return null;
@@ -15018,7 +15145,7 @@ function buildSavedApiCompositeReplacementCandidate(
               ];
           if (!nested) {
             throw new Error(
-              `Promoted nested Composite '${node.id}' lost its owned graph. Nothing was replaced.`
+            "A promoted nested Composite lost its owned graph. Nothing was replaced."
             );
           }
           level.registry[node.id] =
@@ -15149,7 +15276,7 @@ function buildSavedApiCompositeReplacementCandidate(
       disconnectedConnectionIds) {
       if (expandedById.has(connectionId)) {
         throw new Error(
-          `Wire '${connectionId}' was approved for removal but remains in the replacement candidate. Nothing was replaced.`
+          "A wire approved for removal remains in the replacement candidate. Nothing was replaced."
         );
       }
     }
@@ -15164,7 +15291,7 @@ function buildSavedApiCompositeReplacementCandidate(
         ) !== points
       ) {
         throw new Error(
-          `Wire '${connectionId}' could not be preserved exactly. Nothing was replaced.`
+          "A wire could not be preserved exactly. Nothing was replaced."
         );
       }
     }
@@ -15172,7 +15299,7 @@ function buildSavedApiCompositeReplacementCandidate(
       preservedBranchConnectionIds) {
       if (!expandedById.get(connectionId)?.branchFrom) {
         throw new Error(
-          `Branch route '${connectionId}' could not be preserved. Nothing was replaced.`
+          "A branch route could not be preserved. Nothing was replaced."
         );
       }
     }
@@ -15873,7 +16000,7 @@ async function applySavedApiCompositeVersion(
         ) !== targetTokens.get(ownerId)
       ) {
         throw new Error(
-          `Placed Composite '${owner.label || ownerId}' changed while replacement confirmation was open. Nothing was replaced.`
+          `Placed Composite '${savedApiCompositeHumanNodeName(owner, null, "Unnamed Composite")}' changed while replacement confirmation was open. Nothing was replaced.`
         );
       }
     }
@@ -16973,7 +17100,7 @@ function setSavedApiCompositeIcon(
     const namespace =
       "http://www.w3.org/2000/svg";
     const href =
-      `assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-${normalizedIconName}`;
+      `assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${normalizedIconName}`;
     const existingSvg =
       element.firstElementChild;
     const existingUse =
@@ -17566,7 +17693,7 @@ function createSavedApiCompositePaletteItem(
     const add =
       document.createElement("small");
     if (!compatibilityIssue && !currentOpen && savedCompositeAvailable) {
-      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-add"></use></svg>`;
+      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-add"></use></svg>`;
     } else {
       add.textContent = compatibilityIssue ? "!" : currentOpen ? window.RMLI18n.t("composite.library.status_open") : "·";
     }
@@ -17630,7 +17757,7 @@ function createSavedApiCompositePaletteItem(
     const exportButton =
       document.createElement("button");
     exportButton.type = "button";
-    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-download"></use></svg>`;
+    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-download"></use></svg>`;
     exportButton.title =
       window.RMLI18n.format("composite.actions.export_title", { name: record.name });
     exportButton.addEventListener(
@@ -17689,7 +17816,7 @@ function createSavedApiCompositePaletteItem(
     const deleteButton =
       document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-close"></use></svg>`;
+    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-close"></use></svg>`;
     deleteButton.title =
       window.RMLI18n.format("composite.actions.delete_title", { name: record.name });
     deleteButton.addEventListener(
@@ -17718,7 +17845,7 @@ function createSavedApiCompositePaletteItem(
     const menuTrigger = document.createElement("button");
     menuTrigger.type = "button";
     menuTrigger.className = "rml-saved-api-composite-menu-trigger";
-    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-more"></use></svg>`;
+    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-more"></use></svg>`;
     menuTrigger.setAttribute("aria-haspopup", "menu");
     menuTrigger.setAttribute("aria-expanded", "false");
     menuTrigger.setAttribute(
@@ -17824,7 +17951,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.24.31-compile-only-on-zip",
+      "1.24.90-reliable-folder-direct-dll-build",
     writable: false,
     enumerable: true,
     configurable: true

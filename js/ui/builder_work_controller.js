@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.24.31-compile-only-on-zip";
+    "1.24.90-reliable-folder-direct-dll-build";
   let installedController = null;
 
   if (

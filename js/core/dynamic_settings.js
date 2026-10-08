@@ -74,6 +74,38 @@
       .filter(item => item.id);
   }
 
+  function monitorDisplayRecords(monitors) {
+    const records = Array.isArray(monitors)
+      ? monitors
+      : [];
+    const labelCounts = new Map();
+    for (const monitor of records) {
+      const label = String(
+        monitor?.label || "Display Value"
+      ).trim() || "Display Value";
+      labelCounts.set(
+        label,
+        (labelCounts.get(label) || 0) + 1
+      );
+    }
+    const labelOrdinals = new Map();
+    return records.map(monitor => {
+      const label = String(
+        monitor?.label || "Display Value"
+      ).trim() || "Display Value";
+      const ordinal =
+        (labelOrdinals.get(label) || 0) + 1;
+      labelOrdinals.set(label, ordinal);
+      return {
+        ...monitor,
+        displayLabel:
+          labelCounts.get(label) > 1
+            ? `${label} (${ordinal})`
+            : label
+      };
+    });
+  }
+
   function sanitizeIdentifier(value, fallback) {
     let result = String(value || "")
       .replace(/[^A-Za-z0-9_]/g, "_")
@@ -302,10 +334,11 @@
     empty.value = "";
     empty.textContent = window.RMLI18n.t("{{i18n:js.presentation.644de7c01848}}");
     select.appendChild(empty);
-    for (const monitor of monitorNodes()) {
+    for (const monitor of
+      monitorDisplayRecords(monitorNodes())) {
       const option = document.createElement("option");
       option.value = monitor.id;
-      option.textContent = `${monitor.label} · ${monitor.id}`;
+      option.textContent = monitor.displayLabel;
       option.selected = monitor.id === value;
       select.appendChild(option);
     }
@@ -1472,7 +1505,7 @@
         previousButton.type = "button";
         previousButton.className =
           "rml-preview-control rml-preview-enum-step";
-        previousButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-triangle-left"></use></svg>`;
+        previousButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-triangle-left"></use></svg>`;
         previousButton.setAttribute(
           "aria-label",
           window.RMLI18n.t("{{i18n:js.presentation.5caa1fc4e7c2}}")
@@ -1484,7 +1517,7 @@
         nextButton.type = "button";
         nextButton.className =
           "rml-preview-control rml-preview-enum-step";
-        nextButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-triangle-right"></use></svg>`;
+        nextButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-triangle-right"></use></svg>`;
         nextButton.setAttribute(
           "aria-label",
           window.RMLI18n.t("{{i18n:js.presentation.c400ec237248}}")
@@ -2815,7 +2848,7 @@ csString(graphClass)]);
 
       const plus =
         document.createElement("b");
-      plus.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-add"></use></svg>`;
+      plus.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-add"></use></svg>`;
 
       button.append(
         badge,

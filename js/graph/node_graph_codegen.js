@@ -569,12 +569,30 @@ function canonicalCollectListTypeInformation(
         String(value || "").trim()
       )
       .filter(Boolean))];
+    const readableLabel =
+      generatedVisibleText(
+        information.label
+      ) ||
+      generatedVisibleText(
+        information.csType
+      ) ||
+      generatedVisibleText(id) ||
+      "Unknown type";
+    const readableShort =
+      generatedVisibleText(
+        information.short
+      ) ||
+      readableLabel
+        .split(/[.<]/)
+        .filter(Boolean)
+        .pop()
+        ?.slice(0, 4)
+        .toUpperCase() ||
+      "TYPE";
 
     return {
-      label: information.label || id,
-      short:
-        information.short ||
-        id.slice(0, 4).toUpperCase(),
+      label: readableLabel,
+      short: readableShort,
       color:
         information.color || "#9da8b4",
       ...information,
@@ -681,6 +699,13 @@ function typeLabel(type) {
 
     if (type.startsWith("enum:")) {
       return `Enum<${type.slice(5)}>`;
+    }
+
+    const displayed =
+      window.RMLModNodeRegistry
+        ?.displayType?.(type);
+    if (displayed) {
+      return displayed;
     }
 
     return typeInfo(type).label;
@@ -1923,6 +1948,7 @@ function defaultGraphState() {
         history: []
       },
       integratedNodeCompatibility: null,
+      portableTypeContracts: [],
       customCSharpFiles: {},
       apiCompositeGraphs: {},
       nodes: [],
@@ -2666,7 +2692,10 @@ function forwardedApiCompositeBoundary(
         owner?.parameters?.title ||
         "API Composite"
       )} · ${String(
-        boundary.label || boundary.id
+        generatedVisibleText(
+          boundary.label,
+          [boundary.id]
+        ) || "Unnamed port"
       )}`.slice(0, 160),
       type: String(
         boundary.type || ""
@@ -3009,11 +3038,10 @@ function apiCompositeSynchronizedBoundaryLabel(
       ? nodeDefinition(node)
       : null;
     const nodeTitle = String(
-      node?.label ||
-      node?.parameters?.title ||
-      definition?.title ||
-      node?.operatorId ||
-      "Node"
+      generatedHumanNodeName(
+        node,
+        definition
+      )
     );
     const portTitle = String(
       specification?.label ||
@@ -4644,9 +4672,10 @@ function apiCompositePortDescriptor(
         bindings || new Map()
       ) || reference.spec.type || "";
     const nodeTitle =
-      reference.node.label ||
-      reference.definition?.title ||
-      reference.node.operatorId;
+      generatedHumanNodeName(
+        reference.node,
+        reference.definition
+      );
 
     return {
       id: proxyId,
@@ -4728,7 +4757,7 @@ function expandApiCompositeGraphDocument(
             ownedNodeIds.has(nodeId)
           ) {
             throw new Error(
-              `API Composite hierarchy contains duplicate node identity '${nodeId || "<unnamed>"}'.`
+              "API Composite hierarchy contains an invalid or duplicate node identity."
             );
           }
           ownedNodeIds.add(nodeId);
@@ -4745,7 +4774,7 @@ function expandApiCompositeGraphDocument(
             )
           ) {
             throw new Error(
-              `API Composite hierarchy contains duplicate connection identity '${connectionId || "<unnamed>"}'.`
+              "API Composite hierarchy contains an invalid or duplicate connection identity."
             );
           }
           ownedConnectionIds.add(
@@ -4775,7 +4804,7 @@ function expandApiCompositeGraphDocument(
           Object.keys(composites)) {
           if (!containerIds.has(ownerId)) {
             throw new Error(
-              `${path} contains an orphaned API Composite graph '${ownerId || "<unnamed>"}'.`
+              `${path} contains an orphaned API Composite graph.`
             );
           }
         }
@@ -4980,7 +5009,7 @@ function expandApiCompositeGraphDocument(
       const nodeId = String(node?.id || "");
       if (!nodeId || usedNodeIds.has(nodeId)) {
         throw new Error(
-          `Expanded API Composite graph contains duplicate node identity '${nodeId || "<unnamed>"}'.`
+          "Expanded API Composite graph contains an invalid or duplicate node identity."
         );
       }
       usedNodeIds.add(nodeId);
@@ -4998,7 +5027,7 @@ function expandApiCompositeGraphDocument(
         )
       ) {
         throw new Error(
-          `Expanded API Composite graph contains duplicate connection identity '${connectionId || "<unnamed>"}'.`
+          "Expanded API Composite graph contains an invalid or duplicate connection identity."
         );
       }
       usedConnectionIds.add(
@@ -5970,6 +5999,36 @@ function sanitizeGraphState(
       return result;
     }
 
+    const normalizePortableTypeContracts =
+      window.RMLGraphTypeImportMigrations
+        ?.normalizedTypeContracts;
+    if (
+      Array.isArray(
+        raw.portableTypeContracts
+      ) &&
+      typeof normalizePortableTypeContracts ===
+        "function"
+    ) {
+      const normalizedPortableTypes =
+        normalizePortableTypeContracts(
+          raw.portableTypeContracts
+        );
+      if (
+        Array.isArray(
+          normalizedPortableTypes
+            ?.conflicts
+        ) &&
+        normalizedPortableTypes
+          .conflicts.length === 0
+      ) {
+        result.portableTypeContracts =
+          nodeGraphClone(
+            normalizedPortableTypes
+              .contracts || []
+          );
+      }
+    }
+
     result.active =
       raw.active === true;
 
@@ -6218,25 +6277,12 @@ function sanitizeGraphState(
         "harmony.patchArgument": ["harmony.readPatchValue", "argument"],
         "harmony.patchResult": ["harmony.readPatchValue", "result"],
         "harmony.setArgument": ["harmony.writePatchValue", "argument"],
-        "harmony.setResult": ["harmony.writePatchValue", "result"],
-        "lifecycle.worldStart": ["lifecycle.harmonyEvent", "worldStart"],
-        "lifecycle.worldDestroy": ["lifecycle.harmonyEvent", "worldDestroy"],
-        "lifecycle.userJoin": ["lifecycle.harmonyEvent", "userJoin"],
-        "lifecycle.userLeave": ["lifecycle.harmonyEvent", "userLeave"],
-        "lifecycle.componentAttach": ["lifecycle.harmonyEvent", "componentAttach"],
-        "lifecycle.componentDestroy": ["lifecycle.harmonyEvent", "componentDestroy"],
-        "lifecycle.engineUpdate": ["lifecycle.harmonyEvent", "engineUpdate"]
+        "harmony.setResult": ["harmony.writePatchValue", "result"]
       }[operatorId];
       if (migration) {
         parameters.operation = migration[1];
         if (operatorId === "math.power") {
           migratedRuntimeFamilyPorts.set(nodeId, { input: { value: "a", exponent: "b" } });
-        }
-        if (operatorId.startsWith("lifecycle.") && migration[0] === "lifecycle.harmonyEvent") {
-          parameters.targetTypeOverride = String(parameters.targetType || "");
-          parameters.targetMethodOverride = String(parameters.targetMethod || "");
-          delete parameters.targetType;
-          delete parameters.targetMethod;
         }
         return migration[0];
       }
@@ -6322,6 +6368,16 @@ function sanitizeGraphState(
           typeof source.apiContract === "object" &&
           !Array.isArray(source.apiContract)
             ? nodeGraphClone(source.apiContract)
+            : undefined,
+        csharpMigrationProvenance:
+          kind === "operator" &&
+          operatorId.startsWith("csharp.") &&
+          source.csharpMigrationProvenance &&
+          typeof source.csharpMigrationProvenance === "object" &&
+          !Array.isArray(source.csharpMigrationProvenance)
+            ? nodeGraphClone(
+                source.csharpMigrationProvenance
+              )
             : undefined,
         x: nodeGraphClamp(
           finiteNumber(source.x, 120),
@@ -7545,11 +7601,15 @@ function resolveNodeDefinition(node) {
             }
           ));
       };
-      const ownerType = String(contract.ownerType || "").trim();
-      const memberName = String(contract.memberName || contract.name || "").trim();
-      const displayName = [ownerType, memberName].filter(Boolean).join(".") || String(node.operatorId || "API");
+      const displayName =
+        generatedApiContractDisplayName(
+          contract
+        );
       definition = {
-        title: `Unavailable API · ${displayName}`,
+        title:
+          displayName === "Unavailable API"
+            ? displayName
+            : `Unavailable API · ${displayName}`,
         group: window.RMLI18n.t("ui.literal.4a92312d7f7c"),
         symbol: "API?",
         description: window.RMLI18n.t("ui.auto.59e50ab1fd83"),
@@ -7615,7 +7675,7 @@ function resolveNodeDefinition(node) {
         }
       } catch (error) {
         console.error(
-          `Dynamic node definition failed for ${node.operatorId}.`,
+          `Dynamic node definition failed for '${generatedHumanNodeName(node, definition)}'.`,
           error
         );
       }
@@ -8685,7 +8745,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.24.31-compile-only-on-zip",
+        "1.24.90-reliable-folder-direct-dll-build",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8718,7 +8778,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.24.31-compile-only-on-zip" &&
+        "1.24.90-reliable-folder-direct-dll-build" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -9236,23 +9296,23 @@ function analyzeConnectionsCore(
         if (!fromRef) {
           missing.push(
             sourceNode
-              ? `source port '${connection.fromPort}' on node '${sourceNode.operatorId || sourceNode.label || sourceNode.id}'`
-              : `source node '${connection.fromNode}'`
+              ? `source port '${connection.fromPort}' on node '${generatedHumanNodeName(sourceNode, nodeDefinition(sourceNode))}'`
+              : "source node"
           );
         }
 
         if (!toRef) {
           missing.push(
             targetNode
-              ? `target port '${connection.toPort}' on node '${targetNode.operatorId || targetNode.label || targetNode.id}'`
-              : `target node '${connection.toNode}'`
+              ? `target port '${connection.toPort}' on node '${generatedHumanNodeName(targetNode, nodeDefinition(targetNode))}'`
+              : "target node"
           );
         }
 
         return {
           valid: false,
           reason:
-            `Connection '${connection.id || "unnamed"}' references a missing ${missing.join(" and ")}: '${connection.fromNode}.${connection.fromPort}' → '${connection.toNode}.${connection.toPort}'.`,
+            `A connection references a missing ${missing.join(" and ")}.`,
           bindings: new Map()
         };
       }
@@ -12236,10 +12296,10 @@ function generatedNodeOriginMarker(
     const origin = {
       nodeId: String(node?.id || ""),
       nodeLabel: String(
-        node?.label ||
-        definition?.title ||
-        node?.id ||
-        "<unnamed>"
+        generatedHumanNodeName(
+          node,
+          definition
+        )
       ),
       operatorId: String(
         node?.operatorId || ""
@@ -12249,6 +12309,173 @@ function generatedNodeOriginMarker(
       )
     };
     return `/*${GENERATED_NODE_ORIGIN_MARKER}${encodeURIComponent(JSON.stringify(origin))}*/`;
+  }
+
+function generatedVisibleText(
+    value,
+    forbiddenValues = []
+  ) {
+    const text = String(value ?? "").trim();
+    if (!text) return "";
+    const forbidden = (Array.isArray(forbiddenValues)
+      ? forbiddenValues
+      : [forbiddenValues]
+    )
+      .map(candidate => String(candidate || "").trim())
+      .filter(Boolean);
+    if (
+      forbidden.some(candidate =>
+        text === candidate ||
+        text.includes(candidate)
+      ) ||
+      /^(?:unavailable\.preserved\.|api\.)/.test(text) ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)
+    ) {
+      return "";
+    }
+    return text;
+  }
+
+function generatedApiContractDisplayName(
+    contract,
+    fallback = "Unavailable API"
+  ) {
+    const source =
+      contract &&
+      typeof contract === "object" &&
+      !Array.isArray(contract)
+        ? contract
+        : {};
+    const ownerType = generatedVisibleText(
+      source.ownerType || source.catalogType
+    );
+    const memberName = generatedVisibleText(
+      source.memberName ||
+      source.catalogMember ||
+      source.name
+    );
+    const qualifiedName = [
+      ownerType,
+      memberName
+    ].filter(Boolean).join(".");
+    const signature = generatedVisibleText(
+      source.signature || source.apiSignature
+    );
+    return qualifiedName ||
+      signature ||
+      ownerType ||
+      fallback;
+  }
+
+function generatedNodeApiContract(
+    node,
+    definition
+  ) {
+    return [
+      definition?.apiVerification,
+      node?.apiContract,
+      definition?.preservedApiContract
+    ].find(candidate =>
+      candidate &&
+      typeof candidate === "object" &&
+      !Array.isArray(candidate)
+    ) || null;
+  }
+
+function generatedHumanNodeName(
+    node,
+    definition = null,
+    fallback = "Unknown node"
+  ) {
+    const forbidden = [
+      node?.id,
+      node?.operatorId
+    ];
+    const contract = generatedNodeApiContract(
+      node,
+      definition
+    );
+    const contractName = generatedApiContractDisplayName(
+      contract,
+      ""
+    );
+    const unavailable =
+      definition?.unavailableApiContract === true ||
+      Boolean(node?.apiContract);
+    const candidates = [
+      node?.label,
+      node?.parameters?.title,
+      unavailable && contractName,
+      definition?.title,
+      contractName
+    ];
+    for (const candidate of candidates) {
+      const readable = generatedVisibleText(
+        candidate,
+        forbidden
+      );
+      if (readable) return readable;
+    }
+    return unavailable
+      ? "Unavailable API"
+      : fallback;
+  }
+
+function generatedHumanNodeKind(
+    node,
+    definition = null
+  ) {
+    const title = generatedVisibleText(
+      definition?.title,
+      [node?.id, node?.operatorId]
+    );
+    if (title) return title;
+    const contractName =
+      generatedApiContractDisplayName(
+        generatedNodeApiContract(
+          node,
+          definition
+        ),
+        ""
+      );
+    if (contractName) return contractName;
+    if (node?.kind === "configuration") {
+      return "Configuration";
+    }
+    return "Unknown node";
+  }
+
+function generatedVisibleDiagnosticReason(
+    value,
+    node = null
+  ) {
+    let text = String(value || "Unknown error.");
+    for (const [identity, replacement] of [
+      [node?.operatorId, "API node"],
+      [node?.id, "this node"]
+    ]) {
+      const token = String(identity || "");
+      if (token) {
+        text = text.split(token).join(replacement);
+      }
+    }
+    return text
+      .replace(
+        /\bunavailable\.preserved\.[A-Za-z0-9_.:-]+/g,
+        "Unavailable API"
+      )
+      .replace(
+        /\bapi\.[A-Za-z0-9_.-]*\.[0-9a-f]{8,}\b/gi,
+        "API node"
+      )
+      .replace(
+        /\b(?:apiEnum[.:]|api:|normal(?:Exact|Array):|collectList:)[A-Za-z0-9_.:<>,\[\]-]+\b/g,
+        "typed value"
+      )
+      .replace(
+        /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi,
+        "internal item"
+      );
   }
 
 function generatedNodeOriginEndMarker() {
@@ -12340,6 +12567,12 @@ function generatedGraphNodeIndexMarkdown(
         node
       ])
     );
+    const nodeOrdinal = new Map(
+      nodes.map((node, index) => [
+        node,
+        index + 1
+      ])
+    );
     const definitionOf = node => {
       try {
         return typeof definitionForNode ===
@@ -12364,7 +12597,7 @@ function generatedGraphNodeIndexMarkdown(
       } catch {
       }
       return generatedNodeIndexTextValue(
-        node?.id || "?"
+        `Node ${nodeOrdinal.get(node) || "?"}`
       );
     };
     const labelOf = node => {
@@ -12378,13 +12611,19 @@ function generatedGraphNodeIndexMarkdown(
           : "";
       return generatedNodeIndexMarkdownValue(
         configuredMethodName ||
-        node?.label ||
-        definitionOf(node)?.title ||
-        node?.operatorId ||
-        node?.id ||
-        "<unnamed>"
+        generatedHumanNodeName(
+          node,
+          definitionOf(node)
+        )
       );
     };
+    const kindOf = node =>
+      generatedNodeIndexMarkdownValue(
+        generatedHumanNodeKind(
+          node,
+          definitionOf(node)
+        )
+      );
     const lines = [
       "# RML Generated Node Index",
       "",
@@ -12398,8 +12637,8 @@ function generatedGraphNodeIndexMarkdown(
         : []),
       `### Nodes (${nodes.length})`,
       "",
-      "| C# token | Node | Type | Node ID | Position |",
-      "| --- | --- | --- | --- | --- |",
+      "| C# token | Node | Kind | Position |",
+      "| --- | --- | --- | --- |",
       ...nodes.map(node => {
         const rawX = node?.x;
         const rawY = node?.y;
@@ -12416,7 +12655,7 @@ function generatedGraphNodeIndexMarkdown(
           Number.isFinite(y)
             ? `${x}, ${y}`
             : "";
-        return `| ${generatedNodeIndexMarkdownCode(tokenOf(node))} | ${labelOf(node)} | ${generatedNodeIndexMarkdownCode(node?.operatorId || node?.kind || "unknown")} | ${generatedNodeIndexMarkdownCode(node?.id || "?")} | ${position ? generatedNodeIndexMarkdownCode(position) : ""} |`;
+        return `| ${generatedNodeIndexMarkdownCode(tokenOf(node))} | ${labelOf(node)} | ${kindOf(node)} | ${position ? generatedNodeIndexMarkdownCode(position) : ""} |`;
       }),
       "",
       `### Connections (${connections.length})`,
@@ -12433,12 +12672,12 @@ function generatedGraphNodeIndexMarkdown(
         const fromToken = fromNode
           ? tokenOf(fromNode)
           : generatedNodeIndexTextValue(
-              connection?.fromNode || "?"
+              "Unknown node"
             );
         const toToken = toNode
           ? tokenOf(toNode)
           : generatedNodeIndexTextValue(
-              connection?.toNode || "?"
+              "Unknown node"
             );
         const fromPort = generatedNodeIndexTextValue(
           connection?.fromPort || "?"
@@ -12460,24 +12699,24 @@ function generatedNodeFailureDiagnostic(
     stage,
     error
   ) {
-    const label = String(
-      node?.label ||
-      definition?.title ||
-      node?.id ||
-      "<unnamed>"
-    );
-    const nodeId = String(node?.id || "?");
-    const operatorId = String(
-      node?.operatorId || "unknown operator"
+    const label = generatedHumanNodeName(
+      node,
+      definition
     );
     const path = String(
       graphPath || "Runtime Graph"
     );
     const reason =
       error instanceof Error
-        ? error.message
-        : String(error);
-    return `Node code generation failed for label '${label}', node ID '${nodeId}', operator ID '${operatorId}', graph path '${path}' during ${stage}: ${reason}`;
+        ? generatedVisibleDiagnosticReason(
+            error.message,
+            node
+          )
+        : generatedVisibleDiagnosticReason(
+            error,
+            node
+          );
+    return `Node code generation failed for '${label}' in graph path '${path}' during ${stage}: ${reason}`;
   }
 
 function extractGeneratedNodeSourceMap(
@@ -12527,8 +12766,7 @@ function extractGeneratedNodeSourceMap(
             ),
             nodeLabel: String(
               origin?.nodeLabel ||
-              origin?.nodeId ||
-              "<unnamed>"
+              "Unknown node"
             ),
             operatorId: String(
               origin?.operatorId || ""
@@ -12618,6 +12856,12 @@ function unresolvedGeneratedMethodCalls(
 
     for (const match of sanitized.matchAll(
       /\b(?:public|private|protected|internal)\s+(?:static\s+)?(?:async\s+)?(?:[\w?.<>[\],]+\s+)+(?<name>[A-Za-z_]\w*)\s*(?:<[^>{};()]+>)?\s*\(/g
+    )) {
+      declarations.add(match.groups.name);
+    }
+
+    for (const match of sanitized.matchAll(
+      /^[ \t]{8,}(?:static[ \t]+)?(?:async[ \t]+)?(?:[\w?.<>[\],]+[ \t]+)+(?<name>[A-Za-z_]\w*)[ \t]*(?:<[^>{};()]+>)?[ \t]*\([^;{}]*\)[ \t]*$/gm
     )) {
       declarations.add(match.groups.name);
     }
@@ -12877,8 +13121,8 @@ function generatedSourceDiagnostics(
     }
 
     if (
-      options.checkGeneratedFieldLiveness !==
-      false
+      options.checkGeneratedFieldLiveness ===
+      true
     ) {
       const fieldProblems =
         generatedPrivateFieldLivenessProblems(
@@ -13261,6 +13505,21 @@ function removeUnreferencedGeneratedFields(
         replaceReads ||
         replaceWrites
       ) {
+        let declarationStart =
+          declaration.index;
+        const declarationPrefix =
+          optimized.slice(
+            0,
+            declarationStart
+          );
+        const threadStaticAttribute =
+          /(^|\n)(    \[System\.ThreadStaticAttribute\]\n)$/.exec(
+            declarationPrefix
+          );
+        if (threadStaticAttribute) {
+          declarationStart -=
+            threadStaticAttribute[2].length;
+        }
         transformations.push({
           name,
           escaped,
@@ -13269,7 +13528,7 @@ function removeUnreferencedGeneratedFields(
             : "",
           replaceReads,
           replaceWrites,
-          start: declaration.index,
+          start: declarationStart,
           end:
             declaration.index +
             declaration[0].length
@@ -14587,9 +14846,10 @@ function buildTypedNodeGraphCSharpContribution(
           issue?.nodeId || ""
         ),
         nodeLabel: String(
-          issue?.nodeLabel ||
-          issue?.nodeId ||
-          "<unnamed>"
+          generatedVisibleText(
+            issue?.nodeLabel,
+            [issue?.nodeId, issue?.operatorId]
+          ) || "API node"
         ),
         operatorId: String(
           issue?.operatorId || ""
@@ -14685,13 +14945,10 @@ function buildTypedNodeGraphCSharpContribution(
       reloadSafetyIssues.push(normalized);
 
       const contractName =
-        [
-          normalized.ownerType,
-          normalized.memberName
-        ]
-          .filter(Boolean)
-          .join(".") ||
-        normalized.operatorId;
+        generatedApiContractDisplayName(
+          normalized,
+          "API contract"
+        );
       const reasonText =
         normalized.reasons.length > 0
           ? normalized.reasons.join(", ")
@@ -14724,12 +14981,12 @@ function buildTypedNodeGraphCSharpContribution(
         !definition
       ) {
         diagnostics.push(
-          `Node '${node?.label || node?.id || "<unnamed>"}' uses unavailable operator '${node?.operatorId || "<missing>"}'. It cannot be exported until that verified node definition is available.`
+          `Node '${generatedHumanNodeName(node, definition)}' uses an unavailable operator. It cannot be exported until a verified node definition is available.`
         );
       } else if (definition?.unavailableApiContract === true) {
         const preserved = definition.preservedApiContract || node.apiContract || {};
         diagnostics.push(
-          `Node '${node?.label || node?.id || "<unnamed>"}' preserves unavailable API '${[preserved.ownerType, preserved.memberName].filter(Boolean).join(".") || node?.operatorId}'. The graph remains editable, but this unresolved runtime path cannot be exported.`
+          `Node '${generatedHumanNodeName(node, definition)}' preserves unavailable API '${generatedApiContractDisplayName(preserved)}'. The graph remains editable, but this unresolved runtime path cannot be exported.`
         );
       }
 
@@ -14849,6 +15106,8 @@ function buildTypedNodeGraphCSharpContribution(
       new Set();
     const extensionFields =
       new Map();
+    const extensionReferencedFields =
+      new Map();
     const extensionMembers =
       new Map();
     const extensionInitializeStatements =
@@ -14900,7 +15159,7 @@ function buildTypedNodeGraphCSharpContribution(
         );
       if (invalid) {
         const message =
-          `Node '${node?.label || definition?.title || node?.id || "<unnamed>"}' [${node?.id || "?"}] (${node?.operatorId || "unknown operator"}) in ${generatedGraphPath} produced an invalid ${fragmentKind} fragment: structural token '${invalid.token}' at fragment line ${invalid.line}, column ${invalid.column}. No code from this node was emitted.`;
+          `Node '${generatedHumanNodeName(node, definition)}' in ${generatedGraphPath} produced an invalid ${fragmentKind} fragment: structural token '${invalid.token}' at fragment line ${invalid.line}, column ${invalid.column}. No code from this node was emitted.`;
         if (!diagnostics.includes(message)) {
           diagnostics.push(message);
         }
@@ -15090,6 +15349,12 @@ function buildTypedNodeGraphCSharpContribution(
       new Map();
     const expressionStack =
       new Set();
+    const expressionContextStack = [];
+    const deferredExtensionCodegen =
+      new Map();
+    let activeLexicalInlineScope = null;
+    const renderedLexicalImpulsePorts =
+      new Set();
 
     const factoredExpressionMethods =
       new Map();
@@ -15192,6 +15457,13 @@ function buildTypedNodeGraphCSharpContribution(
       nodeId,
       portId
     ) => {
+      if (activeLexicalInlineScope) {
+        return activeLexicalInlineScope.request(
+          nodeId,
+          portId
+        );
+      }
+
       const method =
         inlineImpulseMethodByPort.get(
           `${nodeId}:${portId}`
@@ -15202,6 +15474,208 @@ function buildTypedNodeGraphCSharpContribution(
       }
 
       return method;
+    };
+
+    const normalizedOutputBindings = bindings => {
+      const normalized = [];
+      for (const binding of bindings || []) {
+        const nodeId = String(
+          binding?.nodeId || ""
+        );
+        const portId = String(
+          binding?.portId || ""
+        );
+        const code = String(
+          binding?.code || ""
+        ).trim();
+        if (!nodeId || !portId || !code) {
+          continue;
+        }
+        normalized.push({
+          nodeId,
+          portId,
+          code,
+          type: binding?.type || null
+        });
+      }
+      return normalized;
+    };
+
+    const withOutputBindings = (
+      bindings,
+      callback
+    ) => {
+      const overrides = new Map();
+      for (const binding of
+        normalizedOutputBindings(bindings)) {
+        overrides.set(
+          `${binding.nodeId}:${binding.portId}`,
+          {
+            type: binding.type,
+            code: binding.code
+          }
+        );
+      }
+      const context = {
+        overrides,
+        cache: new Map(),
+        stack: new Set()
+      };
+      expressionContextStack.push(context);
+      try {
+        return callback();
+      } finally {
+        expressionContextStack.pop();
+      }
+    };
+
+    const renderLexicalInlineScope = (
+      entryNodeId,
+      entryPortId,
+      bindings,
+      scopeName = "Callback"
+    ) => {
+      renderedLexicalImpulsePorts.add(
+        `${entryNodeId}:${entryPortId}`
+      );
+      const previousScope =
+        activeLexicalInlineScope;
+      const bindingRecords = new Map();
+      const overrides = new Map();
+      for (const binding of
+        normalizedOutputBindings(bindings)) {
+        const key =
+          `${binding.nodeId}:${binding.portId}`;
+        bindingRecords.set(key, binding);
+        overrides.set(key, {
+          type: binding.type,
+          code: binding.code
+        });
+      }
+      const context = {
+        overrides,
+        cache: new Map(),
+        stack: new Set()
+      };
+      const methods = new Map();
+      const pending = [];
+      const localDeclarations = [];
+      const prefix = graphCsMethodToken(
+        scopeName
+      );
+      const scope = {
+        request(nodeId, portId) {
+          const key = `${nodeId}:${portId}`;
+          if (!methods.has(key)) {
+            methods.set(
+              key,
+              `Local${prefix}${graphCsMethodToken(
+                nodeId,
+                portId
+              )}`
+            );
+            pending.push({
+              key,
+              nodeId,
+              portId
+            });
+          }
+          return methods.get(key);
+        },
+        bindOutput(
+          nodeId,
+          portId,
+          type,
+          csType,
+          defaultCode
+        ) {
+          const key = `${nodeId}:${portId}`;
+          const existing = overrides.get(key);
+          if (existing) {
+            return existing.code;
+          }
+          const local =
+            `_lexical${prefix}${graphCsMethodToken(
+              nodeId,
+              portId
+            )}`;
+          const binding = {
+            nodeId: String(nodeId),
+            portId: String(portId),
+            type: type || null,
+            code: local
+          };
+          bindingRecords.set(key, binding);
+          overrides.set(key, {
+            type: binding.type,
+            code: local
+          });
+          context.cache.clear();
+          localDeclarations.push(
+            `${csType} ${local} = ${defaultCode};`
+          );
+          return local;
+        }
+      };
+
+      expressionContextStack.push(context);
+      activeLexicalInlineScope = scope;
+      try {
+        const entryMethod = scope.request(
+          entryNodeId,
+          entryPortId
+        );
+        const declarations = [];
+        for (
+          let index = 0;
+          index < pending.length;
+          index += 1
+        ) {
+          const item = pending[index];
+          const actions = graph.connections
+            .filter(connection =>
+              connection.fromNode === item.nodeId &&
+              connection.fromPort === item.portId
+            )
+            .map(connection =>
+              targetAction(
+                connection,
+                false,
+                true
+              ).immediate
+            )
+            .filter(Boolean);
+          const body = actions.length > 0
+            ? actions
+                .map(action =>
+                  action
+                    .split("\n")
+                    .map(line => `        ${line}`)
+                    .join("\n")
+                )
+                .join("\n")
+            : "        // No connected impulse targets.";
+          declarations.push(
+`    void ${methods.get(item.key)}()
+    {
+${body}
+    }`
+          );
+        }
+        return {
+          entryMethod,
+          declarations:
+            declarations.join("\n\n"),
+          locals:
+            localDeclarations.join("\n    "),
+          bindings:
+            [...bindingRecords.values()]
+        };
+      } finally {
+        activeLexicalInlineScope =
+          previousScope;
+        expressionContextStack.pop();
+      }
     };
 
     const requestEntryMethod = (
@@ -15383,6 +15857,55 @@ function buildTypedNodeGraphCSharpContribution(
           nodeId,
           portId
         ),
+      withOutputBindings,
+      lexicalInlineScope: (
+        nodeId,
+        portId,
+        bindings,
+        scopeName
+      ) =>
+        renderLexicalInlineScope(
+          nodeId,
+          portId,
+          bindings,
+          scopeName
+        ),
+      lexicalOutputBinding: (
+        portId,
+        graphType,
+        defaultCode
+      ) => {
+        if (!activeLexicalInlineScope) {
+          return "";
+        }
+        const type =
+          graphType || "object";
+        return activeLexicalInlineScope.bindOutput(
+          node?.id || "graph",
+          portId,
+          type,
+          graphCsType(type),
+          String(defaultCode || "").trim() ||
+            graphCsDefault(type)
+        );
+      },
+      deferCodegen(key, callback) {
+        const normalizedKey = String(
+          key || ""
+        ).trim();
+        if (
+          normalizedKey &&
+          typeof callback === "function" &&
+          !deferredExtensionCodegen.has(
+            normalizedKey
+          )
+        ) {
+          deferredExtensionCodegen.set(
+            normalizedKey,
+            callback
+          );
+        }
+      },
       token: graphCsMethodToken,
       identifier: graphCsIdentifier,
       escapeString:
@@ -15413,6 +15936,46 @@ function buildTypedNodeGraphCSharpContribution(
             "field"
           )
         );
+      },
+      addReferencedField(
+        key,
+        identifier,
+        code
+      ) {
+        const name = String(
+          identifier || ""
+        ).trim();
+        if (
+          !/^[A-Za-z_][A-Za-z0-9_]*$/.test(
+            name
+          )
+        ) {
+          throw new TypeError(
+            "A referenced field identifier must be a valid C# identifier."
+          );
+        }
+        const normalizedKey = String(
+          key || ""
+        ).trim();
+        if (
+          normalizedKey &&
+          !extensionReferencedFields.has(
+            normalizedKey
+          )
+        ) {
+          extensionReferencedFields.set(
+            normalizedKey,
+            {
+              identifier: name,
+              code: prepareNodeGeneratedCode(
+                node,
+                definition,
+                code,
+                "referenced field"
+              )
+            }
+          );
+        }
       },
       addRuntimeField(
         key,
@@ -15725,12 +16288,28 @@ function buildTypedNodeGraphCSharpContribution(
       portId
     ) => {
       const key = `${nodeId}:${portId}`;
+      const expressionContext =
+        expressionContextStack.at(-1) ||
+        null;
+      const override =
+        expressionContext?.overrides.get(key);
 
-      if (expressionCache.has(key)) {
-        return expressionCache.get(key);
+      if (override) {
+        return override;
       }
 
-      if (expressionStack.has(key)) {
+      const activeExpressionCache =
+        expressionContext?.cache ||
+        expressionCache;
+      const activeExpressionStack =
+        expressionContext?.stack ||
+        expressionStack;
+
+      if (activeExpressionCache.has(key)) {
+        return activeExpressionCache.get(key);
+      }
+
+      if (activeExpressionStack.has(key)) {
         const cycle = {
           type: null,
           code: "default(object)"
@@ -15741,7 +16320,7 @@ function buildTypedNodeGraphCSharpContribution(
         return cycle;
       }
 
-      expressionStack.add(key);
+      activeExpressionStack.add(key);
 
       const node =
         nodeById.get(nodeId);
@@ -16029,7 +16608,7 @@ function buildTypedNodeGraphCSharpContribution(
         );
       if (invalidExpression) {
         const message =
-          `Node '${node?.label || definition?.title || node?.id || "<unnamed>"}' [${node?.id || "?"}] (${node?.operatorId || "unknown operator"}) in ${generatedGraphPath} produced an invalid expression fragment: structural token '${invalidExpression.token}' at fragment line ${invalidExpression.line}, column ${invalidExpression.column}. The expression was rejected.`;
+          `Node '${generatedHumanNodeName(node, definition)}' in ${generatedGraphPath} produced an invalid expression fragment: structural token '${invalidExpression.token}' at fragment line ${invalidExpression.line}, column ${invalidExpression.column}. The expression was rejected.`;
         if (!diagnostics.includes(message)) {
           diagnostics.push(message);
         }
@@ -16038,6 +16617,7 @@ function buildTypedNodeGraphCSharpContribution(
       if (
         node &&
         outputSpec &&
+        !expressionContext &&
         canFactorGeneratedExpression(code, csType)
       ) {
         const helperName =
@@ -16062,8 +16642,8 @@ function buildTypedNodeGraphCSharpContribution(
         type,
         code
       };
-      expressionStack.delete(key);
-      expressionCache.set(key, result);
+      activeExpressionStack.delete(key);
+      activeExpressionCache.set(key, result);
       return result;
     };
 
@@ -16100,6 +16680,8 @@ function buildTypedNodeGraphCSharpContribution(
       });
 
     const impulseOutputs = [];
+    const requiredCollectedLexicalImpulsePorts =
+      [];
 
     for (const node of graph.nodes) {
       const definition =
@@ -16111,6 +16693,15 @@ function buildTypedNodeGraphCSharpContribution(
       ) {
         const concreteType =
           resolvedType(node, spec);
+        const lexicalImpulseOnly =
+          concreteType === "impulse" &&
+          Array.isArray(
+            definition
+              ?.codegenLexicalImpulseOutputs
+          ) &&
+          definition
+            .codegenLexicalImpulseOutputs
+            .includes(spec.id);
         const reactiveConfiguration =
           node.kind ===
             "configuration" &&
@@ -16154,7 +16745,23 @@ function buildTypedNodeGraphCSharpContribution(
           );
 
         if (
-          impulseConnected ||
+          lexicalImpulseOnly &&
+          impulseConnected &&
+          typeof definition?.codegenCollect ===
+            "function"
+        ) {
+          requiredCollectedLexicalImpulsePorts.push({
+            node,
+            spec,
+            key: `${node.id}:${spec.id}`
+          });
+        }
+
+        if (
+          (
+            impulseConnected &&
+            !lexicalImpulseOnly
+          ) ||
           reactiveConfigurationConnected
         ) {
           impulseOutputs.push({
@@ -16696,6 +17303,12 @@ function buildTypedNodeGraphCSharpContribution(
       );
     };
 
+    const runtimeFailureOrdinal = node =>
+      Math.max(
+        1,
+        graph.nodes.indexOf(node) + 1
+      );
+
     const impulseMethodEntries =
       impulseOutputs.map(item => {
         const sourceRef = {
@@ -16765,7 +17378,7 @@ function buildTypedNodeGraphCSharpContribution(
 
         const failureSource =
           graphCsEscapeString(
-            `Impulse ${item.node.operatorId}:${item.spec.id}`
+            `Impulse ${generatedHumanNodeName(item.node, sourceRef.definition)} #${runtimeFailureOrdinal(item.node)} · ${generatedVisibleText(item.spec.label || item.spec.id) || "Output"}`
           );
 
         return {
@@ -16976,7 +17589,7 @@ configurationButtonCases.length > 0
 
         if (!connection) {
           return guardedRuntimeStatement(
-            `Display ${node.id}`,
+            `Display ${generatedHumanNodeName(node, nodeDefinition(node))} #${index + 1}`,
             `PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "unknown", "<not connected>");`
           );
         }
@@ -16993,12 +17606,12 @@ configurationButtonCases.length > 0
           );
 
         return guardedRuntimeStatement(
-          `Display ${node.id}`,
+          `Display ${generatedHumanNodeName(node, nodeDefinition(node))} #${index + 1}`,
           `PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "${graphType}", ${expression.code});`
         );
       });
 
-    for (const item of configurationFields) {
+    for (const [configurationIndex, item] of configurationFields.entries()) {
       const monitorId =
         `configuration:${graphCsEscapeString(item.node.id)}`;
       const label = graphCsEscapeString(
@@ -17006,7 +17619,7 @@ configurationButtonCases.length > 0
       );
       displayStatements.push(
         guardedRuntimeStatement(
-          `Configuration ${item.node.id}`,
+          `Configuration ${generatedHumanNodeName(item.node, nodeDefinition(item.node))} #${configurationIndex + 1}`,
           item.type === "colorX"
             ? `PublishRuntimeColorBridge("${monitorId}", "${label}", ${item.getter}());`
             : `PublishRuntimeBridge("${monitorId}", "${label}", "configuration", ${item.getter}());`
@@ -17040,7 +17653,7 @@ configurationButtonCases.length > 0
 
       displayStatements.push(
         guardedRuntimeStatement(
-          `Impulse display ${node.id}`,
+          `Impulse display ${generatedHumanNodeName(node, nodeDefinition(node))} #${index + 1}`,
           `PublishDisplay("${graphCsEscapeString(node.id)}", "${graphCsEscapeString(label)}", "impulse", System.Threading.Interlocked.Read(ref _impulseCount${token}));`
         )
       );
@@ -17516,6 +18129,33 @@ item.backing]);
     }`;
         })
         .join("\n\n");
+    for (const deferred of
+      deferredExtensionCodegen.values()) {
+      try {
+        deferred();
+      } catch (error) {
+        diagnostics.push(
+          `Deferred extension C# generation failed: ${
+            error instanceof Error
+              ? error.message
+              : String(error)
+          }`
+        );
+      }
+    }
+    for (const item of
+      requiredCollectedLexicalImpulsePorts) {
+      if (
+        renderedLexicalImpulsePorts.has(
+          item.key
+        )
+      ) {
+        continue;
+      }
+      diagnostics.push(
+        `Connected lexical impulse output '${item.node.id}.${item.spec.id}' was not emitted by its collector. The generated callback would silently discard graph flow.`
+      );
+    }
     const storeFieldsCode =
       storeFields
         .map(item =>
@@ -17558,47 +18198,8 @@ item.backing]);
       configurationFields.some(
         item => item.type === "colorX"
       )
-        ? `    private static readonly FieldInfo? _runtimeColorProfileField =
-        typeof(colorX)
-            .GetFields(
-                BindingFlags.Instance |
-                BindingFlags.Public |
-                BindingFlags.NonPublic)
-            .FirstOrDefault(field =>
-                field.FieldType == typeof(ColorProfile));
-
-    private static readonly PropertyInfo? _runtimeColorProfileProperty =
-        typeof(colorX)
-            .GetProperties(
-                BindingFlags.Instance |
-                BindingFlags.Public |
-                BindingFlags.NonPublic)
-            .FirstOrDefault(property =>
-                property.PropertyType == typeof(ColorProfile) &&
-                property.GetIndexParameters().Length == 0);
-
-    private static ColorProfile RuntimeColorProfile(colorX value)
-    {
-        try
-        {
-            object boxed = value;
-
-            if (_runtimeColorProfileField?.GetValue(boxed) is ColorProfile fieldProfile)
-            {
-                return fieldProfile;
-            }
-
-            if (_runtimeColorProfileProperty?.GetValue(boxed) is ColorProfile propertyProfile)
-            {
-                return propertyProfile;
-            }
-        }
-        catch
-        {
-        }
-
-        return ColorProfile.Linear;
-    }
+        ? `    private static ColorProfile RuntimeColorProfile(colorX value) =>
+        value.Profile;
 
     private static object RuntimeColorChannel(float value) =>
         float.IsNaN(value) || float.IsInfinity(value)
@@ -17679,13 +18280,11 @@ item.backing]);
           )
           .join("\n");
     const reloadWarningSummary = issue => {
-      const contractName = [
-        issue.ownerType,
-        issue.memberName
-      ]
-        .filter(Boolean)
-        .join(".") ||
-        issue.operatorId;
+      const contractName =
+        generatedApiContractDisplayName(
+          issue,
+          "API contract"
+        );
       const reasons =
         issue.reasons.length > 0
           ? issue.reasons.join(", ")
@@ -17928,15 +18527,56 @@ generatedRuntimeMembersCode ? `\n\n${generatedRuntimeMembersCode}` : ""]);
           source,
           extensionFiles.map(
             file => file?.content || ""
-          )
+            )
         );
-      source =
-        removeUnreferencedGeneratedFields(
-          source,
-          extensionFiles.map(
-            file => file?.content || ""
-          )
-        );
+      if (extensionReferencedFields.size > 0) {
+        const sanitizedSource =
+          sanitizeGeneratedCSharp(source);
+        const referencedFieldsCode =
+          [...extensionReferencedFields.values()]
+            .filter(item =>
+              new RegExp(
+                `\\b${item.identifier.replace(
+                  /[.*+?^${}()|[\]\\]/g,
+                  "\\$&"
+                )}\\b`
+              ).test(sanitizedSource)
+            )
+            .map(item =>
+              item.code
+                .split("\n")
+                .map(line =>
+                  line.length > 0
+                    ? `    ${line}`
+                    : ""
+                )
+                .join("\n")
+            )
+            .join("\n\n");
+        if (referencedFieldsCode) {
+          const classOpening =
+            `internal static partial class ${graphClassName}\n{`;
+          source = source.replace(
+            classOpening,
+            `${classOpening}\n${referencedFieldsCode}\n`
+          );
+        }
+      }
+      for (
+        let cleanupPass = 0;
+        cleanupPass < 4;
+        cleanupPass += 1
+      ) {
+        const cleaned =
+          removeUnreferencedGeneratedFields(
+            source,
+            extensionFiles.map(
+              file => file?.content || ""
+            )
+          );
+        if (cleaned === source) break;
+        source = cleaned;
+      }
       const invalidOptimizedLayout =
         invalidGeneratedLayoutEscape(
           source
@@ -18324,7 +18964,7 @@ function validateTypedNodeGraphDocument(
         ]
       ) {
         diagnostics.push(
-          `Node '${node.label || node.id || "<unnamed>"}' uses unavailable operator '${node.operatorId || "<missing>"}'.`
+          `Node '${generatedHumanNodeName(node)}' uses an unavailable operator.`
         );
       }
     }
@@ -18552,7 +19192,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.24.31-compile-only-on-zip",
+          "1.24.90-reliable-folder-direct-dll-build",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

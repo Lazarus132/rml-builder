@@ -2,7 +2,7 @@
   "use strict";
 
   if (
-    window.RMLCustomCSharpDetachedEditor?.version >= 37 &&
+    window.RMLCustomCSharpDetachedEditor?.version >= 39 &&
     typeof window.RMLCustomCSharpDetachedEditor?.mount === "function"
   ) {
     return;
@@ -459,7 +459,7 @@
     heading.textContent = String(options.tabTitle || window.RMLI18n.t("ui.text.ba090b5e07cf"));
     const headerActions = popupDocument.createElement("div");
     headerActions.className = "editor-header-actions";
-    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.24.31-compile-only-on-zip", window.location.href).href;
+    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build", window.location.href).href;
     const createHeaderButton = (label, iconName) => {
       const button = popupDocument.createElement("button");
       button.type = "button";
@@ -1003,6 +1003,10 @@
     diagnosticSettingsTitle.textContent = window.RMLI18n.t("{{i18n:js.presentation.f17a2346fedb}}");
     const diagnosticSourceSetting = popupDocument.createElement("div");
     diagnosticSourceSetting.className = "settings-source";
+    if (options.lockDiagnosticSource === true) {
+      diagnosticSettingsTitle.hidden = true;
+      diagnosticSourceSetting.hidden = true;
+    }
     const diagnosticSourceLabel = popupDocument.createElement("span");
     diagnosticSourceLabel.textContent = window.RMLI18n.t("{{i18n:js.presentation.db8618646acc}}");
     const diagnosticSourceToggle = popupDocument.createElement("div");
@@ -1183,7 +1187,12 @@
       applyAppearance(popupDocument, editorShell, gutter, textarea, appearanceState);
       synchronizeAppearanceControls();
       options.onAppearanceChange?.({ ...appearanceState });
-      commitDiagnosticSource(window.RMLI18n.t("index.text.b5e50a2e9087"));
+      commitDiagnosticSource(
+        options.lockDiagnosticSource === true
+          ? window.RMLI18n.t("index.text.ec0abfff4432")
+          : window.RMLI18n.t("index.text.b5e50a2e9087"),
+        { notify: options.lockDiagnosticSource !== true }
+      );
     });
     settingsOverlay.append(
       resetEditorSettings,
@@ -1203,7 +1212,10 @@
     const encoding = popupDocument.createElement("span");
     encoding.textContent = window.RMLI18n.t("{{i18n:js.presentation.663b90c899fa}}");
     const language = popupDocument.createElement("span");
-    language.textContent = window.RMLI18n.t("{{i18n:js.presentation.e4bc4b105929}}");
+    language.textContent = String(
+      options.codeLanguageLabel ||
+        window.RMLI18n.t("{{i18n:js.presentation.e4bc4b105929}}")
+    );
     statusRight.append(cursorPosition, encoding, language);
     statusBar.append(statusMessage, statusRight);
 
@@ -2966,7 +2978,7 @@
     window.RMLI18n.t("ui.literal.b541050758cc"),
     {
       value: Object.freeze({
-        version: 38,
+        version: 39,
         mount,
         openSettings() {
           return false;

@@ -17,6 +17,18 @@ let customCSharpDetachedEditorModulePromise = null;
 const CUSTOM_CSHARP_SHORTCUT_BOOTSTRAP_VERSION = 18;
 const CUSTOM_CSHARP_CATALOG_SOURCE_CHUNK = 16 * 1024;
 
+function localizedCSharpContractEditorText(
+    key,
+    fallback
+  ) {
+    const translated = String(
+      window.RMLI18n?.t?.(key) ?? ""
+    );
+    return translated && translated !== key
+      ? translated
+      : fallback;
+  }
+
 const customCSharpBuildWorkers = new Map();
 const customCSharpSynchronizations = new Set();
 const customCSharpSynchronizationStatus = new Map();
@@ -2320,6 +2332,12 @@ async function customCSharpWorkerSupport(
       };
     }
 
+    if (!isCurrent()) {
+      throw new DOMException(
+        window.RMLI18n.t("ui.literal.4f23eb11b20d"),
+        "AbortError"
+      );
+    }
     let projection;
     try {
       projection =
@@ -2376,7 +2394,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.24.31-compile-only-on-zip",
+        "js/workers/graph_codegen_worker.js?v=1.24.90-reliable-folder-direct-dll-build",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -4403,7 +4421,7 @@ function loadCustomCSharpDetachedEditorModule() {
         const script =
           document.createElement("script");
         script.src = new URL(
-          "js/editor/custom_csharp_editor.js?v=1.11-distinct-editor-shortcuts",
+          "js/editor/custom_csharp_editor.js?v=1.24.90-reliable-folder-direct-dll-build",
           document.baseURI
         ).href;
         script.async = true;
@@ -5253,11 +5271,95 @@ function commitCustomCSharpEditorValue(
       location => location.node
     );
     if (nodes.length === 0) return false;
-    const previousDefinition =
-      nodeDefinition(nodes[0]);
     if (!validateUnchanged && nodes.every(candidate =>
       String(candidate.parameters?.[parameterKey] ?? "") === next)) {
       synchronizeCustomCSharpInspectorValue(nodeId, parameterKey, next);
+      return true;
+    }
+    let validation = null;
+    if (
+      typeof specification?.validateEditorValue ===
+        "function"
+    ) {
+      try {
+        validation = specification.validateEditorValue(
+          next,
+          nodes[0]
+        );
+      } catch (error) {
+        validation = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : String(error)
+        };
+      }
+      if (validation?.ok !== true) {
+        setCustomCSharpDiagnostics(
+          nodeId,
+          [
+            String(
+              validation?.error ||
+                localizedCSharpContractEditorText(
+                  "csharp.editor.error.invalid_value",
+                  "The structured editor value is invalid."
+                )
+            )
+          ],
+          { source: "Builder" }
+        );
+        return false;
+      }
+      setCustomCSharpDiagnostics(
+        nodeId,
+        [],
+        { source: "Builder" }
+      );
+    }
+    const validationUpdates =
+      validation?.parameterUpdates &&
+      typeof validation.parameterUpdates === "object" &&
+      !Array.isArray(validation.parameterUpdates)
+        ? validation.parameterUpdates
+        : {};
+    const parameterUpdates = {
+      [parameterKey]: next,
+      ...validationUpdates
+    };
+    const previousDefinition =
+      nodeDefinition(nodes[0]);
+    const genericStructuralEditor =
+      (
+        specification?.codeEditor === true ||
+        specification?.structuredEditor === true
+      ) &&
+      previousDefinition?.customCSharpNode !== true &&
+      (
+        specification?.affectsPorts === true ||
+        specification?.affectsNode === true
+      );
+    const previousSelection = genericStructuralEditor
+      ? graphMutationSelectionSnapshot()
+      : null;
+    const affectedConnectionIds = genericStructuralEditor
+      ? incidentGraphConnectionIds(nodeId)
+      : null;
+    if (genericStructuralEditor) {
+      for (const connectionId of
+        previousSelection?.connectionIds || []) {
+        affectedConnectionIds.add(connectionId);
+      }
+    }
+    if (nodes.every(candidate =>
+      Object.entries(parameterUpdates).every(([key, updateValue]) =>
+        Object.is(candidate.parameters?.[key], updateValue)
+      ))) {
+      synchronizeCustomCSharpInspectorValue(
+        nodeId,
+        parameterKey,
+        parameterUpdates[parameterKey]
+      );
       return true;
     }
     for (const candidate of nodes) {
@@ -5266,15 +5368,63 @@ function commitCustomCSharpEditorValue(
         typeof candidate.parameters === "object"
           ? candidate.parameters
           : {};
-      candidate.parameters[parameterKey] = next;
+      Object.assign(candidate.parameters, parameterUpdates);
     }
     const node = nodes[0];
     reconcileCustomCSharpRuntimeValuePorts(
       nodeId,
       parameterKey,
-      next,
+      parameterUpdates[parameterKey],
       previousDefinition
     );
+    if (genericStructuralEditor) {
+      graphNodeDefinitionCache = new WeakMap();
+      currentAnalysis = null;
+      const pruneResult = pruneConnections();
+      if (
+        typeof synchronizeChangedApiCompositeNodePortContract ===
+          "function"
+      ) {
+        synchronizeChangedApiCompositeNodePortContract(
+          nodeId,
+          previousDefinition,
+          nodeDefinition(node),
+          { exposeCurrent: true }
+        );
+      }
+      for (const connection of graph.connections || []) {
+        if (
+          String(connection?.fromNode || "") === String(nodeId) ||
+          String(connection?.toNode || "") === String(nodeId)
+        ) {
+          affectedConnectionIds.add(connection.id);
+        }
+      }
+      renderGraphMutationDelta({
+        nodeIds: [
+          ...new Set([
+            ...(previousSelection?.nodeIds || []),
+            String(nodeId)
+          ])
+        ],
+        connectionIds: affectedConnectionIds,
+        nodeContentIds: [String(nodeId)]
+      });
+      refreshDisplayValueNodes();
+      scheduleAcceptedGraphPersistenceAfterPaint({
+        refreshGeneratedOutput: true,
+        refreshCompositeActions: true
+      });
+      if (pruneResult?.connectionsChanged === true) {
+        showGraphMessage(
+          localizedCSharpContractEditorText(
+            "csharp.editor.warning.connections_removed",
+            "Incompatible connections were removed because the validated C# contract changed the node's ports."
+          ),
+          "warning"
+        );
+      }
+    }
     const synchronization = customCSharpSynchronizationControllers.get(String(nodeId));
     if (synchronization && !synchronization.signal.aborted) {
       synchronization.abort(new DOMException(window.RMLI18n.t("ui.literal.de598a3d6a15"), "AbortError"));
@@ -5282,7 +5432,7 @@ function commitCustomCSharpEditorValue(
     synchronizeCustomCSharpInspectorValue(
       node.id,
       parameterKey,
-      next
+      parameterUpdates[parameterKey]
     );
     scheduleCustomCSharpLiveDiagnostics(
       node,
@@ -5467,7 +5617,7 @@ function createCustomCSharpOverlayFrame(
     actions.className =
       "rml-custom-csharp-overlay-window-actions";
     const windowIcon = name =>
-      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-${name}"></use></svg>`;
+      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${name}"></use></svg>`;
     const returnIcon = windowIcon("back");
     const minimizeIcon = windowIcon("minimize");
     const maximizeIcon = windowIcon("maximize");
@@ -6016,7 +6166,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.24.31-compile-only-on-zip",
+      "styles/features/styles.runtime-graph.css?v=1.24.90-reliable-folder-direct-dll-build",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6691,7 +6841,7 @@ function customCSharpNodeDropSnippet(
     const representation =
       api || syntax || builtIn;
     const comment =
-      `// Builder node: ${title} (${operatorId})`;
+      `// Builder node: ${title}`;
     let snippet;
 
     if (representation) {
@@ -6943,17 +7093,34 @@ function mountCustomCSharpEditorPresentation({
             return colorEditor;
           },
           diagnosticSource:
-            window.RMLBuilderEditorPersonalSettings?.diagnosticSource || "Roslyn",
+            specification?.editorMode === "json"
+              ? "Builder"
+              : window.RMLBuilderEditorPersonalSettings?.diagnosticSource || "Roslyn",
+          lockDiagnosticSource:
+            specification?.editorMode === "json",
+          codeLanguageLabel:
+            specification?.editorMode === "json"
+              ? "JSON"
+              : "C#",
           status:
-            customCSharpSynchronizationStatus.get(
-              nodeId
-            ) || "Synchronized with Builder",
+            specification?.editorMode === "json"
+              ? localizedCSharpContractEditorText(
+                  "csharp.editor.status.validated_contract",
+                  "Validated structured C# contract"
+                )
+              : customCSharpSynchronizationStatus.get(
+                  nodeId
+                ) || "Synchronized with Builder",
           output:
             customCSharpDebugOutput.get(nodeId) || [],
           diagnostics:
             customCSharpDiagnostics.get(nodeId) || [],
-          enableNodeDrop: true,
+          enableNodeDrop:
+            specification?.enableNodeDrop !== false,
           onNodeDrop(payload) {
+            if (specification?.enableNodeDrop === false) {
+              return null;
+            }
             return customCSharpNodeDropSnippet(
               payload,
               specification
@@ -7072,6 +7239,13 @@ function mountCustomCSharpEditorPresentation({
               );
             } else if (mode === "overlay") {
               overlay?.remove();
+            }
+            if (
+              specification?.codeEditor === true &&
+              nodeDefinition(closingNode)?.customCSharpNode !== true &&
+              String(graph.selectedNodeId || "") === String(nodeId)
+            ) {
+              renderGraphInspector();
             }
           }
         });
@@ -7557,7 +7731,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.24.31-compile-only-on-zip",
+      "1.24.90-reliable-folder-direct-dll-build",
     writable: false,
     enumerable: true,
     configurable: true

@@ -174,6 +174,8 @@ let graphParameterPointerTrackingInstalled = false;
 let graphParameterCommitReady = false;
 let graphParameterCommitFrame = 0;
 let graphParameterCommitTask = null;
+let graphParameterCommitTaskDeadlineTimer = 0;
+let graphParameterCommitRetryTimer = 0;
 let graphParameterGestureObserver = null;
 const graphParameterActivePointers = new Map();
 const graphParameterActiveKeys = new Map();
@@ -4679,7 +4681,7 @@ function setRmlNodeSymbolContent(element, symbol) {
   svg.setAttribute("aria-hidden", "true");
   svg.classList.add("rml-node-symbol-svg");
   const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", `assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#${iconId}`);
+  use.setAttribute("href", `assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#${iconId}`);
   svg.appendChild(use);
   element.appendChild(svg);
 }
@@ -4876,6 +4878,23 @@ function graphPortPresentationConcreteType(
       fallbackConcreteTypeForPort(
         presented
       )
+    );
+  }
+
+function isScannerCatalogApiDefinition(
+    definition
+  ) {
+    return Boolean(
+      definition?.catalogGenerated === true &&
+      (
+        definition?.scannerCatalogGenerated ===
+          true ||
+        definition
+          ?.scannerCatalogStreamGenerated ===
+            true
+      ) &&
+      definition?.unavailableApiContract !==
+        true
     );
   }
 
@@ -5170,8 +5189,8 @@ function restorePreviousEmbeddedEditor(
   }
 
 function savedApiContractSemanticKey(
-    contract
-  ) {
+  contract
+) {
     if (
       !contract ||
       typeof contract !== "object" ||
@@ -5181,20 +5200,37 @@ function savedApiContractSemanticKey(
     }
     const normalizePorts = value =>
       (Array.isArray(value) ? value : [])
-        .map(portValue => ({
-          id: String(portValue?.id || ""),
-          type: String(portValue?.type || ""),
-          typeVar: String(
-            portValue?.typeVar || ""
-          ),
-          generic:
-            portValue?.generic === true,
-          optional:
-            portValue?.optional === true,
-          role: String(portValue?.role || "")
-        }));
+        .map(portValue => {
+          const csType = String(
+            portValue?.csType || ""
+          )
+            .replace(/^global::/, "")
+            .replace(/\s+/g, "");
+          const graphType = String(
+            portValue?.type || ""
+          ).trim();
+          return {
+            id: String(portValue?.id || ""),
+            type: csType
+              ? `cs:${csType}`
+              : `graph:${graphType}`,
+            csType,
+            typeVar: String(
+              portValue?.typeVar || ""
+            ),
+            generic:
+              portValue?.generic === true,
+            optional:
+              portValue?.optional === true,
+            role: String(portValue?.role || "")
+          };
+        });
     return JSON.stringify(
       savedApiCompositeCanonicalValue({
+        schemaVersion: Math.max(
+          0,
+          Number(contract.schemaVersion) || 0
+        ),
         kind: String(contract.kind || ""),
         ownerType: String(
           contract.ownerType || ""
@@ -5218,8 +5254,65 @@ function savedApiContractSemanticKey(
           0,
           Number(contract.genericArity) || 0
         ),
+        hookVisibility:
+          String(contract.kind || "") ===
+            "hook-method"
+            ? String(
+                contract.hookVisibility || ""
+              )
+            : "",
         runtimeBound:
           contract.runtimeBound === true,
+        directExecutable:
+          contract.directExecutable === true,
+        ownerGenericParameters:
+          Array.isArray(
+            contract.ownerGenericParameters
+          )
+            ? contract.ownerGenericParameters
+            : [],
+        methodGenericParameters:
+          Array.isArray(
+            contract.methodGenericParameters
+          )
+            ? contract.methodGenericParameters
+            : [],
+        genericBindings:
+          contract.genericBindings &&
+          typeof contract.genericBindings ===
+            "object" &&
+          !Array.isArray(
+            contract.genericBindings
+          )
+            ? contract.genericBindings
+            : {},
+        requiredAssemblyReferences:
+          Array.isArray(
+            contract.requiredAssemblyReferences
+          )
+            ? contract.requiredAssemblyReferences
+            : [],
+        baseAssemblyReferences:
+          Array.isArray(
+            contract.baseAssemblyReferences
+          )
+            ? contract.baseAssemblyReferences
+            : [],
+        enumValues:
+          Array.isArray(contract.enumValues)
+            ? contract.enumValues
+            : [],
+        enumDefaultValue: String(
+          contract.enumDefaultValue || ""
+        ),
+        enumUnderlyingType: String(
+          contract.enumUnderlyingType || ""
+        ),
+        enumIsFlags:
+          contract.enumIsFlags === true,
+        enumValue: String(
+          contract.enumValue || ""
+        ),
         inputPorts: normalizePorts(
           contract.inputPorts
         ),
@@ -7752,7 +7845,11 @@ function applyCatalogMigrationsPreservingGeometry(
             typeof portableApiContract ===
               "function"
               ? portableApiContract(
-                  definition
+                  definition,
+                  {
+                    ...node,
+                    operatorId
+                  }
                 )
               : null;
           hasTargetApiContract = true;
@@ -8599,125 +8696,162 @@ function migrateLegacyOperatorsForImport(
       );
     }
 
-    const nodeIds =
-      graphDocument.nodes.map(node =>
-        String(node?.id || "")
-      );
-    const geometrySignature =
-      replacementGeometrySignature(
-        graphDocument,
-        nodeIds
-      );
-    const sanitized =
-      sanitizeGraphState(
-        graphDocument
-      );
-    const sanitizedNodes =
-      new Map(
-        sanitized.nodes.map(node => [
-          String(node?.id || ""),
-          node
-        ])
-      );
-    const sanitizedConnections =
-      new Map(
-        sanitized.connections.map(
-          connection => [
-            String(
-              connection?.id || ""
-            ),
-            connection
-          ]
-        )
-      );
     const migrations = [];
     let remappedConnectionCount = 0;
+    const pending = [graphDocument];
+    const visited = new WeakSet();
 
-    for (const node of
-      graphDocument.nodes) {
-      const migrated =
-        sanitizedNodes.get(
-          String(node?.id || "")
-        );
-      const previousOperatorId =
-        String(
-          node?.operatorId || ""
-        );
-      const nextOperatorId =
-        String(
-          migrated?.operatorId || ""
-        );
-
+    while (pending.length > 0) {
+      const documentValue = pending.pop();
       if (
-        node?.kind !== "operator" ||
-        !migrated ||
-        !nextOperatorId ||
-        previousOperatorId ===
-          nextOperatorId
+        !documentValue ||
+        typeof documentValue !== "object" ||
+        visited.has(documentValue)
       ) {
         continue;
       }
+      visited.add(documentValue);
 
-      node.operatorId =
-        nextOperatorId;
-      node.parameters =
-        nodeGraphClone(
-          migrated.parameters || {}
+      const hasGraphArrays =
+        Array.isArray(documentValue.nodes) &&
+        Array.isArray(
+          documentValue.connections
         );
-      migrations.push({
-        nodeId:
-          String(node.id || ""),
-        from: previousOperatorId,
-        to: nextOperatorId
-      });
-    }
+      if (hasGraphArrays) {
+        const nodeIds =
+          documentValue.nodes.map(node =>
+            String(node?.id || "")
+          );
+        const geometrySignature =
+          replacementGeometrySignature(
+            documentValue,
+            nodeIds
+          );
+        const sanitized =
+          sanitizeGraphState(
+            documentValue
+          );
+        const sanitizedNodes =
+          new Map(
+            sanitized.nodes.map(node => [
+              String(node?.id || ""),
+              node
+            ])
+          );
+        const sanitizedConnections =
+          new Map(
+            sanitized.connections.map(
+              connection => [
+                String(
+                  connection?.id || ""
+                ),
+                connection
+              ]
+            )
+          );
 
-    for (const connection of
-      graphDocument.connections) {
-      const migrated =
-        sanitizedConnections.get(
-          String(
-            connection?.id || ""
-          )
-        );
+        for (const node of
+          documentValue.nodes) {
+          const migrated =
+            sanitizedNodes.get(
+              String(node?.id || "")
+            );
+          const previousOperatorId =
+            String(
+              node?.operatorId || ""
+            );
+          const nextOperatorId =
+            String(
+              migrated?.operatorId || ""
+            );
 
-      if (!migrated) {
-        continue;
+          if (
+            node?.kind !== "operator" ||
+            !migrated ||
+            !nextOperatorId ||
+            previousOperatorId ===
+              nextOperatorId
+          ) {
+            continue;
+          }
+
+          node.operatorId =
+            nextOperatorId;
+          node.parameters =
+            nodeGraphClone(
+              migrated.parameters || {}
+            );
+          migrations.push({
+            nodeId:
+              String(node.id || ""),
+            from: previousOperatorId,
+            to: nextOperatorId
+          });
+        }
+
+        for (const connection of
+          documentValue.connections) {
+          const migrated =
+            sanitizedConnections.get(
+              String(
+                connection?.id || ""
+              )
+            );
+
+          if (!migrated) {
+            continue;
+          }
+
+          const nextFromPort = String(
+            migrated.fromPort || ""
+          );
+          const nextToPort = String(
+            migrated.toPort || ""
+          );
+          if (
+            nextFromPort !==
+              String(
+                connection.fromPort || ""
+              ) ||
+            nextToPort !==
+              String(
+                connection.toPort || ""
+              )
+          ) {
+            connection.fromPort =
+              nextFromPort;
+            connection.toPort =
+              nextToPort;
+            remappedConnectionCount += 1;
+          }
+        }
+
+        if (
+          replacementGeometrySignature(
+            documentValue,
+            nodeIds
+          ) !== geometrySignature
+        ) {
+          throw new Error(
+            window.RMLI18n.t("ui.literal.b0c52fd64548")
+          );
+        }
       }
 
-      const nextFromPort = String(
-        migrated.fromPort || ""
-      );
-      const nextToPort = String(
-        migrated.toPort || ""
-      );
-      if (
-        nextFromPort !==
-          String(
-            connection.fromPort || ""
-          ) ||
-        nextToPort !==
-          String(
-            connection.toPort || ""
-          )
-      ) {
-        connection.fromPort =
-          nextFromPort;
-        connection.toPort =
-          nextToPort;
-        remappedConnectionCount += 1;
+      for (const collection of [
+        documentValue.apiCompositeGraphs,
+        documentValue.customCSharpFiles
+      ]) {
+        if (
+          collection &&
+          typeof collection === "object" &&
+          !Array.isArray(collection)
+        ) {
+          pending.push(
+            ...Object.values(collection)
+          );
+        }
       }
-    }
-
-    if (
-      replacementGeometrySignature(
-        graphDocument,
-        nodeIds
-      ) !== geometrySignature
-    ) {
-      throw new Error(
-        window.RMLI18n.t("ui.literal.b0c52fd64548")
-      );
     }
 
     return Object.freeze({
@@ -8736,7 +8870,8 @@ function migrateLegacyOperatorsForImport(
   }
 
 function portableApiContract(
-    definition
+    definition,
+    node = null
   ) {
     const contract =
       definition?.apiVerification;
@@ -8758,9 +8893,55 @@ function portableApiContract(
     const contractOutputPorts = new Map(
       (Array.isArray(contract.outputPorts) ? contract.outputPorts : []).map(port => [String(port?.id || ""), port])
     );
+    let resolvedDefinition = definition;
+    let specialization = null;
+    if (
+      node &&
+      typeof definition
+        ?.resolveApiSpecialization ===
+          "function"
+    ) {
+      try {
+        specialization =
+          definition.resolveApiSpecialization(
+            node
+          );
+        if (
+          specialization &&
+          typeof definition
+            .resolveDefinition ===
+              "function"
+        ) {
+          const resolved =
+            definition.resolveDefinition(node);
+          if (
+            resolved &&
+            typeof resolved === "object" &&
+            !Array.isArray(resolved)
+          ) {
+            resolvedDefinition = {
+              ...definition,
+              ...resolved
+            };
+          }
+        }
+      } catch {
+        specialization = null;
+        resolvedDefinition = definition;
+      }
+    }
     const normalizePort = (port, direction) => ({
       id: String(port?.id || ""),
       type: String(port?.type || ""),
+      csType: String(
+        port?.apiCsType ||
+        (direction === "input"
+          ? contractInputPorts
+          : contractOutputPorts)
+          .get(String(port?.id || ""))
+          ?.csType ||
+        ""
+      ),
       typeVar: String(port?.typeVar || ""),
       generic:
         port?.generic === true,
@@ -8772,9 +8953,131 @@ function portableApiContract(
         `${direction}:${String(port?.id || "")}`
       )
     });
+    const assemblyReferences = new Map();
+    for (const reference of [
+      ...(Array.isArray(
+        contract.requiredAssemblyReferences
+      )
+        ? contract.requiredAssemblyReferences
+        : []),
+      ...(Array.isArray(
+        specialization
+          ?.requiredAssemblyReferences
+      )
+        ? specialization
+            .requiredAssemblyReferences
+        : [])
+    ]) {
+      const include = String(
+        reference?.include || ""
+      ).trim();
+      if (!include) continue;
+      assemblyReferences.set(
+        include.toLowerCase(),
+        {
+          include,
+          hintPath: String(
+            reference?.hintPath || ""
+          ).trim(),
+          private:
+            reference?.private === true
+        }
+      );
+    }
+    const genericRows = [
+      ...(Array.isArray(
+        contract.ownerGenericParameters
+      )
+        ? contract.ownerGenericParameters
+            .map((value, index) => ({
+              prefix: "ownerGeneric",
+              position: Math.max(
+                0,
+                Number(value?.position) || index
+              )
+            }))
+        : []),
+      ...(Array.isArray(
+        contract.methodGenericParameters
+      )
+        ? contract.methodGenericParameters
+            .map((value, index) => ({
+              prefix: "generic",
+              position: Math.max(
+                0,
+                Number(value?.position) || index
+              )
+            }))
+        : [])
+    ];
+    const specializationBindings =
+      specialization?.genericBindings &&
+      typeof specialization
+        .genericBindings === "object" &&
+      !Array.isArray(
+        specialization.genericBindings
+      )
+        ? specialization.genericBindings
+        : {};
+    const specializationValid =
+      genericRows.length === 0
+        ? contract.runtimeBound !== true
+        : Boolean(
+            specialization &&
+            Object.keys(
+              specializationBindings
+            ).length === genericRows.length &&
+            genericRows.every(row =>
+              String(
+                specializationBindings[
+                  `${row.prefix}${row.position}`
+                ] || ""
+              ).trim()
+            )
+          );
+    const enumValues = (
+      Array.isArray(contract.enumValues)
+        ? contract.enumValues
+        : []
+    ).map(value => {
+      const raw =
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+          ? value.value ?? value.numericValue
+          : null;
+      const exactValue =
+        typeof raw === "string" &&
+        /^[+-]?\d+$/.test(raw.trim())
+          ? raw.trim().replace(/^\+/, "")
+          : typeof raw === "number" &&
+              Number.isSafeInteger(raw)
+            ? String(raw)
+            : "";
+      return {
+        name: String(
+          value?.name || value || ""
+        ),
+        value: exactValue
+      };
+    }).filter(value => value.name);
+    const enumValueNames = enumValues.map(
+      value => value.name
+    );
+    const enumValue = String(
+      node?.parameters?.value ||
+      contract.enumDefaultValue ||
+      ""
+    );
+    const enumValueValid =
+      String(contract.kind || "") !== "enum" ||
+      (
+        enumValues.length > 0 &&
+        enumValueNames.includes(enumValue)
+      );
 
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       kind: String(contract.kind || ""),
       ownerType: String(
         contract.ownerType || ""
@@ -8798,8 +9101,115 @@ function portableApiContract(
         0,
         Number(contract.genericArity) || 0
       ),
+      hookVisibility:
+        String(contract.kind || "") ===
+          "hook-method"
+          ? String(
+              contract.hookVisibility ||
+              definition?.apiHookVisibility ||
+              ""
+            )
+          : "",
+      ownerGenericParameters:
+        Array.isArray(
+          contract.ownerGenericParameters
+        )
+          ? nodeGraphClone(
+              contract.ownerGenericParameters
+            )
+          : [],
+      methodGenericParameters:
+        Array.isArray(
+          contract.methodGenericParameters
+        )
+          ? nodeGraphClone(
+              contract.methodGenericParameters
+            )
+          : [],
       runtimeBound:
         contract.runtimeBound === true,
+      directExecutable:
+        [
+          "method",
+          "constructor",
+          "property-get",
+          "property-set",
+          "field-get",
+          "field-set",
+          "type",
+          "enum"
+        ].includes(String(contract.kind || "")) &&
+        specializationValid &&
+        enumValueValid,
+      requiredAssemblyReferences:
+        [...assemblyReferences.values()],
+      baseAssemblyReferences:
+        Array.isArray(
+          contract.baseAssemblyReferences
+        )
+          ? nodeGraphClone(
+              contract.baseAssemblyReferences
+            )
+          : Array.isArray(
+              contract.requiredAssemblyReferences
+            )
+            ? nodeGraphClone(
+                contract.requiredAssemblyReferences
+              )
+            : [],
+      enumValues:
+        nodeGraphClone(enumValues),
+      enumDefaultValue: String(
+        contract.enumDefaultValue || ""
+      ),
+      enumUnderlyingType: String(
+        contract.enumUnderlyingType || ""
+      ),
+      enumIsFlags:
+        contract.enumIsFlags === true,
+      threadAffinity: String(
+        contract.threadAffinity || "unknown"
+      ),
+      reloadSafety:
+        contract.reloadSafety &&
+        typeof contract.reloadSafety === "object"
+          ? nodeGraphClone(
+              contract.reloadSafety
+            )
+          : null,
+      reloadCleanupCapabilities:
+        Array.isArray(
+          contract.reloadCleanupCapabilities
+        )
+          ? nodeGraphClone(
+              contract.reloadCleanupCapabilities
+            )
+          : [],
+      reloadAutomaticCleanup:
+        Array.isArray(
+          contract.reloadAutomaticCleanup
+        )
+          ? nodeGraphClone(
+              contract.reloadAutomaticCleanup
+            )
+          : [],
+      ...(String(contract.kind || "") ===
+        "enum"
+        ? {
+            enumValue: String(
+              enumValue
+            )
+          }
+        : {}),
+      ...(specialization
+        ? {
+            genericBindings:
+              nodeGraphClone(
+                specialization
+                  .genericBindings || {}
+              )
+          }
+        : {}),
       stableContractId: String(
         contract.stableContractId || ""
       ),
@@ -8809,12 +9219,12 @@ function portableApiContract(
         ""
       ),
       inputPorts:
-        (Array.isArray(definition.inputs)
-          ? definition.inputs
+        (Array.isArray(resolvedDefinition.inputs)
+          ? resolvedDefinition.inputs
           : []).map(port => normalizePort(port, "input")),
       outputPorts:
-        (Array.isArray(definition.outputs)
-          ? definition.outputs
+        (Array.isArray(resolvedDefinition.outputs)
+          ? resolvedDefinition.outputs
           : []).map(port => normalizePort(port, "output"))
     };
   }
@@ -8832,6 +9242,42 @@ function portableApiContractForNode(
       !Array.isArray(node.apiContract)
         ? node.apiContract
         : null;
+
+    if (
+      definition?.catalogGenerated === true &&
+      definition?.unavailableApiContract !== true
+    ) {
+      if (
+        storedNodeContract &&
+        (
+          definition
+            .portableApiExecutableContract ===
+              true ||
+          definition
+            .portableApiHookContract === true
+        ) &&
+        executablePortableDefinitionMatchesContract(
+          String(node?.operatorId || ""),
+          definition,
+          storedNodeContract,
+          node?.parameters || {}
+        )
+      ) {
+        return nodeGraphClone(
+          storedNodeContract
+        );
+      }
+      return portableApiContract(
+        definition,
+        node
+      ) || (
+        storedNodeContract
+          ? nodeGraphClone(
+              storedNodeContract
+            )
+          : null
+      );
+    }
 
     if (storedNodeContract) {
       return nodeGraphClone(storedNodeContract);
@@ -8853,7 +9299,8 @@ function portableApiContractForNode(
     }
 
     return portableApiContract(
-      definition
+      definition,
+      node
     ) || null;
   }
 
@@ -8897,6 +9344,7 @@ function serializableGraphView(source) {
         "selectedConnectionId",
         "selectedWirePoint",
         "nextSequence",
+        "portableTypeContracts",
         "apiCompositeGraphs",
         "customCSharpFiles"
       ]),
@@ -9029,6 +9477,281 @@ function serializableGraphView(source) {
     };
   }
 
+function portableGraphTypeReferences(
+  documentValue
+) {
+  const result = new Set();
+  const visited = new Set();
+  const add = value => {
+    const type = String(value || "").trim();
+    if (type && type !== "T") result.add(type);
+  };
+  const addContract = contract => {
+    for (const key of [
+      "inputPorts",
+      "outputPorts"
+    ]) {
+      for (const port of
+        Array.isArray(contract?.[key])
+          ? contract[key]
+          : []) {
+        add(port?.type);
+      }
+    }
+  };
+  const addMarkedParameters = node => {
+    const definition =
+      OPERATOR_DEFINITIONS[
+        String(node?.operatorId || "")
+      ];
+    let hasGraphTypeList = false;
+    for (const parameter of
+      Array.isArray(definition?.parameters)
+        ? definition.parameters
+        : []) {
+      const value = node?.parameters?.[
+        parameter?.key
+      ];
+      if (
+        parameter?.graphTypeReference ===
+          true ||
+        String(parameter?.kind || "") ===
+          "visualFunctionReturnType"
+      ) {
+        add(value);
+      } else if (
+        parameter?.graphTypeList === true
+      ) {
+        hasGraphTypeList = true;
+        for (const token of
+          String(value || "").split(
+            /[,\r\n]+/
+          )) {
+          add(token);
+        }
+      } else if (
+        parameter?.graphTypeStructuredList ===
+          true ||
+        String(parameter?.kind || "") ===
+          "visualFunctionParameters"
+      ) {
+        for (const row of
+          Array.isArray(value) ? value : []) {
+          add(row?.type || row?.graphType);
+        }
+      }
+    }
+    if (definition?.configurableTypeVar) {
+      add(node?.parameters?.valueType);
+      if (definition.allowAutoType !== false) {
+        add(
+          node?.parameters?.autoVectorType
+        );
+      }
+    }
+    if (hasGraphTypeList) {
+      for (const [key, value] of
+        Object.entries(
+          node?.parameters || {}
+        )) {
+        if (/^value\d+Type$/.test(key)) {
+          add(value);
+        }
+      }
+    }
+  };
+  const visit = value => {
+    if (
+      !value ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      visited.has(value) ||
+      !Array.isArray(value.nodes)
+    ) {
+      return;
+    }
+    visited.add(value);
+    for (const node of value.nodes) {
+      addContract(node?.apiContract);
+      addContract(
+        node?.importRecovery
+          ?.originalApiContract
+      );
+      addMarkedParameters(node);
+      for (const boundary of
+        Array.isArray(
+          node?.parameters?.boundaryPorts
+        )
+          ? node.parameters.boundaryPorts
+          : []) {
+        add(boundary?.type);
+      }
+    }
+    for (const boundary of
+      Array.isArray(value.boundaryPorts)
+        ? value.boundaryPorts
+        : []) {
+      add(boundary?.type);
+    }
+    for (const collection of [
+      value.customCSharpFiles,
+      value.apiCompositeGraphs
+    ]) {
+      if (
+        collection &&
+        typeof collection === "object" &&
+        !Array.isArray(collection)
+      ) {
+        for (const nested of
+          Object.values(collection)) {
+          visit(nested);
+        }
+      }
+    }
+  };
+  visit(documentValue);
+  return [...result].sort();
+}
+
+function savedApiContractBaseKey(contract) {
+  if (
+    !contract ||
+    typeof contract !== "object" ||
+    Array.isArray(contract)
+  ) {
+    return "";
+  }
+  const ports = (direction, key) =>
+    (Array.isArray(contract[key])
+      ? contract[key]
+      : []).map(port => ({
+      id: String(port?.id || ""),
+      optional: port?.optional === true,
+      role: preservedImportPortRole(
+        contract.kind,
+        direction,
+        port,
+        contract.parameters
+      )
+    }));
+  return JSON.stringify(
+    savedApiCompositeCanonicalValue({
+      schemaVersion: Math.max(
+        0,
+        Number(contract.schemaVersion) || 0
+      ),
+      kind: String(contract.kind || ""),
+      ownerType: String(
+        contract.ownerType || ""
+      ),
+      memberName: String(
+        contract.memberName || ""
+      ),
+      signature: String(
+        contract.signature || ""
+      ),
+      parameters:
+        Array.isArray(contract.parameters)
+          ? contract.parameters
+          : [],
+      returnType: String(
+        contract.returnType ||
+        "System.Void"
+      ),
+      isStatic:
+        contract.isStatic === true,
+      genericArity: Math.max(
+        0,
+        Number(contract.genericArity) || 0
+      ),
+      ownerGenericParameters:
+        Array.isArray(
+          contract.ownerGenericParameters
+        )
+          ? contract.ownerGenericParameters
+          : [],
+      methodGenericParameters:
+        Array.isArray(
+          contract.methodGenericParameters
+        )
+          ? contract.methodGenericParameters
+          : [],
+      baseAssemblyReferences:
+        Array.isArray(
+          contract.baseAssemblyReferences
+        )
+          ? contract.baseAssemblyReferences
+          : Array.isArray(
+              contract.requiredAssemblyReferences
+            )
+            ? contract.requiredAssemblyReferences
+            : [],
+      enumValues:
+        Array.isArray(contract.enumValues)
+          ? contract.enumValues
+          : [],
+      enumDefaultValue: String(
+        contract.enumDefaultValue || ""
+      ),
+      enumUnderlyingType: String(
+        contract.enumUnderlyingType || ""
+      ),
+      enumIsFlags:
+        contract.enumIsFlags === true,
+      inputPorts:
+        ports("input", "inputPorts"),
+      outputPorts:
+        ports("output", "outputPorts")
+    })
+  );
+}
+
+function portableGraphTypeContracts(
+  documentValue
+) {
+  const migrations =
+    window.RMLGraphTypeImportMigrations;
+  const typeRegistry =
+    window.RMLModNodeRegistry;
+  if (
+    migrations?.version !== 1 ||
+    typeof migrations
+      .typeContractFromRegistry !==
+        "function" ||
+    typeof migrations
+      .normalizedTypeContracts !==
+        "function" ||
+    typeof typeRegistry
+      ?.getTypeDefinitions !==
+        "function"
+  ) {
+    throw new Error(
+      "The portable graph type contract module is unavailable."
+    );
+  }
+  const contracts =
+    portableGraphTypeReferences(
+      documentValue
+    )
+      .map(type =>
+        migrations.typeContractFromRegistry(
+          type,
+          typeRegistry
+        )
+      )
+      .filter(Boolean);
+  const normalized =
+    migrations.normalizedTypeContracts(
+      contracts
+    );
+  if (normalized.conflicts.length > 0) {
+    throw new Error(normalized.conflicts[0]);
+  }
+  return nodeGraphClone(
+    normalized.contracts
+  );
+}
+
 function clearStoredGraphMultiSelection(state, omitField = false) {
     const pending = [state];
     const visited = new Set();
@@ -9054,6 +9777,11 @@ function graphSerializableState(
   ) {
     const viewOnly =
       options.viewOnly === true;
+    const synchronizeCompositeFingerprints =
+      !viewOnly &&
+      options
+        .synchronizeCompositeFingerprints !==
+          false;
     const mutationClass =
       graphPersistenceMutationClass(
         options.mutationClass,
@@ -9222,7 +9950,9 @@ function graphSerializableState(
                 };
           const serializedView =
             serializableGraphView(composite);
-          if (!viewOnly) {
+          if (
+            synchronizeCompositeFingerprints
+          ) {
             for (const serializedOwner of
               serializedView.nodes) {
               const nested =
@@ -9292,7 +10022,9 @@ function graphSerializableState(
       );
     const serializedRootView =
       serializableGraphView(rootView);
-    if (!viewOnly) {
+    if (
+      synchronizeCompositeFingerprints
+    ) {
       for (const serializedOwner of
         serializedRootView.nodes) {
         const composite =
@@ -9313,7 +10045,7 @@ function graphSerializableState(
         };
       }
     }
-    return {
+    const serializedGraph = {
       ...cloneGraphOpaqueJsonFields(graph, [
         "nodes",
         "connections",
@@ -9325,6 +10057,7 @@ function graphSerializableState(
         "nextSequence",
         "customCSharpFiles",
         "apiCompositeGraphs",
+        "portableTypeContracts",
         "configSnapshot"
       ]),
       version: GRAPH_SCHEMA_VERSION,
@@ -9350,6 +10083,11 @@ function graphSerializableState(
       apiCompositeGraphs,
       ...serializedRootView
     };
+    serializedGraph.portableTypeContracts =
+      portableGraphTypeContracts(
+        serializedGraph
+      );
+    return serializedGraph;
   }
 
 function scheduleGeneratedOutputRefresh() {
@@ -10040,6 +10778,18 @@ function cancelGraphParameterCommit() {
     }
     graphParameterCommitTask?.cancel();
     graphParameterCommitTask = null;
+    if (graphParameterCommitTaskDeadlineTimer) {
+      window.clearTimeout(
+        graphParameterCommitTaskDeadlineTimer
+      );
+      graphParameterCommitTaskDeadlineTimer = 0;
+    }
+    if (graphParameterCommitRetryTimer) {
+      window.clearTimeout(
+        graphParameterCommitRetryTimer
+      );
+      graphParameterCommitRetryTimer = 0;
+    }
     graphParameterCommitReady = false;
   }
 
@@ -10082,12 +10832,77 @@ function graphParameterGestureActive() {
       graphParameterActiveKeys.size > 0 || graphParameterComposingControls.size > 0;
   }
 
+function scheduleGraphParameterCommitRetry(
+    delay = 32
+  ) {
+    if (!graphParameterPersistenceDirty) {
+      return false;
+    }
+    if (graphParameterCommitRetryTimer) {
+      window.clearTimeout(
+        graphParameterCommitRetryTimer
+      );
+    }
+    const epoch = builderProjectEpoch;
+    graphParameterCommitRetryTimer =
+      window.setTimeout(() => {
+        graphParameterCommitRetryTimer = 0;
+        if (
+          epoch !== builderProjectEpoch ||
+          !graphParameterPersistenceDirty
+        ) {
+          return;
+        }
+        requestGraphParameterCommit();
+      }, Math.max(0, Number(delay) || 0));
+    return true;
+  }
+
+function armGraphParameterCommitTaskDeadline(
+    task,
+    epoch
+  ) {
+    if (graphParameterCommitTaskDeadlineTimer) {
+      window.clearTimeout(
+        graphParameterCommitTaskDeadlineTimer
+      );
+    }
+    graphParameterCommitTaskDeadlineTimer =
+      window.setTimeout(() => {
+        graphParameterCommitTaskDeadlineTimer = 0;
+        if (graphParameterCommitTask !== task) {
+          return;
+        }
+        task.cancel();
+        graphParameterCommitTask = null;
+        if (
+          epoch === builderProjectEpoch &&
+          graphParameterPersistenceDirty
+        ) {
+          scheduleGraphParameterCommitRetry();
+        }
+      }, 1000);
+  }
+
+function clearGraphParameterCommitTaskDeadline() {
+    if (!graphParameterCommitTaskDeadlineTimer) {
+      return;
+    }
+    window.clearTimeout(
+      graphParameterCommitTaskDeadlineTimer
+    );
+    graphParameterCommitTaskDeadlineTimer = 0;
+  }
+
 function requestGraphParameterCommit() {
     const gestureActive = graphParameterGestureActive();
     if (!gestureActive) graphParameterGestureObserver?.disconnect();
     if (!graphParameterPersistenceDirty) return;
     graphParameterCommitReady = true;
-    if (gestureActive) return;
+    if (gestureActive) {
+      scheduleGraphParameterCommitRetry();
+      return;
+    }
     if (graphParameterCommitFrame || graphParameterCommitTask) return;
     const epoch = builderProjectEpoch;
     const enqueue = () => {
@@ -10096,11 +10911,16 @@ function requestGraphParameterCommit() {
       const task = { cancel: () => {} };
       graphParameterCommitTask = task;
       const run = () => {
-        if (graphParameterCommitTask !== task || epoch !== builderProjectEpoch) return;
+        if (graphParameterCommitTask !== task) return;
+        clearGraphParameterCommitTaskDeadline();
         graphParameterCommitTask = null;
+        if (epoch !== builderProjectEpoch) return;
         if (!graphParameterPersistenceDirty) return;
         if (graphParameterGestureActive() || activeInteraction ||
-            customCSharpEditorPersistenceDirty) return;
+            customCSharpEditorPersistenceDirty) {
+          scheduleGraphParameterCommitRetry();
+          return;
+        }
         flushGraphParameterPersistence();
       };
       if (typeof window.scheduler?.postTask === "function") {
@@ -10109,6 +10929,11 @@ function requestGraphParameterCommit() {
         window.scheduler.postTask(run, {
           priority: "background", signal: controller.signal
         }).catch(error => {
+          if (graphParameterCommitTask === task) {
+            clearGraphParameterCommitTaskDeadline();
+            graphParameterCommitTask = null;
+            scheduleGraphParameterCommitRetry();
+          }
           if (error?.name === window.RMLI18n.t("ui.literal.324cefd2fcd2")) return;
           console.error("[RML Builder] Inspector commit failed", error);
           showGraphMessage(window.RMLI18n.t("ui.literal.aa6d5df5e062") +
@@ -10126,6 +10951,10 @@ function requestGraphParameterCommit() {
         };
         channel.port2.postMessage(null);
       }
+      armGraphParameterCommitTaskDeadline(
+        task,
+        epoch
+      );
     };
     if (document.visibilityState === "hidden") {
       enqueue();
@@ -10149,13 +10978,14 @@ function scheduleGraphParameterPersistence() {
     cancelCustomCSharpEditorPersistence();
     if (graphParameterGestureActive()) {
       cancelGraphParameterCommit();
+      scheduleGraphParameterCommitRetry();
       return;
     }
     if (graphParameterCommitReady) {
       requestGraphParameterCommit();
       return;
     }
-    const epoch = builderProjectEpoch;
+    scheduleGraphParameterCommitRetry(120);
   }
 
 function observeGraphParameterGesture() {
@@ -11123,6 +11953,26 @@ function flushGraphViewPersistence(
       : null;
     const deferred =
       consumeDeferredGraphPersistence();
+    const acceptedMutation = [
+      normalizeAcceptedGraphDocumentMutation(
+        deferred.acceptedMutation,
+        deferred.mutationClass
+      ),
+      refreshContent
+        ? normalizeAcceptedGraphDocumentMutation(
+            viewAcceptedMutation,
+            "geometry"
+          )
+        : null
+    ].filter(Boolean).reduce(
+      (latest, candidate) =>
+        !latest ||
+        candidate.documentRevision >=
+          latest.documentRevision
+          ? candidate
+          : latest,
+      null
+    );
     if (
       !hadViewPersistence &&
       !refreshContent &&
@@ -11153,12 +12003,7 @@ function flushGraphViewPersistence(
           : "view",
         deferred.mutationClass
       ),
-      deferred.acceptedMutation ||
-        (
-          refreshContent
-            ? viewAcceptedMutation
-            : null
-        )
+      acceptedMutation
     );
     return true;
   }
@@ -12569,6 +13414,276 @@ function previewMenuItemId(result) {
     );
   }
 
+function graphPresentationContainsMachineId(value) {
+    return /(?:\bapi\.[a-z0-9_.-]*\.[0-9a-f]{8,}\b|\bcontract(?:\.[a-z0-9_-]+)*\.[0-9a-f]{8,}\b|\bunavailable\.preserved\.[A-Za-z0-9_.:-]+\b|\b(?:apiEnum[.:]|api:|normal(?:Exact|Array):|collectList:)[A-Za-z0-9_.:<>,\[\]-]+\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b|\b(?:[a-z][a-z0-9-]*-)?rebuild-n\d+(?:\.[A-Za-z_][A-Za-z0-9_]*)?\b)/i.test(
+      String(value || "")
+    );
+  }
+
+function graphPresentationTokenIsInternal(value) {
+    const token = String(value || "").trim();
+    return Boolean(
+      token &&
+      (
+        graphPresentationContainsMachineId(token) ||
+        /^(?:graph|node|wire|boundary|pure-[a-z0-9-]+)-[A-Za-z0-9_.:-]+$/i.test(token) ||
+        /^runtime-root(?:\/|$)/.test(token)
+      )
+    );
+  }
+
+function graphContractPresentationName(contract) {
+    if (
+      !contract ||
+      typeof contract !== "object" ||
+      Array.isArray(contract)
+    ) {
+      return "";
+    }
+    const ownerType = String(
+      contract.ownerType ||
+      contract.declaringTypeName ||
+      ""
+    )
+      .replace(/^global::/, "")
+      .trim();
+    const memberName = String(
+      contract.memberName ||
+      contract.enumValue ||
+      ""
+    ).trim();
+    if (
+      ownerType &&
+      memberName &&
+      !graphPresentationContainsMachineId(
+        `${ownerType}.${memberName}`
+      )
+    ) {
+      return `${ownerType}.${memberName}`;
+    }
+    return ownerType &&
+      !graphPresentationContainsMachineId(ownerType)
+        ? ownerType
+        : "";
+  }
+
+function graphOperatorPresentationName(
+    operatorId,
+    {
+      node = null,
+      definition = null,
+      contract = null,
+      fallback = ""
+    } = {}
+  ) {
+    const id = String(operatorId || "").trim();
+    const resolvedDefinition =
+      definition ||
+      (
+        typeof OPERATOR_DEFINITIONS !==
+          "undefined"
+          ? OPERATOR_DEFINITIONS[id]
+          : null
+      );
+    for (const candidate of [
+      node?.label,
+      resolvedDefinition?.title
+    ]) {
+      const text = String(candidate || "").trim();
+      if (
+        text &&
+        !graphPresentationContainsMachineId(text)
+      ) {
+        return text;
+      }
+    }
+    const contractName =
+      graphContractPresentationName(
+        contract ||
+        node?.apiContract ||
+        resolvedDefinition?.preservedApiContract ||
+        resolvedDefinition?.apiVerification
+      );
+    if (contractName) {
+      return contractName;
+    }
+    const safeFallback = String(
+      fallback || ""
+    ).trim();
+    if (
+      safeFallback &&
+      !graphPresentationContainsMachineId(
+        safeFallback
+      )
+    ) {
+      return safeFallback;
+    }
+    if (
+      id &&
+      !graphPresentationContainsMachineId(id)
+    ) {
+      const leaf = id
+        .split(".")
+        .filter(Boolean)
+        .at(-1) || "";
+      const readable = leaf
+        .replace(/[-_]+/g, " ")
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .trim();
+      if (readable && !/^[0-9a-f]{8,}$/i.test(readable)) {
+        return readable.replace(
+          /^./,
+          value => value.toUpperCase()
+        );
+      }
+    }
+    return id.startsWith("api.")
+      ? window.RMLI18n.t(
+          "ui.literal.79bf95179598"
+        )
+      : window.RMLI18n.t(
+          "ui.literal.260f7a8cd4f6"
+        );
+  }
+
+function graphNodePresentationName(
+    node,
+    definition = null
+  ) {
+    return graphOperatorPresentationName(
+      node?.operatorId,
+      {
+        node,
+        definition:
+          definition || nodeDefinition(node),
+        contract: node?.apiContract,
+        fallback:
+          window.RMLI18n.t(
+            "ui.literal.260f7a8cd4f6"
+          )
+      }
+    );
+  }
+
+function graphPresentationSafeText(
+    value,
+    requirements = []
+  ) {
+    let text = String(value || "");
+    for (const requirement of
+      Array.isArray(requirements)
+        ? requirements
+        : []) {
+      const id = String(
+        requirement?.operatorId || ""
+      ).trim();
+      if (!id || !text.includes(id)) {
+        continue;
+      }
+      text = text.split(id).join(
+        graphOperatorPresentationName(id, {
+          contract:
+            requirement?.apiContract,
+          fallback:
+            window.RMLI18n.t(
+              "ui.literal.79bf95179598"
+            )
+        })
+      );
+    }
+    text = text.replace(
+      /API Composite boundary\s*·\s*[^\s,;]+/gi,
+      "API Composite boundary"
+    );
+    text = text.replace(
+      /\bapi\.[a-z0-9_.-]*\.[0-9a-f]{8,}\b/gi,
+      id => graphOperatorPresentationName(id)
+    );
+    text = text.replace(
+      /\b(?:apiEnum[.:]|api:|normal(?:Exact|Array):|collectList:)[A-Za-z0-9_.:<>,\[\]-]+\b/g,
+      type => {
+        const display = String(
+          window.RMLModNodeRegistry
+            ?.displayType?.(type, {
+              qualified: true,
+              unavailableLabel:
+                window.RMLI18n.t(
+                  "graph.type.unavailable"
+                )
+            }) || ""
+        ).trim();
+        return display && display !== type
+          ? display
+          : window.RMLI18n.t(
+              "graph.type.unavailable"
+            );
+      }
+    );
+    text = text.replace(
+      /\bcontract(?:\.[a-z0-9_-]+)*\.[0-9a-f]{8,}\b/gi,
+      "stored contract"
+    );
+    text = text.replace(
+      /\bunavailable\.preserved\.[A-Za-z0-9_.:-]+\b/g,
+      window.RMLI18n.t(
+        "ui.literal.79bf95179598"
+      )
+    );
+    text = text.replace(
+      /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi,
+      "internal item"
+    );
+    text = text.replace(
+      /\b(?:[a-z][a-z0-9-]*-)?rebuild-n\d+(?:\.[A-Za-z_][A-Za-z0-9_]*)?\b/gi,
+      "internal endpoint"
+    );
+    text = text
+      .replace(
+        /\bnode\s+'([^']*)'/gi,
+        (match, token) =>
+          graphPresentationTokenIsInternal(token)
+            ? "stored node"
+            : match
+      )
+      .replace(
+        /\bwire\s+'([^']*)'/gi,
+        (match, token) =>
+          graphPresentationTokenIsInternal(token)
+            ? "stored wire"
+            : match
+      )
+      .replace(
+        /\bcomposite boundary\s+'([^']*)'/gi,
+        (match, token) =>
+          graphPresentationTokenIsInternal(token)
+            ? "composite boundary"
+            : match
+      )
+      .replace(
+        /\s+at\s+runtime-root(?:\/[^\s,.)]+)*/gi,
+        " in the saved graph"
+      );
+    return text;
+  }
+
+function graphVerificationIssuePresentations(
+    issues,
+    requirements = []
+  ) {
+    return [
+      ...new Set(
+        [...(issues || [])]
+          .map(issue =>
+            graphPresentationSafeText(
+              issue,
+              requirements
+            ).trim()
+          )
+          .filter(Boolean)
+      )
+    ].sort();
+  }
+
 function previewEffectiveOperatorId(node) {
     const definition = nodeDefinition(node);
     return String(
@@ -12600,8 +13715,16 @@ function previewApplyConfigurationAction(
       }
 
       statistics.runtimeOnlySkipped += 1;
+      const inputLabel = String(
+        nodeDefinition(node)?.inputs?.find(
+          input => input.id === inputId
+        )?.label ||
+        window.RMLI18n.t(
+          "ui.literal.b568d47f2e24"
+        )
+      );
       statistics.messages.push(
-        `${node.operatorId || window.RMLI18n.t("ui.literal.8c52afe081ba")} skipped because ${inputId} is unavailable in Preview: ${result?.reason || window.RMLI18n.t("ui.literal.6a38ceaa5ce0")}.`
+        `${graphNodePresentationName(node)} skipped because ${inputLabel} is unavailable in Preview: ${graphPresentationSafeText(result?.reason || window.RMLI18n.t("ui.literal.6a38ceaa5ce0"))}.`
       );
       return false;
     };
@@ -12722,8 +13845,10 @@ function previewApplyConfigurationAction(
     } else {
       statistics.runtimeOnlySkipped += 1;
       statistics.messages.push(
-        result?.message ||
-          `${effectiveOperatorId || node.operatorId} had no valid Preview target.`
+        graphPresentationSafeText(
+          result?.message ||
+          `${graphNodePresentationName(node)} had no valid Preview target.`
+        )
       );
     }
 
@@ -12848,7 +13973,9 @@ function previewConfigurationImpulse(
       if (visitCount > 32) {
         statistics.runtimeOnlySkipped += 1;
         statistics.messages.push(
-          `Preview stopped a repeating impulse at ${endpoint}.`
+          window.RMLI18n.t(
+            "graph.preview.repeating_impulse_stopped"
+          )
         );
         continue;
       }
@@ -13003,7 +14130,15 @@ function previewConfigurationImpulse(
             statistics.runtimeOnlySkipped +=
               1;
             statistics.messages.push(
-              `${node.operatorId || window.RMLI18n.t("ui.literal.69c486621fc3")} has multiple runtime-dependent impulse outputs.`
+              window.RMLI18n.format(
+                "graph.preview.runtime_outputs_ambiguous",
+                {
+                  node: graphNodePresentationName(
+                    node,
+                    definition
+                  )
+                }
+              )
             );
           }
 
@@ -13707,9 +14842,14 @@ function runtimeMonitorPresentation(
       );
 
     if (record) {
-      const runtimeType =
+      const rawRuntimeType =
         record.runtimeType ||
         record.graphType ||
+        window.RMLI18n.t("ui.literal.e149e083e939");
+      const runtimeType =
+        graphTypeInspectorText(
+          rawRuntimeType
+        ) ||
         window.RMLI18n.t("ui.literal.e149e083e939");
       const updated =
         record.updatedAtUtc
@@ -14071,7 +15211,7 @@ function graphPresentationVisible() {
   }
 
 function graphOutlineToggleMarkup() {
-    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-outline"></use></svg>`;
+    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-outline"></use></svg>`;
   }
 
 function markGraphPackPresentationPending() {
@@ -15280,7 +16420,7 @@ function restoreGraphPaletteScroll(
 
 function setGraphPanelToggleIcon(button, iconName) {
   if (!button) return;
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-${iconName}"></use></svg>`;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${iconName}"></use></svg>`;
 }
 
 let graphPanelScrollPreservationSequence = 0;
@@ -16345,6 +17485,16 @@ function createPaletteItem(
       );
     }
 
+    if (
+      isScannerCatalogApiDefinition(
+        definition
+      )
+    ) {
+      button.classList.add(
+        "catalog-api-node"
+      );
+    }
+
     let configurationPresent = false;
     if (isConfiguration) {
       button.dataset.graphConfiguration =
@@ -16380,7 +17530,7 @@ function createPaletteItem(
 
     const add =
       document.createElement("small");
-    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
 
     button.append(
       symbol,
@@ -16682,7 +17832,7 @@ function refreshGraphPaletteConfigurationAvailability() {
     );
     const marker = button.querySelector("small");
     if (marker) {
-      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
     }
   }
 
@@ -16736,6 +17886,7 @@ function visualFunctionPaletteEntries(
     }
 
     const records = [];
+    const nameOrdinals = new Map();
     for (const declaration of declarations) {
       const declarationId = String(
         declaration.id
@@ -16744,9 +17895,12 @@ function visualFunctionPaletteEntries(
         declaration.parameters?.methodName ||
         "Method"
       ).trim() || "Method";
+      const nameOrdinal =
+        (nameOrdinals.get(methodName) || 0) + 1;
+      nameOrdinals.set(methodName, nameOrdinal);
       const displayName =
         nameCounts.get(methodName) > 1
-          ? `${methodName} · ${declarationId.slice(-8)}`
+          ? `${methodName} (${nameOrdinal})`
           : methodName;
       const parameters = Array.isArray(
         declaration.parameters?.functionParameters
@@ -19674,10 +20828,7 @@ function createOperatorNodeRecord(
       id: makeId("graph-node"),
       kind: "operator",
       operatorId,
-      apiContract:
-        portableApiContract(
-          definition
-        ),
+      apiContract: null,
       x: position.x,
       y: position.y,
       width: null,
@@ -19698,6 +20849,11 @@ function createOperatorNodeRecord(
         )
       }
     };
+    node.apiContract =
+      portableApiContract(
+        definition,
+        node
+      );
 
     graph.nodes.push(node);
     synchronizeVisualFunctionReferenceNode(
@@ -21302,20 +22458,20 @@ function createToolbarButton(
 const GRAPH_TOOLBAR_ICONS =
     Object.freeze({
       center: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-center"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-center"></use></svg>`,
       clear: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-delete"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-delete"></use></svg>`,
       zoomOut: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-zoom-out"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-zoom-out"></use></svg>`,
       zoomIn: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-zoom-in"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-zoom-in"></use></svg>`,
       editMode: `
-        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-expand"></use></svg>
-        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-collapse"></use></svg>`,
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-expand"></use></svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-collapse"></use></svg>`,
       search: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-search"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-search"></use></svg>`,
       next: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-next"></use></svg>`
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-next"></use></svg>`
     });
 
 function createToolbarIconButton(
@@ -21798,7 +22954,7 @@ function renderGraphCanvas() {
       <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="{{i18n:js.presentation.f0d095db4021}}">
         <div class="rml-graph-search-overlay-head">
           <strong>{{i18n:js.presentation.f0d095db4021}}</strong>
-          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-close"></use></svg></button>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-close"></use></svg></button>
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="{{i18n:js.presentation.a00d3271edfc}}" aria-label="{{i18n:js.presentation.f0d095db4021}}" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
@@ -26669,15 +27825,19 @@ function createPortRow(
 
     const small =
       document.createElement("small");
+    const visibleDetail =
+      graphPresentationSafeText(
+        spec.detail || ""
+      ).trim();
     small.textContent =
-      spec.detail
+      visibleDetail
         ? `${
             concreteType
               ? typeLabel(concreteType)
               : constraintLabel(
                   spec.constraint
                 )
-          } · ${spec.detail}`
+          } · ${visibleDetail}`
         : concreteType
           ? typeLabel(concreteType)
           : `${spec.typeVar || "T"} · ${constraintLabel(
@@ -27904,6 +29064,10 @@ function createGraphNodeElementRmlOriginal(
     const apiCompositeNode =
       definition?.apiCompositeContainer ===
         true;
+    const catalogApiNode =
+      isScannerCatalogApiDefinition(
+        definition
+      );
     article.className =
       `rml-graph-node ${
         node.kind
@@ -27915,6 +29079,10 @@ function createGraphNodeElementRmlOriginal(
         expertNode
           ? " expert"
           : ""
+       }${
+         catalogApiNode
+           ? " catalog-api-node"
+           : ""
        }${
          apiCompositeNode
            ? " api-composite-node"
@@ -27975,9 +29143,10 @@ function createGraphNodeElementRmlOriginal(
     const strong =
       document.createElement("strong");
     strong.textContent =
-      node.label ||
-      definition?.title ||
-      window.RMLI18n.t("ui.literal.260f7a8cd4f6");
+      graphNodePresentationName(
+        node,
+        definition
+      );
     const small =
       document.createElement("small");
     small.textContent =
@@ -27993,7 +29162,7 @@ function createGraphNodeElementRmlOriginal(
       flip.className =
         "rml-graph-node-flip";
       flip.type = "button";
-      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-node-swap"></use></svg>`;
+      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-node-swap"></use></svg>`;
       flip.title = mirrored
         ? window.RMLI18n.t("ui.literal.9114b1bfc765")
         : window.RMLI18n.t("ui.literal.c8b7ca53198e");
@@ -28076,7 +29245,7 @@ function createGraphNodeElementRmlOriginal(
     body.dataset.rmlScrollLayerKey =
       `graph-node-body:${node.id}`;
     body.dataset.scrollLabel =
-      `${definition?.title || window.RMLI18n.t("ui.literal.64be19e2118d")} · Node contents`;
+      `${graphNodePresentationName(node, definition)} · Node contents`;
     body.addEventListener(
       "scroll",
       () => {
@@ -29774,6 +30943,11 @@ function synchronizeGraphSummaryNodes(
       const title = graphSummaryNodeTitle(node);
       const className =
         `rml-graph-node-summary ${node.kind}` +
+        (isScannerCatalogApiDefinition(
+          definition
+        )
+          ? " catalog-api-node"
+          : "") +
         (definition?.apiCompositeContainer === true
           ? " api-composite-node"
           : "") +
@@ -32605,9 +33779,10 @@ function graphGpuNodeRecord(node) {
     const definition =
       nodeDefinition(node);
     const title = String(
-      node?.label ||
-      definition?.title ||
-      window.RMLI18n.t("ui.literal.260f7a8cd4f6")
+      graphNodePresentationName(
+        node,
+        definition
+      )
     );
     return {
       nodeId: node.id,
@@ -33232,8 +34407,8 @@ function clearResolvedImportRecoveryMarkers(
           node.apiContract
         ) ===
           savedApiContractSemanticKey(
-            portableApiContract(
-              definition
+            portableApiContractForNode(
+              node
             )
           )
       ) {
@@ -36642,7 +37817,7 @@ function renderGraphInspector(options = {}) {
       empty.className =
         "empty-inspector";
       empty.innerHTML =
-        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-lightning"></use></svg></span>
+        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-lightning"></use></svg></span>
          <h2>{{i18n:ui.text.e02d912b50bb}}</h2>
          <p>{{i18n:ui.text.d19bd2965c4f}}</p>`;
       dom.inspectorContent.appendChild(
@@ -36671,7 +37846,7 @@ function installGraphInspectorSearch(root) {
       ":scope > .rml-graph-inspector-search"
     );
     const entrySelector =
-      ".rml-graph-inspector-card > p, .rml-graph-inspector-card > label, .rml-graph-inspector-card > fieldset, .rml-graph-inspector-card > small, .rml-graph-inspector-type-row, .rml-graph-display-value, .rml-graph-variadic-controls, .rml-graph-code-editor-actions, .rml-graph-inspector-actions > button";
+      ".rml-graph-inspector-card > p, .rml-graph-inspector-card > label, .rml-graph-inspector-card > fieldset, .rml-graph-inspector-card > small, .rml-csharp-contract-summary, .rml-graph-inspector-type-row, .rml-graph-display-value, .rml-graph-variadic-controls, .rml-graph-code-editor-actions, .rml-graph-inspector-actions > button";
     const currentEntries = () =>
       root.querySelectorAll(entrySelector);
     const entries = currentEntries();
@@ -39275,8 +40450,20 @@ function manualStructuralReplacementCandidates(
           descriptor.operatorId,
         apiContract:
           portableApiContract(
-            resolvedCandidate ||
-            candidate
+            candidate,
+            {
+              kind: "operator",
+              operatorId:
+                descriptor.operatorId,
+              parameters:
+                nodeGraphClone(
+                  requirement
+                    ?.nodeParameters || {}
+                ),
+              apiContract:
+                requirement?.apiContract ||
+                null
+            }
           ),
         title: String(
           resolvedCandidate?.title ||
@@ -39505,6 +40692,11 @@ function genericMissingCatalogDefinition(
       buildPorts("output");
 
     return {
+      title:
+        graphOperatorPresentationName(
+          requirement?.operatorId,
+          { contract }
+        ),
       unavailableApiContract: true,
       preservedApiContract: {
         ...contract,
@@ -39647,6 +40839,190 @@ function compatibleImportReplacementCandidates(
         })
       );
 
+    /*
+     * Suggestions and manual search deliberately use different scopes.
+     *
+     * `candidates` above remains the conservative suggestion/auto-repair
+     * set. `searchCandidates` is a browse index over the complete current
+     * API registry. It is only used after the user types a search query.
+     * Entries that are not structurally compatible remain visible but are
+     * disabled and explain why they cannot be selected.
+     */
+    const compatibleByOperatorId =
+      new Map(
+        candidates.map(candidate => [
+          String(candidate.operatorId || ""),
+          candidate
+        ])
+      );
+    const requiredKind =
+      manualReplacementRequiredKind(
+        requirement
+      );
+    const candidateIndex =
+      replacementCandidateIndex();
+    const searchDescriptors = [
+      ...candidateIndex.staticDescriptors
+    ];
+
+    for (const entry of
+      candidateIndex.dynamicEntries) {
+      const resolvedDefinition =
+        resolveNodeDefinition({
+          kind: "operator",
+          operatorId: entry.operatorId,
+          parameters:
+            nodeGraphClone(
+              requirement?.nodeParameters || {}
+            )
+        });
+      searchDescriptors.push({
+        operatorId: entry.operatorId,
+        definition: entry.definition,
+        resolvedDefinition,
+        catalogGenerated:
+          entry.definition?.catalogGenerated === true,
+        inputs:
+          compatibilityContractPorts(
+            resolvedDefinition,
+            "input"
+          ),
+        outputs:
+          compatibilityContractPorts(
+            resolvedDefinition,
+            "output"
+          )
+      });
+    }
+
+    const seenSearchOperators = new Set();
+    const searchCandidates = [];
+    for (const descriptor of searchDescriptors) {
+      const searchOperatorId =
+        String(descriptor?.operatorId || "").trim();
+      if (
+        !searchOperatorId ||
+        seenSearchOperators.has(searchOperatorId)
+      ) {
+        continue;
+      }
+      seenSearchOperators.add(searchOperatorId);
+
+      const exact =
+        compatibleByOperatorId.get(
+          searchOperatorId
+        );
+      if (exact) {
+        searchCandidates.push(
+          Object.freeze({
+            ...exact,
+            selectable: true,
+            incompatibilityReason: ""
+          })
+        );
+        continue;
+      }
+
+      const candidate =
+        descriptor.definition || {};
+      const resolvedCandidate =
+        descriptor.resolvedDefinition ||
+        candidate;
+      const candidateKind = String(
+        resolvedCandidate?.apiVerification?.kind ||
+        resolvedCandidate?.apiMemberKind ||
+        candidate?.apiVerification?.kind ||
+        candidate?.apiMemberKind ||
+        ""
+      );
+      const candidateContract =
+        portableApiContract(
+          candidate,
+          {
+            kind: "operator",
+            operatorId: searchOperatorId,
+            parameters:
+              nodeGraphClone(
+                requirement?.nodeParameters || {}
+              ),
+            apiContract:
+              requirement?.apiContract || null
+          }
+        );
+
+      const incompatibilityReason =
+        requiredKind &&
+        candidateKind &&
+        candidateKind !== requiredKind
+          ? window.RMLI18n.format(
+              "import.replacement.search.kind_mismatch",
+              {
+                expected: requiredKind,
+                actual: candidateKind
+              }
+            )
+          : window.RMLI18n.t(
+              "import.replacement.search.contract_mismatch"
+            );
+
+      searchCandidates.push(
+        Object.freeze({
+          operatorId: searchOperatorId,
+          apiContract: candidateContract
+            ? Object.freeze(
+                nodeGraphClone(candidateContract)
+              )
+            : null,
+          title: String(
+            resolvedCandidate?.title ||
+            candidate?.title ||
+            searchOperatorId
+          ),
+          symbol: String(
+            resolvedCandidate?.symbol ||
+            candidate?.symbol ||
+            "API"
+          ),
+          group: String(
+            resolvedCandidate?.group ||
+            candidate?.group ||
+            window.RMLI18n.t(
+              "ui.literal.924e20a624e5"
+            )
+          ),
+          description: String(
+            resolvedCandidate?.description ||
+            candidate?.description || ""
+          ),
+          paletteIcon: Object.freeze({
+            ...nodePaletteIconDescriptor(
+              resolvedCandidate || candidate
+            )
+          }),
+          matchMode: "catalog-search",
+          score: 0,
+          semanticProof: "incompatible",
+          exactSemanticName: false,
+          autoReconstructable: false,
+          selectable: false,
+          incompatibilityReason,
+          ambiguousPortCount: 0,
+          unmappedRequiredInputs:
+            Object.freeze([]),
+          inputMap: Object.freeze({}),
+          outputMap: Object.freeze({}),
+          unmappedInputPorts:
+            Object.freeze([]),
+          unmappedOutputPorts:
+            Object.freeze([]),
+          unmappedReferencedInputs:
+            Object.freeze([]),
+          unmappedReferencedOutputs:
+            Object.freeze([])
+        })
+      );
+    }
+
     return Object.freeze({
       operatorId,
       unavailableOperatorId:
@@ -39655,7 +41031,9 @@ function compatibleImportReplacementCandidates(
         ),
       matchMode,
       candidates:
-        Object.freeze(candidates)
+        Object.freeze(candidates),
+      searchCandidates:
+        Object.freeze(searchCandidates)
     });
   }
 
@@ -39792,10 +41170,9 @@ function nodeInspectorCard(node) {
     const definition =
       nodeDefinition(node) || {
         title:
-          String(
-            node?.label ||
-            node?.operatorId ||
-            window.RMLI18n.t("ui.auto.6867e1b5cf96")
+          graphNodePresentationName(
+            node,
+            null
           ),
         description: "",
         inputs: [],
@@ -39811,13 +41188,17 @@ function nodeInspectorCard(node) {
     const heading =
       document.createElement("h3");
     heading.textContent =
-      node.label ||
-      definition.title;
+      graphNodePresentationName(
+        node,
+        definition
+      );
 
     const description =
       document.createElement("p");
     description.textContent =
-      definition.description || "";
+      graphPresentationSafeText(
+        definition.description || ""
+      );
 
     card.append(
       heading,
@@ -40097,7 +41478,10 @@ function nodeInspectorCard(node) {
 
         automaticStatus.textContent =
           resolved
-            ? `Currently resolved as ${typeLabel(resolved)}.`
+            ? window.RMLI18n.format(
+                "graph.type.currently_resolved",
+                { type: typeLabel(resolved) }
+              )
             : window.RMLI18n.t("ui.literal.e963b0afc11f");
         card.appendChild(
           automaticStatus
@@ -40956,6 +42340,1149 @@ function localizedCodeEditorTooltip(field) {
       .replaceAll("{field}", () => String(field));
   }
 
+function localizedStructuredCSharpText(
+    key,
+    fallback
+  ) {
+    const translated = String(
+      window.RMLI18n?.t?.(key) ?? ""
+    );
+    return translated && translated !== key
+      ? translated
+      : fallback;
+  }
+
+async function copyStructuredCSharpPreviewText(
+    value,
+    button
+  ) {
+    const text = String(value ?? "");
+    const ownerDocument = button?.ownerDocument || document;
+    const ownerWindow = ownerDocument.defaultView || window;
+    const idleLabel = localizedStructuredCSharpText(
+      "csharp.contract.action.copy",
+      "Copy"
+    );
+    const copiedLabel = localizedStructuredCSharpText(
+      "csharp.contract.action.copied",
+      "Copied"
+    );
+    const failedLabel = localizedStructuredCSharpText(
+      "csharp.contract.action.copy_failed",
+      "Copy failed"
+    );
+
+    try {
+      let copied = false;
+      if (
+        ownerWindow.isSecureContext &&
+        ownerWindow.navigator?.clipboard?.writeText
+      ) {
+        try {
+          await ownerWindow.navigator.clipboard.writeText(text);
+          copied = true;
+        } catch (error) {
+          if (error?.name !== "NotAllowedError") throw error;
+        }
+      }
+
+      if (!copied) {
+        const previouslyFocused = ownerDocument.activeElement;
+        const temporary = ownerDocument.createElement("textarea");
+        temporary.value = text;
+        temporary.readOnly = true;
+        temporary.className = "rml-clipboard-fallback";
+        ownerDocument.body.appendChild(temporary);
+        try {
+          temporary.select();
+          temporary.setSelectionRange(0, temporary.value.length);
+          if (!ownerDocument.execCommand("copy")) {
+            throw new Error(failedLabel);
+          }
+        } finally {
+          temporary.remove();
+          const focusTarget =
+            previouslyFocused?.isConnected &&
+            typeof previouslyFocused.focus === "function"
+              ? previouslyFocused
+              : button;
+          try {
+            focusTarget?.focus?.({ preventScroll: true });
+          } catch {
+            focusTarget?.focus?.();
+          }
+        }
+      }
+
+      button.textContent = copiedLabel;
+      button.dataset.copyState = "copied";
+    } catch {
+      button.textContent = failedLabel;
+      button.dataset.copyState = "failed";
+    }
+
+    ownerWindow.setTimeout(() => {
+      if (!button?.isConnected) return;
+      button.textContent = idleLabel;
+      delete button.dataset.copyState;
+    }, 1600);
+  }
+
+function appendStructuredCodePresentation(
+    card,
+    node,
+    definition,
+    specification
+  ) {
+    if (
+      typeof specification?.presentation !==
+        "function"
+    ) {
+      return false;
+    }
+
+    let presentation;
+    try {
+      presentation = specification.presentation(
+        node,
+        definition
+      );
+    } catch (error) {
+      presentation = {
+        ok: false,
+        title: localizedStructuredCSharpText(
+          "csharp.contract.title.invalid_structured",
+          "Invalid structured C# contract"
+        ),
+        note:
+          error instanceof Error
+            ? error.message
+            : String(error)
+      };
+    }
+    if (!presentation) return false;
+
+    const section = document.createElement("section");
+    section.className =
+      "rml-csharp-contract-summary";
+    section.dataset.valid = String(
+      presentation.ok !== false
+    );
+
+    const header = document.createElement("div");
+    header.className = "rml-csharp-contract-header";
+    const heading = document.createElement("strong");
+    heading.textContent = String(
+      presentation.title || localizedStructuredCSharpText(
+        "csharp.contract.title.contract",
+        "C# contract"
+      )
+    );
+    const previewBadge = document.createElement("span");
+    previewBadge.className = "rml-csharp-contract-preview-badge";
+    previewBadge.textContent = localizedStructuredCSharpText(
+      "csharp.contract.label.preview_only",
+      "Preview only"
+    );
+    previewBadge.title = localizedStructuredCSharpText(
+      "csharp.contract.help.preview_only",
+      "Generated automatically from the editable fields below."
+    );
+    header.append(heading, previewBadge);
+    section.appendChild(header);
+
+    const signature = String(
+      presentation.signature || ""
+    ).trim();
+    if (signature) {
+      const block = document.createElement("pre");
+      block.className = "rml-csharp-contract-code";
+      block.tabIndex = 0;
+      block.setAttribute("role", "textbox");
+      block.setAttribute("aria-readonly", "true");
+      block.setAttribute("aria-multiline", "true");
+      block.setAttribute("aria-label", localizedStructuredCSharpText(
+        "csharp.contract.aria.signature_preview",
+        "C# signature, read-only preview"
+      ));
+      block.title = localizedStructuredCSharpText(
+        "csharp.contract.help.preview_only",
+        "Generated automatically from the editable fields below."
+      );
+      const code = document.createElement("code");
+      code.textContent = signature;
+      block.appendChild(code);
+      section.appendChild(block);
+    }
+
+    const expression = String(
+      presentation.expression || ""
+    ).trim();
+    if (expression && expression !== signature) {
+      const captionRow = document.createElement("div");
+      captionRow.className = "rml-csharp-contract-caption-row";
+      const caption = document.createElement("span");
+      caption.className =
+        "rml-csharp-contract-caption";
+      caption.textContent = localizedStructuredCSharpText(
+        "csharp.contract.label.generated_access",
+        "Generated access"
+      );
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className =
+        "button secondary rml-csharp-contract-copy";
+      copyButton.textContent = localizedStructuredCSharpText(
+        "csharp.contract.action.copy",
+        "Copy"
+      );
+      copyButton.title = localizedStructuredCSharpText(
+        "csharp.contract.help.copy_generated_access",
+        "Copy the generated C# access"
+      );
+      copyButton.setAttribute("aria-label", copyButton.title);
+      copyButton.addEventListener("click", () => {
+        void copyStructuredCSharpPreviewText(
+          expression,
+          copyButton
+        );
+      });
+      captionRow.append(caption, copyButton);
+      const block = document.createElement("pre");
+      block.className = "rml-csharp-contract-code";
+      block.tabIndex = 0;
+      block.setAttribute("role", "textbox");
+      block.setAttribute("aria-readonly", "true");
+      block.setAttribute("aria-multiline", "true");
+      block.setAttribute("aria-label", localizedStructuredCSharpText(
+        "csharp.contract.aria.generated_access_preview",
+        "Generated access, read-only preview"
+      ));
+      block.title = localizedStructuredCSharpText(
+        "csharp.contract.help.preview_only",
+        "Generated automatically from the editable fields below."
+      );
+      const code = document.createElement("code");
+      code.textContent = expression;
+      block.appendChild(code);
+      section.append(captionRow, block);
+    }
+
+    const fields = Array.isArray(
+      presentation.fields
+    )
+      ? presentation.fields
+      : [];
+    if (fields.length > 0) {
+      const details = document.createElement("dl");
+      for (const field of fields) {
+        const term = document.createElement("dt");
+        term.textContent = String(field?.label || "");
+        const value = document.createElement("dd");
+        value.textContent = String(field?.value || "—");
+        details.append(term, value);
+      }
+      section.appendChild(details);
+    }
+
+    const note = String(presentation.note || "").trim();
+    if (note) {
+      const copy = document.createElement("small");
+      copy.textContent = note;
+      section.appendChild(copy);
+    }
+    card.appendChild(section);
+    return true;
+  }
+
+function csharpStructuredTypeSuggestions() {
+    const suggestions = new Set([
+      "System.Object",
+      "System.String",
+      "System.Boolean",
+      "System.Int32",
+      "System.Int64",
+      "System.Single",
+      "System.Double",
+      "System.Decimal",
+      "System.Type",
+      "System.Void",
+      "System.Collections.Generic.List<System.Object>",
+      "System.Collections.Generic.Dictionary<System.String, System.Object>"
+    ]);
+    const registry = window.RMLModNodeRegistry;
+    const definitions = registry?.getTypeDefinitions?.() || {};
+    for (const definition of Object.values(definitions)) {
+      const csType = String(
+        definition?.csType ||
+        definition?.csharpType ||
+        ""
+      ).replaceAll("global::", "").trim();
+      if (csType && csType.length <= 260) {
+        suggestions.add(csType);
+      }
+    }
+    return [...suggestions].sort((left, right) =>
+      left.localeCompare(right)
+    );
+  }
+
+function rankedCSharpTypeSuggestions(
+    suggestions,
+    query,
+    limit = 18
+  ) {
+    const normalizedQuery = String(query ?? "")
+      .trim()
+      .toLocaleLowerCase();
+    const unique = new Map();
+
+    for (const candidate of Array.isArray(suggestions) ? suggestions : []) {
+      const value = String(candidate ?? "").trim();
+      if (!value || unique.has(value)) continue;
+      unique.set(value, unique.size);
+    }
+
+    return [...unique.entries()]
+      .map(([value, originalIndex]) => {
+        const normalized = value.toLocaleLowerCase();
+        const simpleName = normalized.slice(
+          Math.max(normalized.lastIndexOf("."), normalized.lastIndexOf("+")) + 1
+        );
+        let rank = 0;
+
+        if (normalizedQuery) {
+          if (normalized === normalizedQuery) rank = 0;
+          else if (simpleName === normalizedQuery) rank = 1;
+          else if (normalized.startsWith(normalizedQuery)) rank = 2;
+          else if (simpleName.startsWith(normalizedQuery)) rank = 3;
+          else if (normalized.includes(normalizedQuery)) rank = 4;
+          else rank = Number.POSITIVE_INFINITY;
+        }
+
+        return { value, originalIndex, rank };
+      })
+      .filter(entry => Number.isFinite(entry.rank))
+      .sort((left, right) =>
+        left.rank - right.rank ||
+        left.value.length - right.value.length ||
+        left.value.localeCompare(right.value) ||
+        left.originalIndex - right.originalIndex
+      )
+      .slice(0, Math.max(1, Number(limit) || 18))
+      .map(entry => entry.value);
+  }
+
+function appendCSharpTypeSuggestions(input, suggestions, suffix) {
+    if (!(input instanceof HTMLInputElement)) return null;
+
+    const listId = `rml-csharp-type-suggestions-${String(
+      suffix || makeId("types")
+    )}`;
+    const wrapper = document.createElement("div");
+    wrapper.className = "rml-csharp-type-combobox";
+
+    const inputRow = document.createElement("div");
+    inputRow.className = "rml-csharp-type-input-row";
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "rml-csharp-type-toggle";
+    toggle.setAttribute("aria-controls", listId);
+    toggle.setAttribute("aria-expanded", "false");
+    const toggleIcon = document.createElement("span");
+    toggleIcon.setAttribute("aria-hidden", "true");
+    toggleIcon.textContent = "▾";
+    toggle.appendChild(toggleIcon);
+
+    const list = document.createElement("div");
+    list.id = listId;
+    list.className = "rml-csharp-type-options";
+    list.setAttribute("role", "listbox");
+    list.hidden = true;
+
+    input.removeAttribute("list");
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-controls", listId);
+    input.setAttribute("aria-expanded", "false");
+
+    const existingParent = input.parentNode;
+    if (existingParent) existingParent.replaceChild(wrapper, input);
+    inputRow.append(input, toggle);
+    wrapper.append(inputRow, list);
+
+    let opened = false;
+    let renderedOptions = [];
+    let activeIndex = -1;
+
+    const toggleText = () => localizedStructuredCSharpText(
+      opened
+        ? "csharp.form.type_suggestions_hide"
+        : "csharp.form.type_suggestions_show",
+      opened ? "Hide C# type suggestions" : "Show C# type suggestions"
+    );
+
+    const syncExpandedState = () => {
+      input.setAttribute("aria-expanded", opened ? "true" : "false");
+      toggle.setAttribute("aria-expanded", opened ? "true" : "false");
+      toggle.setAttribute("aria-label", toggleText());
+      toggle.title = toggleText();
+      wrapper.classList.toggle("open", opened);
+      list.hidden = !opened;
+    };
+
+    const setActiveIndex = (index, scroll = true) => {
+      if (renderedOptions.length === 0) {
+        activeIndex = -1;
+        input.removeAttribute("aria-activedescendant");
+        return;
+      }
+
+      activeIndex = Math.max(
+        0,
+        Math.min(renderedOptions.length - 1, Number(index) || 0)
+      );
+      renderedOptions.forEach((option, optionIndex) => {
+        const active = optionIndex === activeIndex;
+        option.classList.toggle("active", active);
+        option.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      const activeOption = renderedOptions[activeIndex];
+      input.setAttribute("aria-activedescendant", activeOption.id);
+      if (scroll) activeOption.scrollIntoView({ block: "nearest" });
+    };
+
+    const close = () => {
+      if (!opened) return;
+      opened = false;
+      input.removeAttribute("aria-activedescendant");
+      activeIndex = -1;
+      syncExpandedState();
+    };
+
+    const choose = value => {
+      input.value = String(value ?? "");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      close();
+      input.focus({ preventScroll: true });
+    };
+
+    const renderOptions = () => {
+      const matches = rankedCSharpTypeSuggestions(
+        suggestions,
+        input.value,
+        18
+      );
+      list.replaceChildren();
+      renderedOptions = [];
+      activeIndex = -1;
+      input.removeAttribute("aria-activedescendant");
+
+      if (matches.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "rml-csharp-type-empty";
+        empty.textContent = localizedStructuredCSharpText(
+          "csharp.form.type_suggestions_empty",
+          "No matching known type. The typed C# type remains valid."
+        );
+        list.appendChild(empty);
+        return;
+      }
+
+      matches.forEach((value, index) => {
+        const option = document.createElement("div");
+        option.id = `${listId}-option-${index}`;
+        option.className = "rml-csharp-type-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", "false");
+        option.textContent = value;
+        option.title = value;
+        option.addEventListener("pointerdown", event => {
+          event.preventDefault();
+        });
+        option.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          choose(value);
+        });
+        option.addEventListener("pointerenter", () => {
+          setActiveIndex(index, false);
+        });
+        renderedOptions.push(option);
+        list.appendChild(option);
+      });
+
+      const exactIndex = matches.findIndex(value =>
+        value.toLocaleLowerCase() === input.value.trim().toLocaleLowerCase()
+      );
+      if (exactIndex >= 0) setActiveIndex(exactIndex, false);
+    };
+
+    const open = preferredIndex => {
+      renderOptions();
+      opened = true;
+      syncExpandedState();
+      if (renderedOptions.length > 0) {
+        setActiveIndex(
+          preferredIndex === "last"
+            ? renderedOptions.length - 1
+            : activeIndex >= 0
+              ? activeIndex
+              : 0
+        );
+      }
+    };
+
+    input.addEventListener("input", () => {
+      if (!opened) {
+        open();
+      } else {
+        renderOptions();
+      }
+    });
+
+    input.addEventListener("keydown", event => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (!opened) {
+          open(event.key === "ArrowUp" ? "last" : 0);
+        } else if (renderedOptions.length > 0) {
+          const direction = event.key === "ArrowDown" ? 1 : -1;
+          setActiveIndex(
+            activeIndex < 0
+              ? direction > 0 ? 0 : renderedOptions.length - 1
+              : (activeIndex + direction + renderedOptions.length) %
+                  renderedOptions.length
+          );
+        }
+      } else if (opened && event.key === "Home") {
+        event.preventDefault();
+        setActiveIndex(0);
+      } else if (opened && event.key === "End") {
+        event.preventDefault();
+        setActiveIndex(renderedOptions.length - 1);
+      } else if (opened && event.key === "Enter" && activeIndex >= 0) {
+        event.preventDefault();
+        choose(renderedOptions[activeIndex].textContent);
+      } else if (opened && event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      } else if (opened && event.key === "Tab") {
+        close();
+      }
+    });
+
+    toggle.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (opened) close();
+      else open();
+      input.focus({ preventScroll: true });
+    });
+
+    wrapper.addEventListener("focusout", () => {
+      queueMicrotask(() => {
+        if (!wrapper.contains(document.activeElement)) close();
+      });
+    });
+
+    syncExpandedState();
+    return wrapper;
+  }
+
+function csharpStructuredField(
+    parent,
+    labelText,
+    control,
+    { className = "", help = "" } = {}
+  ) {
+    const label = document.createElement("label");
+    label.className = `rml-csharp-structured-field ${className}`.trim();
+    const caption = document.createElement("span");
+    caption.textContent = labelText;
+    if (!control.hasAttribute("aria-label")) {
+      control.setAttribute("aria-label", labelText);
+    }
+    label.append(caption, control);
+    if (help) {
+      const copy = document.createElement("small");
+      copy.textContent = help;
+      label.appendChild(copy);
+    }
+    parent.appendChild(label);
+    return label;
+  }
+
+function csharpStructuredTextInput(value, placeholder = "") {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = String(value ?? "");
+    input.placeholder = placeholder;
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    return input;
+  }
+
+function csharpStructuredSelect(value, entries) {
+    const select = document.createElement("select");
+    for (const entry of entries) {
+      const option = document.createElement("option");
+      option.value = String(entry.value);
+      option.textContent = String(entry.label);
+      option.selected = option.value === String(value ?? "");
+      select.appendChild(option);
+    }
+    return select;
+  }
+
+function appendCSharpStructuredParameterControl(
+    card,
+    node,
+    specification
+  ) {
+    const kind = String(specification?.kind || "");
+    if (!["csharpTypeRef", "csharpMemberRef"].includes(kind)) {
+      return false;
+    }
+    if (
+      typeof specification.createEditorModel !== "function" ||
+      typeof specification.serializeEditorModel !== "function"
+    ) {
+      return false;
+    }
+
+    const host = document.createElement("section");
+    host.className = "rml-csharp-structured-editor";
+    host.dataset.editorKind = kind;
+    const suggestions = csharpStructuredTypeSuggestions();
+    let advancedOpen = false;
+    let model;
+    try {
+      model = specification.createEditorModel(
+        node.parameters?.[specification.key] ?? specification.default
+      );
+    } catch (error) {
+      const failure = document.createElement("p");
+      failure.className = "rml-csharp-structured-status error";
+      failure.textContent = error instanceof Error
+        ? error.message
+        : String(error);
+      host.appendChild(failure);
+      card.appendChild(host);
+      return true;
+    }
+
+    const status = document.createElement("p");
+    status.className = "rml-csharp-structured-status";
+    status.setAttribute("role", "status");
+
+    const setStatus = (text, tone = "") => {
+      status.textContent = String(text || "");
+      status.className = `rml-csharp-structured-status ${tone}`.trim();
+    };
+
+    const commitModel = () => {
+      let serialized;
+      try {
+        serialized = specification.serializeEditorModel(model);
+        const validation = typeof specification.validateEditorValue === "function"
+          ? specification.validateEditorValue(serialized, node)
+          : { ok: true };
+        if (validation?.ok !== true) {
+          setStatus(
+            String(validation?.error || localizedStructuredCSharpText(
+              "csharp.form.invalid",
+              "Complete the highlighted C# contract fields before the node is updated."
+            )),
+            "error"
+          );
+          return false;
+        }
+      } catch (error) {
+        setStatus(
+          error instanceof Error ? error.message : String(error),
+          "error"
+        );
+        return false;
+      }
+
+      const committed = commitCustomCSharpEditorValue(
+        node.id,
+        specification,
+        serialized
+      );
+      if (committed) {
+        const currentSummary = host.parentElement?.querySelector(
+          ":scope > .rml-csharp-contract-summary"
+        );
+        if (currentSummary) {
+          const buffer = document.createElement("div");
+          if (
+            appendStructuredCodePresentation(
+              buffer,
+              node,
+              nodeDefinition(node),
+              specification
+            )
+          ) {
+            currentSummary.replaceWith(buffer.firstElementChild);
+          }
+        }
+        setStatus(
+          localizedStructuredCSharpText(
+            "csharp.form.updated",
+            "Node ports and compatible wires are synchronized."
+          ),
+          "success"
+        );
+      }
+      return committed;
+    };
+
+    const bindInput = (control, update, eventName = "input") => {
+      control.addEventListener(eventName, () => {
+        update(control);
+        commitModel();
+      });
+      return control;
+    };
+
+    const appendTypeField = (
+      parent,
+      label,
+      value,
+      update,
+      suffix,
+      placeholder = "System.String"
+    ) => {
+      const input = csharpStructuredTextInput(value, placeholder);
+      bindInput(input, control => update(control.value));
+      const field = csharpStructuredField(parent, label, input);
+      appendCSharpTypeSuggestions(input, suggestions, `${node.id}-${suffix}`);
+      return field;
+    };
+
+    const heading = document.createElement("div");
+    heading.className = "rml-csharp-structured-heading";
+    const title = document.createElement("strong");
+    title.textContent = specification.label || localizedStructuredCSharpText(
+      kind === "csharpTypeRef"
+        ? "csharp.form.title.type"
+        : "csharp.form.title.member",
+      kind === "csharpTypeRef" ? "Choose C# type" : "Choose C# member"
+    );
+    const hint = document.createElement("small");
+    hint.textContent = localizedStructuredCSharpText(
+      "csharp.form.live_hint",
+      "Every valid change updates the node and its typed ports automatically."
+    );
+    heading.append(title, hint);
+    host.appendChild(heading);
+
+    const renderTypeEditor = () => {
+      const fields = document.createElement("div");
+      fields.className = "rml-csharp-structured-grid";
+      appendTypeField(
+        fields,
+        localizedStructuredCSharpText("csharp.form.type", "C# type"),
+        model.typeText,
+        value => { model.typeText = value; },
+        "type",
+        "System.Collections.Generic.List<System.String>"
+      );
+      host.appendChild(fields);
+    };
+
+    const renderArgumentRows = (
+      parent,
+      rows,
+      { generic = false, owner = false } = {}
+    ) => {
+      const list = document.createElement("div");
+      list.className = "rml-csharp-structured-list";
+      rows.forEach((row, index) => {
+        const line = document.createElement("div");
+        line.className = `rml-csharp-structured-row ${
+          generic ? "generic" : "parameter"
+        }${!generic && row.optional === true ? " has-default" : ""}`;
+
+        if (!generic) {
+          const name = csharpStructuredTextInput(
+            row.name,
+            `argument${index + 1}`
+          );
+          name.setAttribute("aria-label", localizedStructuredCSharpText(
+            "csharp.form.parameter_name",
+            "Argument name"
+          ));
+          name.className = "rml-csharp-structured-argument-name";
+          bindInput(name, control => { row.name = control.value; });
+          line.appendChild(name);
+        }
+
+        const type = csharpStructuredTextInput(
+          row.typeText,
+          "System.Object"
+        );
+        type.setAttribute("aria-label", localizedStructuredCSharpText(
+          generic
+            ? "csharp.form.generic_type"
+            : "csharp.form.parameter_type",
+          generic ? "Generic type" : "Argument type"
+        ));
+        type.className = "rml-csharp-structured-type";
+        bindInput(type, control => { row.typeText = control.value; });
+        line.appendChild(type);
+        const typeCombobox = appendCSharpTypeSuggestions(
+          type,
+          suggestions,
+          `${node.id}-${owner ? "owner-generic" : generic ? "generic" : "argument"}-${index}`
+        );
+        typeCombobox?.classList.add("rml-csharp-structured-type");
+
+        if (!generic) {
+          const modifier = csharpStructuredSelect(
+            row.refKind || "none",
+            [
+              { value: "none", label: localizedStructuredCSharpText("csharp.form.modifier.value", "Value") },
+              { value: "ref", label: "ref" },
+              { value: "out", label: "out" },
+              { value: "in", label: "in" }
+            ]
+          );
+          modifier.setAttribute("aria-label", localizedStructuredCSharpText(
+            "csharp.form.parameter_modifier",
+            "Argument modifier"
+          ));
+          modifier.className = "rml-csharp-structured-modifier";
+          bindInput(
+            modifier,
+            control => { row.refKind = control.value; },
+            "change"
+          );
+          line.appendChild(modifier);
+
+          const optionalLabel = document.createElement("label");
+          optionalLabel.className =
+            "rml-csharp-structured-check rml-csharp-structured-optional";
+          const optional = document.createElement("input");
+          optional.type = "checkbox";
+          optional.checked = row.optional === true;
+          const optionalText = document.createElement("span");
+          optionalText.textContent = localizedStructuredCSharpText(
+            "csharp.form.optional",
+            "Optional"
+          );
+          optionalLabel.append(optional, optionalText);
+          bindInput(optional, control => {
+            row.optional = control.checked;
+            row.hasDefaultValue = control.checked;
+            if (
+              control.checked &&
+              !String(row.defaultValueText || "").trim()
+            ) {
+              row.defaultValueText = `default(${String(row.typeText || "System.Object")})`;
+            }
+            queueMicrotask(render);
+          }, "change");
+          line.appendChild(optionalLabel);
+
+          if (row.optional === true) {
+            const defaultValue = csharpStructuredTextInput(
+              row.defaultValueText,
+              `default(${String(row.typeText || "System.Object")})`
+            );
+            defaultValue.setAttribute("aria-label", localizedStructuredCSharpText(
+              "csharp.form.default_value",
+              "Default value"
+            ));
+            defaultValue.className = "rml-csharp-structured-default";
+            bindInput(defaultValue, control => {
+              row.defaultValueText = control.value;
+              row.hasDefaultValue = true;
+            });
+            line.appendChild(defaultValue);
+          }
+        }
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "button secondary rml-csharp-structured-remove";
+        remove.textContent = "×";
+        remove.title = localizedStructuredCSharpText(
+          generic ? "csharp.form.remove_generic" : "csharp.form.remove_parameter",
+          generic ? "Remove generic type" : "Remove argument"
+        );
+        remove.setAttribute("aria-label", remove.title);
+        remove.addEventListener("click", () => {
+          rows.splice(index, 1);
+          commitModel();
+          render();
+        });
+        line.appendChild(remove);
+        list.appendChild(line);
+      });
+      parent.appendChild(list);
+    };
+
+    const appendListSection = (
+      parent,
+      titleText,
+      rows,
+      options = {}
+    ) => {
+      const section = document.createElement("section");
+      section.className = "rml-csharp-structured-subsection";
+      const bar = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = titleText;
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "button secondary";
+      add.textContent = localizedStructuredCSharpText(
+        options.generic ? "csharp.form.add_type" : "csharp.form.add_parameter",
+        options.generic ? "Add type" : "Add argument"
+      );
+      add.addEventListener("click", () => {
+        if (options.generic) {
+          rows.push({ typeText: "System.Object" });
+        } else {
+          rows.push({
+            name: `argument${rows.length + 1}`,
+            typeText: "System.Object",
+            refKind: "none",
+            optional: false,
+            hasDefaultValue: false,
+            defaultValueText: ""
+          });
+        }
+        commitModel();
+        render();
+      });
+      bar.append(title, add);
+      section.appendChild(bar);
+      renderArgumentRows(section, rows, options);
+      parent.appendChild(section);
+    };
+
+    const renderAssemblyReferences = (parent, rows) => {
+      const section = document.createElement("section");
+      section.className = "rml-csharp-structured-subsection";
+      const bar = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = localizedStructuredCSharpText(
+        "csharp.form.assemblies",
+        "Assembly references"
+      );
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "button secondary";
+      add.textContent = localizedStructuredCSharpText(
+        "csharp.form.add_assembly",
+        "Add assembly"
+      );
+      add.addEventListener("click", () => {
+        rows.push({ include: "", hintPath: "", private: false });
+        render();
+      });
+      bar.append(title, add);
+      section.appendChild(bar);
+
+      const list = document.createElement("div");
+      list.className = "rml-csharp-structured-list";
+      rows.forEach((row, index) => {
+        const line = document.createElement("div");
+        line.className = "rml-csharp-structured-row assembly";
+        const include = csharpStructuredTextInput(row.include, "FrooxEngine");
+        include.className = "rml-csharp-structured-assembly-name";
+        include.setAttribute("aria-label", localizedStructuredCSharpText(
+          "csharp.form.assembly_name",
+          "Assembly name"
+        ));
+        bindInput(include, control => { row.include = control.value; });
+        const hintPath = csharpStructuredTextInput(
+          row.hintPath,
+          "$(ResonitePath)FrooxEngine.dll"
+        );
+        hintPath.className = "rml-csharp-structured-assembly-path";
+        hintPath.setAttribute("aria-label", localizedStructuredCSharpText(
+          "csharp.form.hint_path",
+          "Hint path"
+        ));
+        bindInput(hintPath, control => { row.hintPath = control.value; });
+        const copyLabel = document.createElement("label");
+        copyLabel.className =
+          "rml-csharp-structured-check rml-csharp-structured-copy-local";
+        const copy = document.createElement("input");
+        copy.type = "checkbox";
+        copy.checked = row.private === true;
+        const copyText = document.createElement("span");
+        copyText.textContent = localizedStructuredCSharpText(
+          "csharp.form.copy_local",
+          "Copy local"
+        );
+        copyLabel.append(copy, copyText);
+        bindInput(copy, control => { row.private = control.checked; }, "change");
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "button secondary rml-csharp-structured-remove";
+        remove.textContent = "×";
+        remove.title = localizedStructuredCSharpText(
+          "csharp.form.remove_assembly",
+          "Remove assembly"
+        );
+        remove.addEventListener("click", () => {
+          rows.splice(index, 1);
+          commitModel();
+          render();
+        });
+        line.append(include, hintPath, copyLabel, remove);
+        list.appendChild(line);
+      });
+      section.appendChild(list);
+      parent.appendChild(section);
+    };
+
+    const renderMemberEditor = () => {
+      const fields = document.createElement("div");
+      fields.className = "rml-csharp-structured-grid";
+
+      const scope = csharpStructuredSelect(
+        model.isStatic === true ? "static" : "instance",
+        [
+          { value: "instance", label: localizedStructuredCSharpText("csharp.form.scope.instance", "Instance") },
+          { value: "static", label: localizedStructuredCSharpText("csharp.form.scope.static", "Static") }
+        ]
+      );
+      bindInput(scope, control => {
+        model.isStatic = control.value === "static";
+      }, "change");
+      csharpStructuredField(
+        fields,
+        localizedStructuredCSharpText("csharp.form.scope", "Access"),
+        scope
+      );
+
+      if (model.access !== "call") {
+        const memberKind = csharpStructuredSelect(
+          model.kind,
+          [
+            { value: "property", label: localizedStructuredCSharpText("csharp.form.kind.property", "Property") },
+            { value: "field", label: localizedStructuredCSharpText("csharp.form.kind.field", "Field") }
+          ]
+        );
+        bindInput(memberKind, control => {
+          model.kind = control.value;
+          if (control.value === "field") model.parameters = [];
+          queueMicrotask(render);
+        }, "change");
+        csharpStructuredField(
+          fields,
+          localizedStructuredCSharpText("csharp.form.member_kind", "Member kind"),
+          memberKind
+        );
+      }
+
+      appendTypeField(
+        fields,
+        localizedStructuredCSharpText("csharp.form.declaring_type", "Declaring type"),
+        model.declaringTypeText,
+        value => { model.declaringTypeText = value; },
+        "declaring-type",
+        "System.String"
+      );
+
+      const memberName = csharpStructuredTextInput(
+        model.name,
+        model.access === "call" ? "MethodName" : "MemberName"
+      );
+      bindInput(memberName, control => { model.name = control.value; });
+      csharpStructuredField(
+        fields,
+        model.access === "call"
+          ? localizedStructuredCSharpText("csharp.form.method_name", "Method name")
+          : localizedStructuredCSharpText("csharp.form.member_name", "Member name"),
+        memberName
+      );
+
+      if (model.access === "set") {
+        appendTypeField(
+          fields,
+          localizedStructuredCSharpText("csharp.form.value_type", "Value type"),
+          model.valueTypeText,
+          value => { model.valueTypeText = value; },
+          "value-type",
+          "System.Object"
+        );
+      } else {
+        appendTypeField(
+          fields,
+          model.access === "call"
+            ? localizedStructuredCSharpText("csharp.form.result_type", "Result type")
+            : localizedStructuredCSharpText("csharp.form.return_type", "Return type"),
+          model.resultTypeText,
+          value => { model.resultTypeText = value; },
+          "result-type",
+          model.access === "call" ? "System.Void" : "System.Object"
+        );
+      }
+      host.appendChild(fields);
+
+      if (model.kind !== "field") {
+        appendListSection(
+          host,
+          model.access === "call"
+            ? localizedStructuredCSharpText("csharp.form.arguments", "Arguments")
+            : localizedStructuredCSharpText("csharp.form.index_arguments", "Indexer arguments"),
+          model.parameters,
+          { generic: false }
+        );
+      }
+
+      const advanced = document.createElement("details");
+      advanced.className = "rml-csharp-structured-advanced";
+      advanced.open = advancedOpen;
+      advanced.addEventListener("toggle", () => {
+        advancedOpen = advanced.open;
+      });
+      const summary = document.createElement("summary");
+      summary.textContent = localizedStructuredCSharpText(
+        "csharp.form.advanced",
+        "Generic types and assembly details"
+      );
+      advanced.appendChild(summary);
+      appendListSection(
+        advanced,
+        localizedStructuredCSharpText("csharp.form.owner_generics", "Declaring-type bindings"),
+        model.ownerGenericArguments,
+        { generic: true, owner: true }
+      );
+      if (model.access === "call") {
+        appendListSection(
+          advanced,
+          localizedStructuredCSharpText("csharp.form.method_generics", "Method type arguments"),
+          model.genericArguments,
+          { generic: true }
+        );
+      }
+      renderAssemblyReferences(advanced, model.assemblyReferences);
+      host.appendChild(advanced);
+    };
+
+    const render = () => {
+      host.replaceChildren(heading);
+      if (kind === "csharpTypeRef") renderTypeEditor();
+      else renderMemberEditor();
+      host.appendChild(status);
+    };
+
+    render();
+    card.appendChild(host);
+    return true;
+  }
+
 function refreshVisibleGraphInspectorLanguage() {
     if (!dom.inspectorContent) return;
     refreshVisibleApiCompositeInspectorSaveActions();
@@ -41025,6 +43552,284 @@ window.addEventListener(
       refreshVisibleGraphLanguage();
     }
   );
+
+function graphTypeInspectorText(type) {
+    const value = String(type || "").trim();
+    if (!value) {
+      return "";
+    }
+    return String(
+      window.RMLModNodeRegistry
+        ?.displayType?.(value, {
+          qualified: true,
+          unavailableLabel:
+            window.RMLI18n.t(
+              "graph.type.unavailable"
+            )
+        }) ||
+      typeLabel(value) ||
+      window.RMLI18n.t(
+        "graph.type.unavailable"
+      )
+    );
+  }
+
+function graphTypeReferenceOptions(
+    node,
+    specification
+  ) {
+    const current = String(
+      node?.parameters?.[
+        specification.key
+      ] ?? ""
+    ).trim();
+    const includeAutomatic =
+      current === "" ||
+      String(
+        specification.default ?? ""
+      ) === "" ||
+      specification.allowEmptyGraphType ===
+        true;
+    const values = [];
+    const seen = new Set();
+    const add = value => {
+      const id = String(value ?? "").trim();
+      if ((!id && !includeAutomatic) || seen.has(id)) {
+        return;
+      }
+      seen.add(id);
+      values.push(id);
+    };
+
+    add(current);
+    if (includeAutomatic) {
+      add("");
+    }
+    for (const value of VALUE_TYPES) {
+      add(value);
+    }
+
+    return values
+      .map(value => ({
+        value,
+        label: value
+          ? graphTypeInspectorText(value)
+          : window.RMLI18n.t(
+              "graph.type.automatic"
+            )
+      }))
+      .sort((left, right) => {
+        if (left.value === "") return -1;
+        if (right.value === "") return 1;
+        return left.label.localeCompare(
+          right.label,
+          undefined,
+          {
+            numeric: true,
+            sensitivity: "base"
+          }
+        );
+      });
+  }
+
+function graphTypeListValues(value) {
+    return String(value ?? "")
+      .split(/[\r\n,;]+/)
+      .map(entry => entry.trim())
+      .filter(Boolean);
+  }
+
+function graphTypeListOptions(currentValue = "") {
+    const values = [];
+    const seen = new Set();
+    const add = value => {
+      const id = String(value ?? "").trim();
+      if (!id || seen.has(id)) {
+        return;
+      }
+      seen.add(id);
+      values.push(id);
+    };
+
+    add(currentValue);
+    for (const value of VALUE_TYPES) {
+      add(value);
+    }
+
+    return values
+      .map(value => ({
+        value,
+        text: graphTypeInspectorText(value)
+      }))
+      .sort((left, right) =>
+        left.text.localeCompare(
+          right.text,
+          undefined,
+          {
+            numeric: true,
+            sensitivity: "base"
+          }
+        )
+      );
+  }
+
+function graphTypeListControl(
+    control,
+    specification
+  ) {
+    const editor = document.createElement("div");
+    editor.className = "rml-graph-type-list";
+    const rows = document.createElement("div");
+    rows.className = "rml-graph-type-list-rows";
+    const actions = document.createElement("div");
+    actions.className = "rml-graph-type-list-actions";
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "rml-graph-type-list-add";
+    add.textContent = window.RMLI18n.t(
+      "graph.type.list.add"
+    );
+
+    let values = graphTypeListValues(
+      control.value
+    );
+    let draftPending = false;
+
+    const commit = () => {
+      const serialized = values.join("\n");
+      draftPending = false;
+      if (control.value === serialized) {
+        renderRows();
+        return;
+      }
+      control.value = serialized;
+      control.dispatchEvent(
+        new Event("change", {
+          bubbles: true
+        })
+      );
+    };
+
+    const renderRows = () => {
+      rows.replaceChildren();
+      const renderedValues = draftPending
+        ? [...values, ""]
+        : values;
+
+      if (renderedValues.length === 0) {
+        const empty = document.createElement("small");
+        empty.className = "rml-graph-type-list-empty";
+        empty.textContent = window.RMLI18n.t(
+          "graph.type.list.empty"
+        );
+        rows.appendChild(empty);
+      }
+
+      renderedValues.forEach((value, index) => {
+        const row = document.createElement("div");
+        row.className = "rml-graph-type-list-row";
+        const itemLabel = document.createElement("span");
+        itemLabel.className = "rml-graph-type-list-item-label";
+        itemLabel.textContent = window.RMLI18n
+          .t("graph.type.list.item")
+          .replace("{index}", String(index + 1));
+        const select = document.createElement("select");
+        const options = graphTypeListOptions(value);
+
+        if (!value) {
+          options.unshift({
+            value: "",
+            text: window.RMLI18n.t(
+              "graph.type.list.choose"
+            )
+          });
+        }
+
+        for (const entry of options) {
+          const option = document.createElement("option");
+          option.value = entry.value;
+          option.textContent = entry.text;
+          option.selected = entry.value === value;
+          select.appendChild(option);
+        }
+
+        select.addEventListener("change", () => {
+          const selected = String(select.value || "").trim();
+          if (!selected) {
+            return;
+          }
+          if (index < values.length) {
+            values[index] = selected;
+          } else {
+            values.push(selected);
+          }
+          commit();
+        });
+
+        const remove = visualFunctionParameterButton(
+          "remove",
+          window.RMLI18n
+            .t("graph.type.list.remove")
+            .replace("{index}", String(index + 1)),
+          () => {
+            if (index < values.length) {
+              values.splice(index, 1);
+              commit();
+            } else {
+              draftPending = false;
+              renderRows();
+            }
+          }
+        );
+        remove.classList.add(
+          "rml-graph-type-list-remove"
+        );
+
+        row.append(
+          itemLabel,
+          searchableSelectWrapper(
+            select,
+            options,
+            () =>
+              index < values.length
+                ? values[index]
+                : "",
+            window.RMLI18n.t(
+              "graph.type.search"
+            ),
+            true
+          ),
+          remove
+        );
+        rows.appendChild(row);
+      });
+
+      add.disabled = draftPending;
+    };
+
+    add.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (draftPending) {
+        return;
+      }
+      draftPending = true;
+      renderRows();
+      requestAnimationFrame(() => {
+        const triggers = editor.querySelectorAll(
+          ".rml-graph-searchable-trigger"
+        );
+        triggers[triggers.length - 1]?.focus({
+          preventScroll: true
+        });
+      });
+    });
+
+    actions.appendChild(add);
+    editor.append(rows, actions);
+    renderRows();
+    return editor;
+  }
 
 function appendParameterControl(
     card,
@@ -41175,7 +43980,7 @@ function appendParameterControl(
 
     const graphTypeOptions = includeVoid => {
       const values = [...new Set([...(includeVoid ? ["void"] : []), ...VALUE_TYPES])];
-      return values.map(value => ({ value, text: value === "void" ? window.RMLI18n.t("ui.visualFunctions.voidType") : typeLabel(value) }));
+      return values.map(value => ({ value, text: value === "void" ? window.RMLI18n.t("ui.visualFunctions.voidType") : graphTypeInspectorText(value) }));
     };
 
     for (const specification of specifications) {
@@ -41185,6 +43990,28 @@ function appendParameterControl(
       const kind =
         specification.kind ||
         "text";
+      const graphTypeReference =
+        specification.graphTypeReference ===
+        true;
+      const graphTypeList =
+        specification.graphTypeList === true;
+
+      appendStructuredCodePresentation(
+        card,
+        node,
+        definition,
+        specification
+      );
+
+      if (
+        appendCSharpStructuredParameterControl(
+          card,
+          node,
+          specification
+        )
+      ) {
+        continue;
+      }
 
       if (kind === "visualFunctionParameters") {
         if (!Array.isArray(node.parameters[specification.key])) {
@@ -41264,12 +44091,15 @@ function appendParameterControl(
           const name = String(declaration.parameters?.methodName || "").trim() || "Method";
           nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
         }
+        const nameOrdinals = new Map();
         const options = declarations.map(candidate => {
           const name = String(candidate.parameters?.methodName || "").trim() || "Method";
+          const ordinal = (nameOrdinals.get(name) || 0) + 1;
+          nameOrdinals.set(name, ordinal);
           return {
             value: candidate.id,
             text: nameCounts.get(name) > 1
-              ? `${name} · ${candidate.id.slice(-8)}`
+              ? `${name} (${ordinal})`
               : name
           };
         });
@@ -41277,7 +44107,10 @@ function appendParameterControl(
         if (!options.some(entry => entry.value === current)) {
           options.unshift({
             value: current,
-            text: String(node.parameters.methodName || "").trim() || current || "—"
+            text: String(node.parameters.methodName || "").trim() ||
+              window.RMLI18n.t(
+                "ui.visualFunctions.unavailableFunction"
+              )
           });
         }
         for (const entry of options) { const option = document.createElement("option"); option.value = entry.value; option.textContent = entry.text; option.selected = entry.value === current; select.appendChild(option); }
@@ -41355,18 +44188,27 @@ function appendParameterControl(
             text: option.textContent
           });
         }
-      } else if (kind === "select") {
+      } else if (
+        kind === "select" ||
+        graphTypeReference
+      ) {
         control =
           document.createElement("select");
         selectEntries = [];
         const sourceOptions =
-          typeof specification.options ===
-            "function"
-            ? specification.options(
+          graphTypeReference &&
+          kind !== "select"
+            ? graphTypeReferenceOptions(
                 node,
-                definition
+                specification
               )
-            : specification.options || [];
+            : typeof specification.options ===
+                "function"
+              ? specification.options(
+                  node,
+                  definition
+                )
+              : specification.options || [];
 
         for (const sourceOption of sourceOptions) {
           const value =
@@ -41394,7 +44236,15 @@ function appendParameterControl(
             value ?? ""
           );
           option.textContent = String(
-            text ?? value ?? ""
+            graphTypeReference
+              ? String(value ?? "").trim()
+                ? graphTypeInspectorText(
+                    value
+                  )
+                : window.RMLI18n.t(
+                    "graph.type.automatic"
+                  )
+              : text ?? value ?? ""
           );
           option.selected =
             String(
@@ -41404,6 +44254,41 @@ function appendParameterControl(
             ) === option.value;
           control.appendChild(option);
           selectEntries.push({
+            value: option.value,
+            text: option.textContent
+          });
+        }
+
+        const currentValue = String(
+          node.parameters[
+            specification.key
+          ] ?? ""
+        );
+        if (
+          graphTypeReference &&
+          !selectEntries.some(
+            entry =>
+              entry.value === currentValue
+          )
+        ) {
+          const option =
+            document.createElement(
+              "option"
+            );
+          option.value = currentValue;
+          option.textContent = currentValue
+            ? graphTypeInspectorText(
+                currentValue
+              )
+            : window.RMLI18n.t(
+                "graph.type.automatic"
+              );
+          option.selected = true;
+          control.insertBefore(
+            option,
+            control.firstChild
+          );
+          selectEntries.unshift({
             value: option.value,
             text: option.textContent
           });
@@ -41489,22 +44374,27 @@ function appendParameterControl(
         definition.customCSharpNode ===
           true &&
         kind === "code";
+      const detachedCodeEditorControl =
+        kind === "code" &&
+        customCSharpCodeControl;
       const customCSharpSourceControl =
         customCSharpCodeControl &&
         definition.customCSharpFile ===
           true &&
         specification.key === "source" &&
         !customCSharpEditor;
-      if (customCSharpCodeControl) {
+      if (detachedCodeEditorControl) {
         const editorBoundValue =
           customCSharpEditorCurrentValue(
             node.id,
             specification.key,
             control.value
           );
-        node.parameters[
-          specification.key
-        ] = editorBoundValue;
+        if (customCSharpCodeControl) {
+          node.parameters[
+            specification.key
+          ] = editorBoundValue;
+        }
         control.value = editorBoundValue;
         control.setAttribute(
           CUSTOM_CSHARP_CODE_NODE_ATTRIBUTE,
@@ -41552,7 +44442,9 @@ function appendParameterControl(
         let value;
         const dropdownChange =
           kind === "bool" ||
-          kind === "select";
+          kind === "select" ||
+          graphTypeReference ||
+          graphTypeList;
 
         if (kind === "bool") {
           value =
@@ -41587,7 +44479,7 @@ function appendParameterControl(
           control.value = value;
         }
 
-        if (customCSharpCodeControl) {
+        if (detachedCodeEditorControl) {
           commitCustomCSharpEditorValue(node.id, specification, String(value));
           const detached = customCSharpDetachedEditors.get(
             customCSharpDetachedEditorKey(node.id, specification.key)
@@ -41733,10 +44625,12 @@ function appendParameterControl(
         return true;
       };
 
-      if (!customCSharpCodeControl) trackGraphParameterGesture(control);
+      if (!detachedCodeEditorControl) trackGraphParameterGesture(control);
       control.addEventListener(
         kind === "bool" ||
-        kind === "select"
+        kind === "select" ||
+        graphTypeReference ||
+        graphTypeList
           ? "change"
           : "input",
         update
@@ -41775,8 +44669,19 @@ function appendParameterControl(
         );
       }
 
-      if (
-        (kind === "bool" || kind === "select") &&
+      if (graphTypeList) {
+        label.appendChild(
+          graphTypeListControl(
+            control,
+            specification
+          )
+        );
+      } else if (
+        (
+          kind === "bool" ||
+          kind === "select" ||
+          graphTypeReference
+        ) &&
         Array.isArray(selectEntries)
       ) {
         label.appendChild(
@@ -41786,10 +44691,14 @@ function appendParameterControl(
             () => node.parameters[
               specification.key
             ],
-            `Search ${String(
-              specification.label ||
-              specification.key
-            ).toLowerCase()}…`
+            graphTypeReference
+              ? window.RMLI18n.t(
+                  "graph.type.search"
+                )
+              : `Search ${String(
+                  specification.label ||
+                  specification.key
+                ).toLowerCase()}…`
           )
         );
       } else if (
@@ -41809,11 +44718,14 @@ function appendParameterControl(
             ).toLowerCase()}…`
           )
         );
-      } else {
+      } else if (specification.editorOnly !== true) {
         label.appendChild(control);
       }
 
-      if (specification.help) {
+      if (
+        specification.help &&
+        specification.editorOnly !== true
+      ) {
         const help =
           document.createElement("small");
         help.textContent =
@@ -41821,8 +44733,15 @@ function appendParameterControl(
         label.appendChild(help);
       }
 
-      card.appendChild(label);
-      if (customCSharpCodeControl) {
+      if (specification.editorOnly !== true) {
+        card.appendChild(label);
+      } else if (specification.help) {
+        const help = document.createElement("small");
+        help.className = "rml-csharp-contract-help";
+        help.textContent = specification.help;
+        card.appendChild(help);
+      }
+      if (detachedCodeEditorControl) {
         const openDetached =
           inspectorButton(
             window.RMLI18n.t("{{i18n:js.presentation.e3b65256eca5}}"),
@@ -41886,7 +44805,7 @@ const INSPECTOR_ACTION_PRESENTATION = Object.freeze({
 
   function inspectorButtonIconMarkup(actionId) {
     const iconName = INSPECTOR_ACTION_PRESENTATION[actionId]?.[0] || "more";
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-${iconName}"></use></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${iconName}"></use></svg>`;
   }
 
   function inspectorButtonTone(actionId) {
@@ -41952,7 +44871,7 @@ function visualFunctionParameterButton(action, label, handler) {
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("aria-hidden", "true");
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    use.setAttribute("href", `assets/rml-icons.svg?v=1.24.31-compile-only-on-zip#icon-visual-function-parameter-${action}`);
+    use.setAttribute("href", `assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-visual-function-parameter-${action}`);
     svg.appendChild(use);
     button.appendChild(svg);
     button.addEventListener("click", event => {
@@ -48017,6 +50936,72 @@ function normalizedPreservedImportContract(
     return contract;
   }
 
+function executablePortableHookDefinitionMatchesContract(
+    operatorId,
+    definition,
+    expectedContract
+  ) {
+    if (
+      !String(operatorId || "").startsWith(
+        "api.hook."
+      ) ||
+      definition?.portableApiHookContract !==
+        true ||
+      definition?.unavailableApiContract ===
+        true ||
+      definition?.catalogGenerated !== true ||
+      definition?.apiMemberKind !==
+        "hook-method" ||
+      typeof definition.codegenCollect !==
+        "function" ||
+      typeof definition.codegenExpression !==
+        "function"
+    ) {
+      return false;
+    }
+    const expected =
+      normalizedPreservedImportContract(
+        expectedContract
+      );
+    const preserved =
+      normalizedPreservedImportContract(
+        definition.preservedApiContract
+      );
+    const verified =
+      normalizedPreservedImportContract(
+        definition.apiVerification
+      );
+    const expectedKey =
+      savedApiContractSemanticKey(
+        expected
+      );
+    return (
+      Boolean(expectedKey) &&
+      savedApiContractSemanticKey(
+        preserved
+      ) === expectedKey &&
+      savedApiContractSemanticKey(
+        verified
+      ) === expectedKey &&
+      String(
+        definition.apiHookMethod
+          ?.declaringType || ""
+      ) ===
+        String(expected?.ownerType || "") &&
+      String(
+        definition.apiHookMethod?.name || ""
+      ) ===
+        String(expected?.memberName || "") &&
+      String(
+        definition.apiHookMethod
+          ?.visibility || ""
+      ) ===
+        String(
+          expected?.hookVisibility || ""
+        )
+    );
+  }
+
 function preservedImportContractPortMap(
     contract,
     direction,
@@ -48076,12 +51061,32 @@ function freezePreservedImportPlanValue(
   }
 
 function planPreservedCatalogOperatorsForImport(
-    value = graph,
-    unresolvedRequirements = []
-  ) {
-    const issues = new Set();
-    const expected = new Map();
-    for (const requirement of
+  value = graph,
+  unresolvedRequirements = []
+) {
+  const issues = new Set();
+  const typeContractNormalizer =
+    window.RMLGraphTypeImportMigrations
+      ?.normalizedTypeContracts;
+  const normalizedTypes =
+    typeof typeContractNormalizer ===
+      "function"
+      ? typeContractNormalizer(
+          value?.portableTypeContracts
+        )
+      : {
+          contracts: [],
+          conflicts: [
+            "The portable graph type contract verifier is unavailable."
+          ]
+        };
+  for (const conflict of
+    normalizedTypes.conflicts || []) {
+    issues.add(String(conflict));
+  }
+  const expected = new Map();
+  const expectedByOperator = new Map();
+  for (const requirement of
       Array.isArray(unresolvedRequirements)
         ? unresolvedRequirements
         : []) {
@@ -48104,21 +51109,40 @@ function planPreservedCatalogOperatorsForImport(
       }
       const semanticKey =
         savedApiContractSemanticKey(contract);
-      const previous = expected.get(operatorId);
-      if (
-        previous &&
-        previous.semanticKey !== semanticKey
-      ) {
+      if (!semanticKey) {
         issues.add(
-          `${operatorId}: conflicting required contracts`
+          `${operatorId}: its portable API contract is not canonical`
         );
         continue;
       }
-      expected.set(operatorId, {
-        operatorId,
-        semanticKey,
-        apiContract: contract,
-        inputPorts: new Set(
+      const specializationKey =
+        `${operatorId}\u0000${semanticKey}`;
+      let entry = expected.get(
+        specializationKey
+      );
+      if (!entry) {
+        entry = {
+          operatorId,
+          semanticKey,
+          specializationKey,
+          apiContract: contract,
+          inputPorts: new Set(),
+          outputPorts: new Set()
+        };
+        expected.set(
+          specializationKey,
+          entry
+        );
+        const family =
+          expectedByOperator.get(operatorId) ||
+          [];
+        family.push(entry);
+        expectedByOperator.set(
+          operatorId,
+          family
+        );
+      }
+      for (const portId of
           (Array.isArray(
             requirement?.inputPorts
           )
@@ -48128,8 +51152,10 @@ function planPreservedCatalogOperatorsForImport(
               String(portId || "").trim()
             )
             .filter(Boolean)
-        ),
-        outputPorts: new Set(
+      ) {
+        entry.inputPorts.add(portId);
+      }
+      for (const portId of
           (Array.isArray(
             requirement?.outputPorts
           )
@@ -48139,8 +51165,9 @@ function planPreservedCatalogOperatorsForImport(
               String(portId || "").trim()
             )
             .filter(Boolean)
-        )
-      });
+      ) {
+        entry.outputPorts.add(portId);
+      }
     }
 
     const plans = new Map();
@@ -48167,7 +51194,7 @@ function planPreservedCatalogOperatorsForImport(
         ).trim();
         if (
           node?.kind !== "operator" ||
-          !expected.has(operatorId)
+          !expectedByOperator.has(operatorId)
         ) {
           continue;
         }
@@ -48200,30 +51227,24 @@ function planPreservedCatalogOperatorsForImport(
           );
         const semanticKey =
           savedApiContractSemanticKey(contract);
+        const specializationKey =
+          `${operatorId}\u0000${semanticKey}`;
         const expectedRequirement =
-          expected.get(operatorId);
-        if (
-          semanticKey !==
-            expectedRequirement.semanticKey
-        ) {
+          expected.get(specializationKey);
+        if (!expectedRequirement) {
           issues.add(
-            `${operatorId}: stored node contract conflicts with its import requirement`
-          );
-        }
-        let plan = plans.get(operatorId);
-        if (
-          plan &&
-          plan.semanticKey !== semanticKey
-        ) {
-          issues.add(
-            `${operatorId}: multiple stored nodes use conflicting contracts`
+            `${operatorId}: node '${String(node?.id || "<missing>")}' has no exact specialization requirement`
           );
           continue;
         }
+        let plan = plans.get(
+          specializationKey
+        );
         if (!plan) {
           plan = {
             operatorId,
             semanticKey,
+            specializationKey,
             apiContract: contract,
             nodeParameters:
               node?.parameters &&
@@ -48235,11 +51256,28 @@ function planPreservedCatalogOperatorsForImport(
                 : {},
             inputPorts,
             outputPorts,
-            nodeCount: 0
+            nodeCount: 0,
+            nodeReferences: []
           };
-          plans.set(operatorId, plan);
+          plans.set(
+            specializationKey,
+            plan
+          );
         }
         plan.nodeCount += 1;
+        plan.nodeReferences.push({
+          path,
+          nodeId: String(node?.id || ""),
+          nodeParameters:
+            node?.parameters &&
+            typeof node.parameters ===
+              "object" &&
+            !Array.isArray(node.parameters)
+              ? nodeGraphClone(
+                  node.parameters
+                )
+              : {}
+        });
         planByNodeId.set(
           String(node?.id || ""),
           plan
@@ -48340,7 +51378,7 @@ function planPreservedCatalogOperatorsForImport(
     for (const requirement of
       expected.values()) {
       const plan = plans.get(
-        requirement.operatorId
+        requirement.specializationKey
       );
       if (!plan) {
         issues.add(
@@ -48371,7 +51409,13 @@ function planPreservedCatalogOperatorsForImport(
       if (
         existing &&
         existing.unavailableApiContract !==
-          true
+          true &&
+        !executablePortableDefinitionMatchesContract(
+          requirement.operatorId,
+          existing,
+          requirement.apiContract,
+          plan?.nodeParameters || {}
+        )
       ) {
         issues.add(
           `${requirement.operatorId}: its exact registry id is already owned by a real or integrated definition`
@@ -48383,6 +51427,9 @@ function planPreservedCatalogOperatorsForImport(
       .sort((left, right) =>
         left.operatorId.localeCompare(
           right.operatorId
+        ) ||
+        left.semanticKey.localeCompare(
+          right.semanticKey
         )
       )
       .map(plan => ({
@@ -48399,17 +51446,27 @@ function planPreservedCatalogOperatorsForImport(
         outputPorts: [
           ...plan.outputPorts.keys()
         ],
-        nodeCount: plan.nodeCount
+        nodeCount: plan.nodeCount,
+        nodeReferences:
+          nodeGraphClone(
+            plan.nodeReferences || []
+          )
       }));
     const planKey = JSON.stringify(
-      entries.map(entry => ({
-        operatorId: entry.operatorId,
-        apiContract:
-          entry.apiContract,
-        inputPorts: entry.inputPorts,
-        outputPorts: entry.outputPorts,
-        nodeCount: entry.nodeCount
-      }))
+      {
+        entries: entries.map(entry => ({
+          operatorId: entry.operatorId,
+          apiContract:
+            entry.apiContract,
+          inputPorts: entry.inputPorts,
+          outputPorts: entry.outputPorts,
+          nodeCount: entry.nodeCount,
+          nodeReferences:
+            entry.nodeReferences
+        })),
+        typeContracts:
+          normalizedTypes.contracts || []
+      }
     );
     const result = {
       ready:
@@ -48418,17 +51475,25 @@ function planPreservedCatalogOperatorsForImport(
         issues.size === 0,
       planKey,
       entries,
-      operatorIds:
-        entries.map(entry =>
-          entry.operatorId
+      typeContracts:
+        nodeGraphClone(
+          normalizedTypes.contracts || []
         ),
+      operatorIds:
+        [...new Set(entries.map(entry =>
+          entry.operatorId
+        ))],
       nodeCount:
         entries.reduce(
           (total, entry) =>
             total + entry.nodeCount,
           0
         ),
-      issues: [...issues].sort()
+      issues:
+        graphVerificationIssuePresentations(
+          issues,
+          [...expected.values()]
+        )
     };
     return freezePreservedImportPlanValue(
       result
@@ -48448,6 +51513,8 @@ function verifyPreservedCatalogOperatorsForImport(
       entry => ({
         operatorId: entry.operatorId,
         apiContract: entry.apiContract,
+        nodeParameters:
+          entry.nodeParameters,
         inputPorts: entry.inputPorts,
         outputPorts: entry.outputPorts
       })
@@ -48482,43 +51549,68 @@ function verifyPreservedCatalogOperatorsForImport(
         normalizedPreservedImportContract(
           definition?.preservedApiContract
         );
-      if (
-        definition?.unavailableApiContract !==
-          true ||
+      const executablePortable =
+        executablePortableDefinitionMatchesContract(
+          entry.operatorId,
+          definition,
+          expectedContract,
+          entry.nodeParameters || {}
+        );
+      const unavailablePlaceholder =
+        definition?.unavailableApiContract ===
+          true &&
         savedApiContractSemanticKey(
           actualContract
-        ) !==
+        ) ===
           savedApiContractSemanticKey(
             expectedContract
-          )
+          );
+      if (
+        !unavailablePlaceholder &&
+        !executablePortable
       ) {
         issues.add(
-          `${entry.operatorId}: the exact unavailable registry contract was not installed`
+          `${entry.operatorId}: the exact portable registry contract was not installed`
         );
         continue;
       }
-      const portKey = (
-        direction,
-        port
-      ) => JSON.stringify({
-        id: String(port?.id || ""),
-        type: String(port?.type || ""),
-        typeVar: String(
-          port?.typeVar || ""
-        ),
-        generic: port?.generic === true,
-        optional: port?.optional === true,
-        role: String(
-          port?.semanticRole ||
-          port?.role ||
-          preservedImportPortRole(
-            expectedContract.kind,
-            direction,
-            port,
-            expectedContract.parameters
-          )
-        )
-      });
+      let resolvedDefinition = definition;
+      if (
+        typeof definition?.resolveDefinition ===
+          "function"
+      ) {
+        try {
+          const resolved =
+            definition.resolveDefinition({
+              kind: "operator",
+              operatorId:
+                entry.operatorId,
+              parameters:
+                nodeGraphClone(
+                  entry.nodeParameters || {}
+                ),
+              apiContract:
+                nodeGraphClone(
+                  expectedContract
+                )
+            });
+          if (
+            resolved &&
+            typeof resolved === "object" &&
+            !Array.isArray(resolved)
+          ) {
+            resolvedDefinition = {
+              ...definition,
+              ...resolved
+            };
+          }
+        } catch (error) {
+          issues.add(
+            `${entry.operatorId}: installed specialization could not resolve (${String(error?.message || error)})`
+          );
+          continue;
+        }
+      }
       for (const [direction, contractKey, definitionKey] of [
         ["input", "inputPorts", "inputs"],
         ["output", "outputPorts", "outputs"]
@@ -48526,14 +51618,24 @@ function verifyPreservedCatalogOperatorsForImport(
         const expectedPorts = (
           expectedContract[contractKey] || []
         ).map(port =>
-          portKey(direction, port)
+          portableDefinitionPortKey(
+            expectedContract,
+            direction,
+            port
+          )
         );
         const actualPorts = (
-          Array.isArray(definition[definitionKey])
-            ? definition[definitionKey]
+          Array.isArray(
+            resolvedDefinition[definitionKey]
+          )
+            ? resolvedDefinition[definitionKey]
             : []
         ).map(port =>
-          portKey(direction, port)
+          portableDefinitionPortKey(
+            expectedContract,
+            direction,
+            port
+          )
         );
         if (
           JSON.stringify(actualPorts) !==
@@ -48555,8 +51657,517 @@ function verifyPreservedCatalogOperatorsForImport(
         )
       ),
       issues: Object.freeze(
-        [...issues].sort()
+        graphVerificationIssuePresentations(
+          issues,
+          entries
+        )
       )
+  });
+}
+
+function catalogDefinitionMatchesPortableExportRequirement(
+  requirement,
+  definition
+) {
+  const operatorId = String(
+    requirement?.operatorId || ""
+  );
+  const expected =
+    normalizedPreservedImportContract(
+      requirement?.apiContract
+    );
+  const catalog =
+    window.RMLResoniteApiCatalog ||
+    window.RMLFrooxComponentCatalog ||
+    null;
+  const report =
+    window.RMLApiNodeFactoryReport;
+  const verification =
+    definition?.apiVerification;
+  if (
+    !operatorId ||
+    !expected ||
+    !catalog ||
+    report?.verificationPassed !== true ||
+    definition?.catalogGenerated !== true ||
+    definition?.scannerCatalogGenerated !==
+      true ||
+    definition?.unavailableApiContract ===
+      true ||
+    definition
+      ?.portableApiExecutableContract ===
+        true ||
+    definition?.portableApiHookContract ===
+      true ||
+    !verification ||
+    (
+      String(verification.nodeId || "") &&
+      String(verification.nodeId) !==
+        operatorId
+    ) ||
+    String(
+      verification.catalogFingerprint ||
+      ""
+    ) !==
+      String(
+        catalog.catalogFingerprint || ""
+      ) ||
+    String(report.catalogFingerprint || "") !==
+      String(
+        catalog.catalogFingerprint || ""
+      ) ||
+    String(report.engineVersion || "") !==
+      String(catalog.engineVersion || "")
+  ) {
+    return false;
+  }
+
+  const probeNode = {
+    kind: "operator",
+    operatorId,
+    parameters:
+      requirement?.nodeParameters &&
+      typeof requirement.nodeParameters ===
+        "object" &&
+      !Array.isArray(
+        requirement.nodeParameters
+      )
+        ? nodeGraphClone(
+            requirement.nodeParameters
+          )
+        : {},
+    apiContract: nodeGraphClone(expected)
+  };
+  let available;
+  let resolved = definition;
+  try {
+    available = portableApiContract(
+      definition,
+      probeNode
+    );
+    if (
+      typeof definition.resolveDefinition ===
+        "function"
+    ) {
+      const value =
+        definition.resolveDefinition(
+          probeNode
+        );
+      if (
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+      ) {
+        resolved = {
+          ...definition,
+          ...value
+        };
+      }
+    }
+  } catch {
+    return false;
+  }
+  if (
+    !available ||
+    savedApiContractBaseKey(available) !==
+      savedApiContractBaseKey(expected)
+  ) {
+    return false;
+  }
+
+  const normalizedBindings = value =>
+    Object.fromEntries(
+      Object.entries(
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+          ? value
+          : {}
+      )
+        .map(([key, type]) => [
+          String(key),
+          String(type || "")
+            .replace(/^global::/, "")
+            .replace(/\s+/g, "")
+        ])
+        .sort(([left], [right]) =>
+          left.localeCompare(right)
+        )
+    );
+  if (
+    JSON.stringify(
+      normalizedBindings(
+        available.genericBindings
+      )
+    ) !==
+      JSON.stringify(
+        normalizedBindings(
+          expected.genericBindings
+        )
+      ) ||
+    (
+      expected.kind === "enum" &&
+      String(available.enumValue || "") !==
+        String(expected.enumValue || "")
+    )
+  ) {
+    return false;
+  }
+
+  for (const [direction, contractKey, definitionKey] of [
+    ["input", "inputPorts", "inputs"],
+    ["output", "outputPorts", "outputs"]
+  ]) {
+    const actualById = new Map(
+      (Array.isArray(resolved?.[definitionKey])
+        ? resolved[definitionKey]
+        : []).map(port => [
+        String(port?.id || ""),
+        port
+      ])
+    );
+    const availableById = new Map(
+      (Array.isArray(available?.[contractKey])
+        ? available[contractKey]
+        : []).map(port => [
+        String(port?.id || ""),
+        port
+      ])
+    );
+    const expectedPorts = Array.isArray(
+      expected?.[contractKey]
+    )
+      ? expected[contractKey]
+      : [];
+    for (const port of expectedPorts) {
+      const id = String(port?.id || "");
+      const actual = actualById.get(id);
+      const availablePort =
+        availableById.get(id);
+      if (!id || !actual || !availablePort) {
+        return false;
+      }
+      const expectedCsType = String(
+        port?.csType || ""
+      )
+        .replace(/^global::/, "")
+        .replace(/\s+/g, "");
+      const actualCsType = String(
+        actual?.apiCsType ||
+        actual?.csType ||
+        availablePort?.csType ||
+        ""
+      )
+        .replace(/^global::/, "")
+        .replace(/\s+/g, "");
+      if (
+        expectedCsType &&
+        actualCsType &&
+        expectedCsType !== actualCsType
+      ) {
+        return false;
+      }
+    }
+    const requiredPortIds = Array.isArray(
+      requirement?.[
+        direction === "input"
+          ? "inputPorts"
+          : "outputPorts"
+      ]
+    )
+      ? requirement[
+          direction === "input"
+            ? "inputPorts"
+            : "outputPorts"
+        ]
+      : [];
+    if (
+      requiredPortIds.some(portId =>
+        !actualById.has(String(portId || ""))
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function verifyPortableCatalogOperatorsForExport(
+  value,
+    requiredNodes = []
+  ) {
+    const requirements = (
+      Array.isArray(requiredNodes)
+        ? requiredNodes
+        : []
+  ).filter(requirement =>
+      requirement?.catalogScope === "api"
+    );
+  const issues = new Set();
+  const portableRequirements = [];
+  const catalogRequirements = [];
+  const unresolvedRequirements = [];
+  for (const requirement of requirements) {
+    const definition =
+      OPERATOR_DEFINITIONS[
+        String(
+          requirement?.operatorId || ""
+        )
+      ];
+    if (
+      definition &&
+      (
+        definition
+          .portableApiExecutableContract ===
+            true ||
+        definition
+          .portableApiHookContract === true
+      ) &&
+      executablePortableDefinitionMatchesContract(
+        requirement.operatorId,
+        definition,
+        requirement.apiContract,
+        requirement.nodeParameters || {}
+      )
+    ) {
+      portableRequirements.push(
+        requirement
+      );
+    } else if (
+      catalogDefinitionMatchesPortableExportRequirement(
+        requirement,
+        definition
+      )
+    ) {
+      catalogRequirements.push(
+        requirement
+      );
+    } else {
+      unresolvedRequirements.push(
+        requirement
+      );
+      issues.add(
+        `${String(requirement?.operatorId || "<missing>")}: neither an exact catalog definition nor an exact executable portable contract is installed`
+      );
+    }
+  }
+  const plan = portableRequirements.length > 0
+    ? planPreservedCatalogOperatorsForImport(
+        value,
+        portableRequirements
+      )
+    : Object.freeze({
+        ready: true,
+        planKey: "",
+        entries: Object.freeze([]),
+        operatorIds: Object.freeze([]),
+        nodeCount: 0,
+        issues: Object.freeze([])
+      });
+  const installed = portableRequirements.length > 0
+    ? verifyPreservedCatalogOperatorsForImport(
+        value,
+        plan
+      )
+    : Object.freeze({
+        ready: true,
+        nodeCount: 0,
+        operatorIds: Object.freeze([]),
+        issues: Object.freeze([])
+      });
+
+    for (const issue of plan.issues || []) {
+      issues.add(String(issue));
+    }
+    for (const issue of installed.issues || []) {
+      issues.add(String(issue));
+    }
+
+    let apiNodeCount = 0;
+    const visited = new Set();
+    const visit = documentValue => {
+      if (
+        !documentValue ||
+        typeof documentValue !== "object" ||
+        Array.isArray(documentValue) ||
+        visited.has(documentValue) ||
+        !Array.isArray(documentValue.nodes)
+      ) {
+        return;
+      }
+      visited.add(documentValue);
+      for (const node of documentValue.nodes) {
+        if (
+          node?.kind === "operator" &&
+          String(node?.operatorId || "")
+            .startsWith("api.")
+        ) {
+          apiNodeCount += 1;
+        }
+      }
+      for (const collection of [
+        documentValue.customCSharpFiles,
+        documentValue.apiCompositeGraphs
+      ]) {
+        if (
+          collection &&
+          typeof collection === "object" &&
+          !Array.isArray(collection)
+        ) {
+          for (const nested of
+            Object.values(collection)) {
+            visit(nested);
+          }
+        }
+      }
+    };
+    visit(value);
+
+    const coveredNodeReferences = new Set();
+    for (const entry of [
+      ...(plan.entries || []),
+      ...catalogRequirements
+    ]) {
+      for (const reference of
+        Array.isArray(entry?.nodeReferences)
+          ? entry.nodeReferences
+          : []) {
+        const nodeId = String(
+          reference?.nodeId || ""
+        );
+        if (nodeId) {
+          coveredNodeReferences.add(
+            `${String(reference?.path || "runtime-root")}\u0000${nodeId}`
+          );
+        }
+      }
+    }
+    if (
+      coveredNodeReferences.size !==
+        apiNodeCount
+    ) {
+      issues.add(
+        "The hybrid portable/catalog export plan does not cover every API node in the runtime graph."
+      );
+    }
+
+    for (const entry of plan.entries || []) {
+      const definition =
+        OPERATOR_DEFINITIONS[
+          entry.operatorId
+        ];
+      const portableExecutable = Boolean(
+        definition?.unavailableApiContract !==
+          true &&
+        (
+          definition
+            ?.portableApiExecutableContract ===
+              true ||
+          definition
+            ?.portableApiHookContract === true
+        ) &&
+        executablePortableDefinitionMatchesContract(
+          entry.operatorId,
+          definition,
+          entry.apiContract,
+          entry.nodeParameters || {}
+        )
+      );
+      if (!portableExecutable) {
+        issues.add(
+          `${entry.operatorId}: no exact executable portable contract is installed`
+        );
+      }
+    }
+
+    try {
+      const normalizer =
+        window.RMLGraphTypeImportMigrations
+          ?.normalizedTypeContracts;
+      if (typeof normalizer !== "function") {
+        throw new Error(
+          "The portable graph type contract verifier is unavailable."
+        );
+      }
+      const stored = normalizer(
+        value?.portableTypeContracts
+      );
+      for (const conflict of
+        stored.conflicts || []) {
+        issues.add(String(conflict));
+      }
+      const current =
+        portableGraphTypeContracts(value);
+      if (
+        JSON.stringify(
+          stored.contracts || []
+        ) !== JSON.stringify(current)
+      ) {
+        issues.add(
+          "The stored portable graph type contracts do not exactly match the installed type registry."
+        );
+      }
+    } catch (error) {
+      issues.add(
+        String(error?.message || error)
+      );
+    }
+
+    const verified = Boolean(
+      requirements.length > 0 &&
+      plan.ready &&
+      installed.ready &&
+      plan.entries.length ===
+        portableRequirements.length &&
+      catalogRequirements.length +
+        portableRequirements.length ===
+          requirements.length &&
+      unresolvedRequirements.length === 0 &&
+      apiNodeCount > 0 &&
+      issues.size === 0
+    );
+    return Object.freeze({
+      required: requirements.length > 0,
+      verified,
+      available: verified,
+      source: verified
+        ? portableRequirements.length > 0 &&
+          catalogRequirements.length > 0
+          ? "hybrid-portable-schema-4-catalog"
+          : portableRequirements.length > 0
+            ? "portable-schema-4"
+            : "verified-catalog"
+        : "unverified-portable-contracts",
+      unresolved: verified
+        ? 0
+        : Math.max(
+            1,
+            requirements.length
+          ),
+      unresolvedRequirements:
+        verified
+          ? Object.freeze([])
+          : Object.freeze(
+              unresolvedRequirements.length > 0
+                ? [...unresolvedRequirements]
+                : [...requirements]
+            ),
+      failureLabels: Object.freeze(
+        graphVerificationIssuePresentations(
+          issues,
+          requirements
+        )
+      ),
+      operatorIds: Object.freeze([
+        ...new Set(
+          requirements.map(requirement =>
+            String(
+              requirement?.operatorId || ""
+            )
+          )
+        )
+      ]),
+      nodeCount: apiNodeCount
     });
   }
 
@@ -48596,7 +52207,6 @@ function restorePreservedGraphCatalogOperators(
     }
 
     const requirements = new Map();
-    const conflicts = new Set();
     const visited = new Set();
     const visit = documentValue => {
       if (
@@ -48631,10 +52241,33 @@ function restorePreservedGraphCatalogOperators(
           node?.kind !== "operator" ||
           !operatorId ||
           (
+            Math.max(
+              0,
+              Number(
+                contract?.schemaVersion
+              ) || 0
+            ) >= 4 &&
+            (
+              !existingDefinition ||
+              executablePortableDefinitionMatchesContract(
+                operatorId,
+                existingDefinition,
+                contract,
+                node?.parameters || {}
+              )
+            )
+          ) ||
+          (
             existingDefinition &&
             existingDefinition
               .unavailableApiContract !==
-                true
+                true &&
+            executablePortableDefinitionMatchesContract(
+              operatorId,
+              existingDefinition,
+              contract,
+              node?.parameters || {}
+            )
           ) ||
           !String(
             contract?.ownerType || ""
@@ -48648,20 +52281,17 @@ function restorePreservedGraphCatalogOperators(
           savedApiContractSemanticKey(
             contract
           );
+        const specializationKey =
+          `${operatorId}\u0000${semanticKey}`;
         let requirement =
-          requirements.get(operatorId);
-        if (
-          requirement &&
-          requirement.semanticKey !==
-            semanticKey
-        ) {
-          conflicts.add(operatorId);
-          continue;
-        }
+          requirements.get(
+            specializationKey
+          );
         if (!requirement) {
           requirement = {
             operatorId,
             semanticKey,
+            specializationKey,
             apiContract: contract,
             nodeParameters:
               node.parameters || {},
@@ -48685,7 +52315,7 @@ function restorePreservedGraphCatalogOperators(
             )
           };
           requirements.set(
-            operatorId,
+            specializationKey,
             requirement
           );
         }
@@ -48771,34 +52401,42 @@ function restorePreservedGraphCatalogOperators(
     };
     visit(value);
 
-    const unresolved = new Set(conflicts);
+    const unresolved = new Set();
     let attempted = 0;
     let restored = 0;
     for (const requirement of
       requirements.values()) {
-      if (
-        conflicts.has(
-          requirement.operatorId
-        )
-      ) {
-        continue;
-      }
       const existingDefinition =
         OPERATOR_DEFINITIONS[
           requirement.operatorId
         ];
       if (existingDefinition) {
         if (
-          !unavailableDefinitionSatisfiesRequirement(
-            existingDefinition,
-            requirement
+          !(
+            unavailableDefinitionSatisfiesRequirement(
+              existingDefinition,
+              requirement
+            ) ||
+            executablePortableDefinitionMatchesContract(
+              requirement.operatorId,
+              existingDefinition,
+              requirement.apiContract,
+              requirement.nodeParameters || {}
+            )
           )
         ) {
-          unresolved.add(
-            requirement.operatorId
-          );
+          if (
+            existingDefinition
+              .unavailableApiContract !== true
+          ) {
+            unresolved.add(
+              requirement.operatorId
+            );
+            continue;
+          }
+        } else {
+          continue;
         }
-        continue;
       }
       attempted += 1;
       const registrationId = String(
@@ -48826,7 +52464,19 @@ function restorePreservedGraphCatalogOperators(
           requirement.operatorId &&
         OPERATOR_DEFINITIONS[
           requirement.operatorId
-        ]?.unavailableApiContract === true
+        ] &&
+        (
+          OPERATOR_DEFINITIONS[
+            requirement.operatorId
+          ].unavailableApiContract === true ||
+          OPERATOR_DEFINITIONS[
+            requirement.operatorId
+          ].portableApiExecutableContract ===
+            true ||
+          OPERATOR_DEFINITIONS[
+            requirement.operatorId
+          ].portableApiHookContract === true
+        )
       ) {
         restored += 1;
       } else {
@@ -48908,23 +52558,31 @@ function graphCatalogDefinitionsReady(
     }
 
     if (!catalog) {
-      return definitions.every(
-        definition =>
-          definition
-            .unavailableApiContract ===
-              true
+      return operatorNodes.every(
+        node => {
+          const definition =
+            OPERATOR_DEFINITIONS[
+              node.operatorId
+            ];
+          if (
+            definition
+              ?.unavailableApiContract === true
+          ) {
+            return true;
+          }
+          return executablePortableDefinitionMatchesContract(
+            String(node.operatorId || ""),
+            definition,
+            node?.apiContract,
+            node?.parameters || {}
+          );
+        }
       );
     }
 
     return factoryMatchesCatalog &&
-      definitions.every(
-        definition =>
-          definition.catalogGenerated ===
-            true &&
-          definition
-            .unavailableApiContract !==
-              true
-      );
+      graphCatalogContractIssues(value)
+        .length === 0;
   }
 
 function graphCatalogContractIssues(
@@ -48966,9 +52624,7 @@ function graphCatalogContractIssues(
             ? node.apiContract
             : null;
         const currentContract =
-          portableApiContract(
-            definition
-          );
+          portableApiContractForNode(node);
         const catalogNode =
           operatorId.startsWith("api.") ||
           definition?.catalogGenerated ===
@@ -49354,6 +53010,27 @@ async function confirmOpenGraphCatalogUpdate(
     );
   }
 
+const OPEN_GRAPH_CATALOG_RECONCILIATION_STALE =
+  "RML_OPEN_GRAPH_CATALOG_RECONCILIATION_STALE";
+
+function openGraphCatalogReconciliationStale(
+    message
+  ) {
+    const error = new Error(String(message ||
+      "The graph changed while its catalog contracts were being reconciled."));
+    error.name = "OpenGraphCatalogReconciliationStaleError";
+    error.code =
+      OPEN_GRAPH_CATALOG_RECONCILIATION_STALE;
+    return error;
+  }
+
+function isOpenGraphCatalogReconciliationStale(
+    error
+  ) {
+    return error?.code ===
+      OPEN_GRAPH_CATALOG_RECONCILIATION_STALE;
+  }
+
 async function reconcileOpenGraphForCatalog(
     catalogKey
   ) {
@@ -49466,7 +53143,7 @@ async function reconcileOpenGraphForCatalog(
     if (
       !sourceIsCurrent()
     ) {
-      throw new Error(
+      throw openGraphCatalogReconciliationStale(
         window.RMLI18n.t("ui.literal.79cb124085f8")
       );
     }
@@ -49506,7 +53183,7 @@ async function reconcileOpenGraphForCatalog(
     if (
       !sourceIsCurrent()
     ) {
-      throw new Error(
+      throw openGraphCatalogReconciliationStale(
         window.RMLI18n.t("ui.literal.616ad8c3d1f6")
       );
     }
@@ -49619,6 +53296,7 @@ function scheduleOpenGraphCatalogReconciliation(
     graphCatalogReadinessMessage =
       window.RMLI18n.t("ui.literal.750cd70992c1");
     updatePackButton();
+    let requeueAfterSettlement = false;
     openGraphCatalogReconciliationPromise =
       waitForGraphPaintOpportunity()
         .then(painted => {
@@ -49637,6 +53315,9 @@ function scheduleOpenGraphCatalogReconciliation(
           );
         })
         .then(result => {
+          if (result?.stale === true) {
+            requeueAfterSettlement = true;
+          }
           if (
             result?.stale !== true &&
             catalogKey ===
@@ -49648,6 +53329,22 @@ function scheduleOpenGraphCatalogReconciliation(
           return result;
         })
         .catch(error => {
+          if (
+            isOpenGraphCatalogReconciliationStale(
+              error
+            )
+          ) {
+            requeueAfterSettlement = true;
+            return {
+              stale: true,
+              requeue: true,
+              catalogKey,
+              reason:
+                error instanceof Error
+                  ? error.message
+                  : String(error)
+            };
+          }
           graphCatalogReadiness = "failed";
           graphCatalogReadinessMessage =
             `${error instanceof Error ? error.message : String(error)} Click the Runtime Graph button to retry the deterministic replacement flow.`;
@@ -49684,10 +53381,17 @@ function scheduleOpenGraphCatalogReconciliation(
             savedApiCompositeCatalogKey();
           if (
             currentKey &&
-            currentKey !== catalogKey
+            (
+              currentKey !== catalogKey ||
+              requeueAfterSettlement
+            )
           ) {
             queueMicrotask(() => {
-              void scheduleOpenGraphCatalogReconciliation();
+              void scheduleOpenGraphCatalogReconciliation({
+                force:
+                  requeueAfterSettlement &&
+                  currentKey === catalogKey
+              });
             });
           } else {
             void scheduleSavedApiCompositeCatalogReconciliation();
@@ -49821,6 +53525,179 @@ function repairStaleApiPresentation(
     scheduleGraphPaletteRender();
   }
   return staleNodes.length;
+}
+
+function portableDefinitionPortKey(
+  contract,
+  direction,
+  port
+) {
+  return JSON.stringify({
+    id: String(port?.id || ""),
+    type: String(port?.type || ""),
+    csType: String(
+      port?.apiCsType || port?.csType || ""
+    )
+      .replace(/^global::/, "")
+      .replace(/\s+/g, ""),
+    typeVar: String(port?.typeVar || ""),
+    generic: port?.generic === true,
+    optional: port?.optional === true,
+    role: String(
+      port?.semanticRole ||
+      port?.role ||
+      preservedImportPortRole(
+        contract?.kind,
+        direction,
+        port,
+        contract?.parameters
+      )
+    )
+  });
+}
+
+function executablePortableDefinitionMatchesContract(
+  operatorId,
+  definition,
+  expectedContract,
+  nodeParameters = {}
+) {
+  if (
+    definition?.scannerCatalogGenerated !== true
+  ) {
+    return false;
+  }
+  const expected =
+    normalizedPreservedImportContract(
+      expectedContract
+    );
+  if (!expected) return false;
+  if (
+    executablePortableHookDefinitionMatchesContract(
+      operatorId,
+      definition,
+      expected
+    )
+  ) {
+    return true;
+  }
+  const directKinds = new Set([
+    "method",
+    "constructor",
+    "property-get",
+    "property-set",
+    "field-get",
+    "field-set",
+    "type",
+    "enum"
+  ]);
+  if (
+    Math.max(
+      0,
+      Number(expected.schemaVersion) || 0
+    ) < 4 ||
+    expected.directExecutable !== true ||
+    !directKinds.has(
+      String(expected.kind || "")
+    ) ||
+    definition?.catalogGenerated !== true ||
+    definition?.unavailableApiContract ===
+      true
+  ) {
+    return false;
+  }
+  const probeNode = {
+    kind: "operator",
+    operatorId,
+    parameters:
+      nodeParameters &&
+      typeof nodeParameters === "object" &&
+      !Array.isArray(nodeParameters)
+        ? nodeGraphClone(nodeParameters)
+        : {},
+    apiContract: nodeGraphClone(expected)
+  };
+  const liveContract =
+    definition
+      .portableApiExecutableContract !== true
+      ? portableApiContract(
+          definition,
+          probeNode
+        )
+      : null;
+  if (
+    liveContract &&
+    savedApiContractSemanticKey(
+      liveContract
+    ) ===
+      savedApiContractSemanticKey(expected)
+  ) {
+    return true;
+  }
+  if (
+    definition
+      .portableApiExecutableContract !== true ||
+    String(definition.apiMemberKind || "") !==
+      String(expected.kind || "") ||
+    savedApiContractBaseKey(
+      definition.apiVerification ||
+      definition.preservedApiContract
+    ) !==
+      savedApiContractBaseKey(expected) ||
+    typeof definition.resolveDefinition !==
+      "function"
+  ) {
+    return false;
+  }
+  let resolved;
+  try {
+    resolved = definition.resolveDefinition(
+      probeNode
+    );
+  } catch {
+    return false;
+  }
+  if (
+    !resolved ||
+    typeof resolved !== "object" ||
+    Array.isArray(resolved)
+  ) {
+    return false;
+  }
+  for (const [direction, contractKey, definitionKey] of [
+    ["input", "inputPorts", "inputs"],
+    ["output", "outputPorts", "outputs"]
+  ]) {
+    const expectedPorts = (
+      Array.isArray(expected[contractKey])
+        ? expected[contractKey]
+        : []
+    ).map(port =>
+      portableDefinitionPortKey(
+        expected,
+        direction,
+        port
+      )
+    );
+    const actualPorts = (
+      Array.isArray(resolved[definitionKey])
+        ? resolved[definitionKey]
+        : []
+    ).map(port =>
+      portableDefinitionPortKey(
+        expected,
+        direction,
+        port
+      )
+    );
+    if (
+      JSON.stringify(actualPorts) !==
+      JSON.stringify(expectedPorts)
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 let graphStaleApiPresentationRepairQueued = false;
@@ -50335,7 +54212,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.24.31-compile-only-on-zip",
+      "1.24.90-reliable-folder-direct-dll-build",
     writable: false,
     enumerable: true,
     configurable: true

@@ -335,6 +335,13 @@ const GRAPH_VECTOR_SCALAR_CSHARP_TYPES =
 const GRAPH_TYPE_BY_CSHARP_TYPE =
   new Map();
 
+// Presentation-only C# names carried by the currently loaded project.
+// These contracts deliberately do not enter TYPE_INFO: an offline project
+// must remain non-executable until its real catalog types are available, but
+// its validated C# type names are still safe and useful to display.
+const GRAPH_PORTABLE_TYPE_PRESENTATIONS =
+  new Map();
+
 function graphNormalizeCsTypeExpression(
     value
   ) {
@@ -370,6 +377,144 @@ function graphCanonicalCsType(typeOrCsType) {
     declared
   );
 }
+
+function graphTypeIsInternalIdentifier(value) {
+  const id = String(value || "").trim();
+  return /^(?:api[.:]|apiEnum[.:]|normal(?:Exact|Array):|collectList:|contract\.|unavailable\.preserved\.)/.test(id) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ||
+    /(?:^|[.:_-])[0-9a-f]{12,}$/i.test(id);
+}
+
+function graphTypeUnavailableLabel() {
+  const key = "graph.type.unavailable";
+  const translated = String(
+    window.RMLI18n?.t?.(key) || ""
+  ).trim();
+  return translated && translated !== key
+    ? translated
+    : "Unavailable type";
+}
+
+function graphTypeDisplayName(
+    type,
+    options = {}
+  ) {
+    const id = String(type || "").trim();
+    if (!id) {
+      return String(options.emptyLabel || "");
+    }
+
+    if (id.startsWith("enum:")) {
+      return `Enum<${id.slice(5)}>`;
+    }
+
+    const canonical = canonicalGraphType(id);
+    const information =
+      TYPE_INFO[id] ||
+      TYPE_INFO[canonical] ||
+      null;
+    const portableCsType = String(
+      GRAPH_PORTABLE_TYPE_PRESENTATIONS.get(id) ||
+      GRAPH_PORTABLE_TYPE_PRESENTATIONS.get(canonical) ||
+      ""
+    )
+      .trim()
+      .replace(/^global::/, "");
+    const csType = String(
+      information?.csType || portableCsType || ""
+    )
+      .trim()
+      .replace(/^global::/, "");
+    const internal =
+      graphTypeIsInternalIdentifier(id);
+
+    if (
+      csType &&
+      !graphTypeIsInternalIdentifier(csType) &&
+      (
+        internal ||
+        information?.catalogGenerated === true ||
+        information?.unavailableApiType === true ||
+        options.qualified === true
+      )
+    ) {
+      return csType;
+    }
+
+    const label = String(
+      information?.label || ""
+    ).trim();
+    if (
+      label &&
+      !graphTypeIsInternalIdentifier(label) &&
+      !/(?:api(?:Enum)?[.:]|normal(?:Exact|Array):|contract\.)/i.test(label)
+    ) {
+      return label;
+    }
+
+    if (csType && !graphTypeIsInternalIdentifier(csType)) {
+      return csType;
+    }
+
+    if (internal) {
+      return String(
+        options.unavailableLabel ||
+        graphTypeUnavailableLabel()
+      );
+    }
+
+    return id;
+  }
+
+function replaceGraphPortableTypePresentations(
+    contracts
+  ) {
+    const next = new Map();
+    const conflicts = new Set();
+    for (const contract of
+      Array.isArray(contracts) ? contracts : []) {
+      const graphType = String(
+        contract?.graphType || ""
+      ).trim();
+      const csType = String(
+        contract?.csType || ""
+      )
+        .trim()
+        .replace(/^global::/, "");
+      if (
+        !graphType ||
+        !csType ||
+        graphTypeIsInternalIdentifier(csType) ||
+        /[`;'"{}=+|&\r\n]/.test(csType) ||
+        !/^[A-Za-z_][A-Za-z0-9_.]*(?:\s*<[A-Za-z0-9_.,<>\[\]*?\s]+>)?(?:\s*\[[,\s]*\])?\s*$/.test(csType)
+      ) {
+        continue;
+      }
+      const previous = next.get(graphType);
+      if (previous && previous !== csType) {
+        conflicts.add(graphType);
+        next.delete(graphType);
+        continue;
+      }
+      if (!conflicts.has(graphType)) {
+        next.set(graphType, csType);
+      }
+    }
+    GRAPH_PORTABLE_TYPE_PRESENTATIONS.clear();
+    for (const [graphType, csType] of next) {
+      GRAPH_PORTABLE_TYPE_PRESENTATIONS.set(
+        graphType,
+        csType
+      );
+    }
+    return Object.freeze({
+      installed:
+        GRAPH_PORTABLE_TYPE_PRESENTATIONS.size,
+      conflicts: Object.freeze(
+        [...conflicts].sort()
+      )
+    });
+  }
 
 function indexGraphTypeCsType(type, information) {
   const canonical =
@@ -1869,7 +2014,7 @@ Object.defineProperty(
     "RMLModNodeRegistry",
     {
       value: Object.freeze({
-        version: 8,
+        version: 9,
         port,
         genericPort,
         registerType:
@@ -1897,6 +2042,24 @@ Object.defineProperty(
         },
         canonicalCsType(type) {
           return graphCanonicalCsType(type);
+        },
+        displayType(type, options) {
+          return graphTypeDisplayName(
+            type,
+            options
+          );
+        },
+        replacePortableTypePresentations(
+          contracts
+        ) {
+          return replaceGraphPortableTypePresentations(
+            contracts
+          );
+        },
+        isInternalTypeIdentifier(type) {
+          return graphTypeIsInternalIdentifier(
+            type
+          );
         },
         getNodeDefinitions() {
           return OPERATOR_DEFINITIONS;
@@ -1935,6 +2098,12 @@ Object.defineProperty(
       enumerable: true,
       configurable: true
     }
+  );
+
+window.RMLModNodeRegistry
+  .replacePortableTypePresentations(
+    window.RMLPortableTypePresentationContracts ||
+    []
   );
 
 window.__rmlResolveNodeRegistryReady?.(

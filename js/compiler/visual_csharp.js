@@ -1731,13 +1731,13 @@ internal static class EarlyHarmonyPatches
       const cacheKey = `${nodeId}\u0000${renderMode}`;
       if (cache.has(cacheKey)) return cache.get(cacheKey);
       if (stack.has(nodeId)) {
-        diagnostics.push(`Visual C# syntax cycle detected at node '${nodeId}'.`);
+        diagnostics.push("Visual C# syntax cycle detected.");
         return "";
       }
       const node = nodeById.get(nodeId);
       const definition = node ? getNodeDefinition(node.operatorId) : null;
       if (!node || typeof definition?.syntaxRender !== "function") {
-        diagnostics.push(`Visual C# syntax references unavailable node '${nodeId}'.`);
+        diagnostics.push("Visual C# syntax references an unavailable node.");
         return "";
       }
       stack.add(nodeId);
@@ -1747,7 +1747,7 @@ internal static class EarlyHarmonyPatches
       };
       const context = {
         node,
-        title: definition.title || node.operatorId,
+        title: definition.title || "Visual C# node",
         renderMode,
         input,
         graphValue(id) {
@@ -1792,13 +1792,13 @@ internal static class EarlyHarmonyPatches
           const cacheKey = `${nodeId}\u0000${renderMode}`;
           if (cache.has(cacheKey)) return cache.get(cacheKey);
           if (stack.has(nodeId)) {
-            api.diagnostic(`Visual C# syntax cycle detected at node '${nodeId}'.`);
+            api.diagnostic("Visual C# syntax cycle detected.");
             return "";
           }
           const node = localNodeById.get(nodeId);
           const definition = node ? getNodeDefinition(node.operatorId) : null;
           if (!node || typeof definition?.syntaxRender !== "function") {
-            api.diagnostic(`Visual C# syntax references unavailable node '${nodeId}'.`);
+            api.diagnostic("Visual C# syntax references an unavailable node.");
             return "";
           }
           stack.add(nodeId);
@@ -1808,7 +1808,7 @@ internal static class EarlyHarmonyPatches
           };
           const context = {
             node,
-            title: definition.title || node.operatorId,
+            title: definition.title || "Visual C# node",
             renderMode,
             input,
             graphValue(id) {
