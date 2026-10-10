@@ -230,9 +230,40 @@
     const csType = normalizeCsType(
       value.csType || ""
     );
+    const hasExplicitTypeAuthority =
+      Object.prototype.hasOwnProperty.call(
+        value,
+        "typeAuthority"
+      );
+    const requestedTypeAuthority = String(
+      value.typeAuthority || ""
+    ).trim();
+    const legacyLanguageExactType = Boolean(
+      !hasExplicitTypeAuthority &&
+      (
+        graphType.startsWith("normalExact:") ||
+        graphType.startsWith("csharpExact:")
+      )
+    );
+    const typeAuthority =
+      requestedTypeAuthority === "language-exact" ||
+      legacyLanguageExactType
+        ? "language-exact"
+        : "";
     if (
       !graphType ||
-      !safeClosedCsType(csType)
+      !safeClosedCsType(csType) ||
+      (
+        requestedTypeAuthority &&
+        requestedTypeAuthority !==
+          "language-exact"
+      ) ||
+      (
+        typeAuthority === "language-exact" &&
+        /^(?:api[.:]|apiEnum[.:])/i.test(
+          graphType
+        )
+      )
     ) {
       return null;
     }
@@ -253,6 +284,7 @@
     return Object.freeze({
       graphType,
       csType,
+      typeAuthority,
       referenceType:
         value.referenceType === true,
       valueType:
@@ -266,6 +298,37 @@
           Object.freeze(reference)
         )
       )
+    });
+  }
+
+  function typeContractCompatibility(
+    contract,
+    information
+  ) {
+    const expectedCsType = normalizeCsType(
+      contract?.csType || ""
+    );
+    const installedCsType = normalizeCsType(
+      information?.csType || ""
+    );
+    const identityMatches = Boolean(
+      expectedCsType &&
+      installedCsType &&
+      expectedCsType === installedCsType
+    );
+    const referenceKindMatches =
+      (contract?.referenceType === true) ===
+      (information?.referenceType === true);
+
+    return Object.freeze({
+      compatible:
+        identityMatches &&
+        referenceKindMatches,
+      identityMatches,
+      referenceKindMatches,
+      valueCapabilityMatches:
+        (contract?.valueType === true) ===
+        (information?.valueType === true)
     });
   }
 
@@ -353,6 +416,17 @@
     return normalizeTypeContract({
       graphType: id,
       csType,
+      typeAuthority:
+        information.catalogGenerated !== true &&
+        (
+          information.languageExactType === true ||
+          information.normalExactType === true ||
+          information.csharpExactType === true ||
+          id.startsWith("normalExact:") ||
+          id.startsWith("csharpExact:")
+        )
+          ? "language-exact"
+          : "",
       referenceType:
         information.referenceType === true,
       valueType:
@@ -792,6 +866,7 @@
         continue;
       }
       const [csType] = values;
+      const stored = contractsByType.get(source);
       const existing = definitions[source];
       if (existing) {
         if (
@@ -801,6 +876,12 @@
           continue;
         }
         identityConflicts.push(source);
+        continue;
+      }
+      if (
+        stored?.typeAuthority ===
+          "language-exact"
+      ) {
         continue;
       }
       const candidates = [
@@ -813,18 +894,15 @@
         continue;
       }
       const target = candidates[0];
-      const stored = contractsByType.get(source);
       if (stored) {
         const liveInformation = definitions[target];
-        if (
-          stored.referenceType !==
-            (liveInformation
-              ?.referenceType === true) ||
-          (
-            stored.valueType === true &&
+        const compatibility =
+          typeContractCompatibility(
+            stored,
             liveInformation
-              ?.valueType !== true
-          )
+          );
+        if (
+          !compatibility.compatible
         ) {
           hierarchyConflicts.push(source);
           continue;
@@ -1103,9 +1181,6 @@
             delete patch.target[patch.key];
           }
         } catch {
-          // Plain imported JSON is writable. If a hostile
-          // accessor also blocks rollback, preserve the
-          // original failure instead of masking it.
         }
       }
       throw error;
@@ -1127,6 +1202,7 @@
     normalizeCsType,
     normalizeTypeContract,
     normalizedTypeContracts,
+    typeContractCompatibility,
     typeContractFromRegistry,
     legacyApiGraphTypeId,
     aliasPlan,

@@ -178,14 +178,35 @@
   ) {
     const previous = rendererBackendSubmissionFailures.get(backendKind);
     rendererBackendSubmissionFailures.set(backendKind, {
-      attempts: (previous?.attempts || 0) + 1
+      attempts: (previous?.attempts || 0) + 1,
+      fallbackCreations: 1
     });
   }
 
   function rendererBackendTemporarilyUnavailable(
     backendKind
   ) {
-    return rendererBackendSubmissionFailures.has(backendKind);
+    const failure =
+      rendererBackendSubmissionFailures.get(backendKind);
+    if (!failure) return false;
+    const remaining = Math.max(
+      0,
+      Number(failure.fallbackCreations) || 0
+    );
+    if (remaining <= 1) {
+      rendererBackendSubmissionFailures.delete(
+        backendKind
+      );
+    } else {
+      rendererBackendSubmissionFailures.set(
+        backendKind,
+        {
+          ...failure,
+          fallbackCreations: remaining - 1
+        }
+      );
+    }
+    return remaining > 0;
   }
 
   function clearRendererBackendSubmissionFailure(
@@ -215,6 +236,7 @@
     ) {
       return false;
     }
+    let initializedDevice = null;
     try {
       const adapter =
         await navigator.gpu.requestAdapter(
@@ -247,6 +269,7 @@
               }
             : undefined
         );
+      initializedDevice = device;
       const format =
         navigator.gpu.getPreferredCanvasFormat();
       device.pushErrorScope("validation");
@@ -269,8 +292,13 @@
       webGpuRuntime.format = format;
       webGpuRuntime.pipelines =
         pipelineHolder.gpuPipelines;
+      initializedDevice = null;
       return true;
     } catch (error) {
+      try {
+        initializedDevice?.destroy?.();
+      } catch {
+      }
       webGpuRuntime.error = error;
       console.warn(
         "RML graph WebGPU initialization failed; WebGL2 remains active.",
@@ -845,6 +873,8 @@
       this.available = false;
       this.contextLost = false;
       this.disposed = false;
+      this.pendingSubmissionWaiters =
+        new Set();
       this.frame = 0;
       this.resizeObserver = null;
       this.resizeListenersInstalled = false;
@@ -943,6 +973,7 @@
         event.preventDefault();
         if (this.disposed) return;
         this.contextLost = true;
+        this.cancelPendingSubmissionWaits();
         this.setLifecycleState("recovering");
         this.setAvailability(false);
       };
@@ -1006,6 +1037,52 @@
         this.initialize();
       }
       this.attach(options);
+    }
+
+    cancelPendingSubmissionWaits() {
+      for (const cancel of [
+        ...this.pendingSubmissionWaiters
+      ]) {
+        try {
+          cancel();
+        } catch {
+        }
+      }
+      this.pendingSubmissionWaiters.clear();
+    }
+
+    waitForSubmissionSettlement(work) {
+      if (this.disposed || this.contextLost) {
+        return Promise.resolve(false);
+      }
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (callback, value) => {
+          if (settled) return;
+          settled = true;
+          this.pendingSubmissionWaiters.delete(
+            cancel
+          );
+          callback(value);
+        };
+        const cancel = () =>
+          finish(resolve, false);
+        this.pendingSubmissionWaiters.add(cancel);
+        let pending;
+        try {
+          pending =
+            typeof work === "function"
+              ? work()
+              : work;
+        } catch (error) {
+          finish(reject, error);
+          return;
+        }
+        Promise.resolve(pending).then(
+          value => finish(resolve, value),
+          error => finish(reject, error)
+        );
+      });
     }
 
     setLifecycleState(value) {
@@ -1205,6 +1282,7 @@
       );
       this.canRecoverContext = false;
       this.contextLost = true;
+      this.cancelPendingSubmissionWaits();
       this.setLifecycleState("recovering");
       this.setAvailability(false);
       return false;
@@ -4086,10 +4164,26 @@
       if (!gl || !this.available || !viewport || !gl.fenceSync) return Promise.resolve(false);
       const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
       if (!fence) return Promise.resolve(false);
-      return new Promise((resolve, reject) => {
-        const inspect = () => {
-          if (this.disposed || this.contextLost || this.gl !== gl || this.viewport !== viewport) {
+      let frame = 0;
+      let fenceDeleted = false;
+      const cleanup = () => {
+        if (frame) {
+          window.cancelAnimationFrame(frame);
+          frame = 0;
+        }
+        if (!fenceDeleted) {
+          fenceDeleted = true;
+          try {
             gl.deleteSync(fence);
+          } catch {
+          }
+        }
+      };
+      const pending = new Promise((resolve, reject) => {
+        const inspect = () => {
+          frame = 0;
+          if (this.disposed || this.contextLost || this.gl !== gl || this.viewport !== viewport) {
+            cleanup();
             resolve(false);
             return;
           }
@@ -4099,17 +4193,22 @@
             0
           );
           if (state === gl.ALREADY_SIGNALED || state === gl.CONDITION_SATISFIED) {
-            gl.deleteSync(fence);
+            cleanup();
             resolve(true);
           } else if (state === gl.WAIT_FAILED) {
-            gl.deleteSync(fence);
+            cleanup();
             reject(new Error("The initial WebGL graph submission failed."));
           } else {
-            requestAnimationFrame(inspect);
+            frame = window.requestAnimationFrame(
+              inspect
+            );
           }
         };
         inspect();
       });
+      return this.waitForSubmissionSettlement(
+        pending
+      ).finally(cleanup);
     }
 
     draw() {
@@ -4511,6 +4610,7 @@
         return;
       }
       this.disposed = true;
+      this.cancelPendingSubmissionWaits();
       this.setLifecycleState("disposed");
       this.onAvailabilityChange = null;
       this.onRecoveryComplete = null;
@@ -5080,6 +5180,7 @@
             info
           );
           this.contextLost = true;
+          this.cancelPendingSubmissionWaits();
           if (webGpuRuntime.device === this.gpuDevice) {
             webGpuRuntime.device = null;
             webGpuRuntime.error =
@@ -7317,9 +7418,16 @@
     }
 
     whenSubmittedWorkDone() {
-      return this.gpuDevice?.queue
-        ?.onSubmittedWorkDone?.() ||
-        Promise.resolve(true);
+      const queue = this.gpuDevice?.queue;
+      if (
+        typeof queue?.onSubmittedWorkDone !==
+          "function"
+      ) {
+        return Promise.resolve(true);
+      }
+      return this.waitForSubmissionSettlement(
+        () => queue.onSubmittedWorkDone()
+      );
     }
 
     clearScene() {

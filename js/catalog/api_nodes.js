@@ -2,20 +2,107 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.24.90-reliable-folder-direct-dll-build";
+    "1.25.00-canonical-type-reconciliation-startup-recovery";
   const FACTORY_VERSION = 41;
   const API_VERIFICATION_SCHEMA_VERSION = 4;
   const CATALOG_PROJECTION_INDEX_VERSION = 2;
-  const ADVANCED_GROUP = "Advanced / Raw C#";
-  const UNAVAILABLE_GROUP = "Unavailable API";
+
+  function apiText(key, fallback) {
+    const translate = window.RMLI18n?.t;
+    if (typeof translate !== "function") return fallback;
+    const translated = String(
+      translate.call(window.RMLI18n, key) ?? ""
+    );
+    return translated && translated !== key
+      ? translated
+      : fallback;
+  }
+
+  function apiFormat(
+    key,
+    fallback,
+    values = {}
+  ) {
+    const template = apiText(key, fallback);
+    return String(template).replace(
+      /\{([A-Za-z0-9_]+)\}/g,
+      (match, name) =>
+        Object.prototype.hasOwnProperty.call(
+          values,
+          name
+        )
+          ? String(values[name] ?? "")
+          : match
+    );
+  }
+
+  const ADVANCED_GROUP = apiText(
+    "api.catalog.group.advanced",
+    "Advanced / Raw C#"
+  );
+  const UNAVAILABLE_GROUP = apiText(
+    "api.catalog.group.unavailable",
+    "Unavailable API"
+  );
   const API_GROUPS = Object.freeze({
-    types: "API · Types & Enums",
-    constructors: "API · Constructors",
-    methods: "API · Methods",
-    hooks: "API · Hooks",
-    properties: "API · Properties",
-    fields: "API · Fields",
-    events: "API · Events"
+    types: apiText(
+      "api.catalog.group.types",
+      "API · Types & Enums"
+    ),
+    constructors: apiText(
+      "api.catalog.group.constructors",
+      "API · Constructors"
+    ),
+    methods: apiText(
+      "api.catalog.group.methods",
+      "API · Methods"
+    ),
+    hooks: apiText(
+      "api.catalog.group.hooks",
+      "API · Hooks"
+    ),
+    properties: apiText(
+      "api.catalog.group.properties",
+      "API · Properties"
+    ),
+    fields: apiText(
+      "api.catalog.group.fields",
+      "API · Fields"
+    ),
+    events: apiText(
+      "api.catalog.group.events",
+      "API · Events"
+    )
+  });
+  const API_PORT_LABELS = Object.freeze({
+    call: apiText("api.catalog.port.call", "Call"),
+    called: apiText(
+      "api.catalog.port.called",
+      "Called"
+    ),
+    done: apiText("api.catalog.port.done", "Done"),
+    exception: apiText(
+      "api.catalog.port.exception",
+      "Exception"
+    ),
+    instance: apiText(
+      "api.catalog.port.instance",
+      "Instance"
+    ),
+    result: apiText(
+      "api.catalog.port.result",
+      "Result"
+    ),
+    success: apiText(
+      "api.catalog.port.success",
+      "Success"
+    ),
+    target: apiText(
+      "api.catalog.port.target",
+      "Target"
+    ),
+    type: apiText("api.catalog.port.type", "Type"),
+    value: apiText("api.catalog.port.value", "Value")
   });
 
   function catalogVisibleText(
@@ -45,7 +132,10 @@
 
   function catalogContractDisplayName(
       contract,
-      fallback = "Unavailable API"
+      fallback = apiText(
+        "api.catalog.title.unavailable_api",
+        "Unavailable API"
+      )
     ) {
     const source =
       contract &&
@@ -77,7 +167,10 @@
   function catalogDefinitionDisplayName(
       definition,
       operatorId = "",
-      fallback = "API node"
+      fallback = apiText(
+        "api.catalog.display.api_node",
+        "API node"
+      )
     ) {
     const contract =
       definition?.apiVerification ||
@@ -104,16 +197,30 @@
   function catalogUnavailableTitle(
       isApi,
       displayName
-    ) {
+  ) {
     const prefix = isApi
-      ? "Unavailable API"
-      : "Unavailable Operator";
+      ? apiText(
+          "api.catalog.title.unavailable_api",
+          "Unavailable API"
+        )
+      : apiText(
+          "api.catalog.title.unavailable_operator",
+          "Unavailable Operator"
+        );
     const readable = catalogVisibleText(
       displayName
     );
     return !readable || readable === prefix
       ? prefix
-      : `${prefix} · ${readable}`;
+      : apiFormat(
+          isApi
+            ? "api.catalog.title.unavailable_api_named"
+            : "api.catalog.title.unavailable_operator_named",
+          isApi
+            ? "Unavailable API · {name}"
+            : "Unavailable Operator · {name}",
+          { name: readable }
+        );
   }
 
   function catalogUnavailableTypeLabel(
@@ -123,8 +230,55 @@
       normalizedPortableCsType(csType)
     );
     return readable
-      ? `Unavailable · ${readable}`
-      : "Unavailable API type";
+      ? apiFormat(
+          "api.catalog.type.unavailable_named",
+          "Unavailable · {type}",
+          { type: readable }
+        )
+      : apiText(
+          "api.catalog.type.unavailable",
+          "Unavailable API type"
+        );
+  }
+
+  function catalogUnavailableDescription(
+    isApi
+  ) {
+    return apiText(
+      isApi
+        ? "api.catalog.description.unavailable_api"
+        : "api.catalog.description.unavailable_node",
+      isApi
+        ? "The original API contract is preserved, but the current Builder has no safely equivalent operator. The project remains editable; only export of this unresolved runtime path is blocked."
+        : "The original node contract is preserved, but the current Builder has no safely equivalent operator. The project remains editable; only export of this unresolved runtime path is blocked."
+    );
+  }
+
+  function catalogLanguageExactTypePresentation(
+      csType,
+      graphType = ""
+    ) {
+    const normalized =
+      normalizedPortableCsType(csType);
+    const generic = normalized.indexOf("<");
+    const head = generic >= 0
+      ? normalized.slice(0, generic)
+      : normalized;
+    const tail =
+      head.split(/[.+]/).filter(Boolean).pop() ||
+      apiText("api.catalog.port.type", "Type");
+    const label = generic >= 0
+      ? `${tail}${normalized.slice(generic)}`
+      : tail;
+    return Object.freeze({
+      label,
+      short: String(graphType).startsWith(
+        "normalExact:"
+      )
+        ? "T"
+        : "C#",
+      color: "#91b9dd"
+    });
   }
 
   let prerequisiteWaitInstalled = false;
@@ -1269,11 +1423,32 @@
       .replace(/\s+/g, "");
   }
 
+  function exactPortableCsTypeIdentity(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    try {
+      const identity =
+        window.RMLCSharpContracts
+          ?.canonicalTypeIdentity?.(
+            text,
+            { allowOpen: true }
+          );
+      if (identity) return identity;
+    } catch {}
+
+    const nullable = text.endsWith("?");
+    const canonical =
+      canonicalPortableCsType(text);
+    return nullable
+      ? `System.Nullable<${canonical}>`
+      : canonical;
+  }
+
   function portableCsTypesEqual(left, right) {
     return Boolean(
-      canonicalPortableCsType(left) &&
-      canonicalPortableCsType(left) ===
-        canonicalPortableCsType(right)
+      exactPortableCsTypeIdentity(left) &&
+      exactPortableCsTypeIdentity(left) ===
+        exactPortableCsTypeIdentity(right)
     );
   }
 
@@ -2289,8 +2464,9 @@
   function normalizedRequiredApiPortCsType(
     value
   ) {
-    return normalizeCsType(value)
-      .replace(/\s+/g, "");
+    return exactPortableCsTypeIdentity(
+      value
+    );
   }
 
   function resolvedRequiredApiDefinitionPorts(
@@ -2421,10 +2597,25 @@
       const expectedType = String(
         expected?.type || ""
       );
+      const expectedCsType =
+        normalizedRequiredApiPortCsType(
+          expected?.csType
+        );
+      const actualCsType =
+        normalizedRequiredApiPortCsType(
+          actual?.apiCsType ||
+          actual?.csType ||
+          verificationById.get(id)?.csType
+        );
       if (
         expectedType &&
         String(actual?.type || "") !==
-          expectedType
+          expectedType &&
+        !(
+          expectedCsType &&
+          actualCsType &&
+          actualCsType === expectedCsType
+        )
       ) {
         mismatches.add(id);
         continue;
@@ -2440,16 +2631,6 @@
         mismatches.add(id);
         continue;
       }
-      const expectedCsType =
-        normalizedRequiredApiPortCsType(
-          expected?.csType
-        );
-      const actualCsType =
-        normalizedRequiredApiPortCsType(
-          actual?.apiCsType ||
-          actual?.csType ||
-          verificationById.get(id)?.csType
-        );
       if (
         expectedCsType &&
         actualCsType !== expectedCsType
@@ -2927,10 +3108,6 @@
       captureFactoryEnvironment(
         window.RMLModNodeRegistry
       );
-    // Portable contracts are also the exact fallback for an incomplete
-    // Live/cache catalog. The frozen environment, factory lease and the
-    // staging collision checks below provide the required safety; catalog
-    // presence alone is not a semantic conflict.
     const token = Object.freeze({
       epoch: factoryOperationEpoch,
       planKey: key,
@@ -3178,8 +3355,14 @@
       catalogContractDisplayName(
         contract,
         isApi
-          ? "Unavailable API"
-          : "Unavailable Operator"
+          ? apiText(
+              "api.catalog.title.unavailable_api",
+              "Unavailable API"
+            )
+          : apiText(
+              "api.catalog.title.unavailable_operator",
+              "Unavailable Operator"
+            )
       );
     registry.registerGroup?.(UNAVAILABLE_GROUP, { after: ADVANCED_GROUP });
     const registered = registry.registerNode(registrationId, {
@@ -3189,7 +3372,8 @@
       ),
       group: UNAVAILABLE_GROUP,
       symbol: "API?",
-      description: `The original ${isApi ? "API contract" : "node contract"} is preserved, but the current Builder has no safely equivalent operator. The project remains editable; only export of this unresolved runtime path is blocked.`,
+      description:
+        catalogUnavailableDescription(isApi),
       hiddenFromPalette: true,
       expertOnly: true,
       unavailableApiContract: true,
@@ -3246,13 +3430,37 @@
   function projectStoredContractMayExecute(
     _operatorId
   ) {
-    /*
-     * Executable catalog definitions are owned exclusively by the active
-     * scanner catalog. A project may preserve identity and ports for
-     * recovery, but saved project data must never authorize code generation,
-     * irrespective of an operator-id prefix supplied by that project.
-     */
     return false;
+  }
+
+  function catalogOwnedProvisionalTypeInformation(
+    _graphType,
+    information
+  ) {
+    if (!information || information.catalogGenerated === true) {
+      return false;
+    }
+    return Boolean(
+      information.unavailableApiType === true ||
+      information.portableApiType === true
+    );
+  }
+
+  function languageOwnedExactTypeInformation(
+    graphType,
+    information
+  ) {
+    if (!information || information.catalogGenerated === true) {
+      return false;
+    }
+    const id = String(graphType || "").trim();
+    return Boolean(
+      information.languageExactType === true ||
+      information.normalExactType === true ||
+      information.csharpExactType === true ||
+      id.startsWith("normalExact:") ||
+      id.startsWith("csharpExact:")
+    );
   }
 
   function stageUnavailableOperatorTransaction(
@@ -3294,12 +3502,23 @@
     const canonicalSyntheticCollectorVerifier =
       window.RMLTypedNodeGraphGenerator
         ?.isCanonicalSyntheticCollectorType;
+    const portableTypeCompatibility =
+      window.RMLGraphTypeImportMigrations
+        ?.typeContractCompatibility;
     if (
       typeof canonicalSyntheticCollectorVerifier !==
-        "function"
+      "function"
     ) {
       throw new Error(
         "The Runtime Graph cannot verify canonical synthetic collection contracts."
+      );
+    }
+    if (
+      typeof portableTypeCompatibility !==
+      "function"
+    ) {
+      throw new Error(
+        "The Runtime Graph cannot reconcile portable C# type contracts."
       );
     }
 
@@ -3338,11 +3557,42 @@
         normalizedPortableCsType(
           value?.csType
         );
+      const hasExplicitTypeAuthority =
+        Object.prototype.hasOwnProperty.call(
+          value || {},
+          "typeAuthority"
+        );
+      const requestedTypeAuthority = String(
+        value?.typeAuthority || ""
+      ).trim();
+      const typeAuthority =
+        requestedTypeAuthority ===
+          "language-exact" ||
+        (
+          !hasExplicitTypeAuthority &&
+          (
+            graphType.startsWith("normalExact:") ||
+            graphType.startsWith("csharpExact:")
+          )
+        )
+          ? "language-exact"
+          : "";
       if (
         !graphType ||
         !csType ||
         !isSafeCSharpTypeExpression(csType) ||
-        isOpenTypeExpression(csType)
+        isOpenTypeExpression(csType) ||
+        (
+          requestedTypeAuthority &&
+          requestedTypeAuthority !==
+            "language-exact"
+        ) ||
+        (
+          typeAuthority === "language-exact" &&
+          /^(?:api[.:]|apiEnum[.:])/i.test(
+            graphType
+          )
+        )
       ) {
         throw new Error(
           "A portable graph type contract is incomplete or unsafe."
@@ -3367,6 +3617,7 @@
       const contract = Object.freeze({
         graphType,
         csType,
+        typeAuthority,
         referenceType:
           value?.referenceType === true,
         valueType:
@@ -3760,12 +4011,184 @@
         }
         return;
       }
+      const installedTypeInformation =
+        typeDefinitions[type] || null;
+      const installedProvisionalCsType =
+        normalizedPortableCsType(
+          installedTypeInformation?.csType
+        );
+      const replaceProvisionalType = Boolean(
+        typeContract &&
+        installedTypeInformation &&
+        catalogOwnedProvisionalTypeInformation(
+          type,
+          installedTypeInformation
+        ) &&
+        (
+          !installedProvisionalCsType ||
+          portableCsTypesEqual(
+            installedProvisionalCsType,
+            "System.Object"
+          ) ||
+          portableCsTypesEqual(
+            installedProvisionalCsType,
+            normalizedCsType
+          )
+        )
+      );
+      const contractLanguageExactType =
+        typeContract?.typeAuthority ===
+          "language-exact";
+      const projectLanguageExactType = Boolean(
+        typeContract &&
+        installedTypeInformation &&
+        installedTypeInformation.catalogGenerated !==
+          true &&
+        (
+          languageOwnedExactTypeInformation(
+            type,
+            installedTypeInformation
+          ) ||
+          contractLanguageExactType
+        ) &&
+        installedProvisionalCsType &&
+        portableCsTypesEqual(
+          installedProvisionalCsType,
+          normalizedCsType
+        )
+      );
+      if (projectLanguageExactType) {
+        if (stagingTypeIds.has(type)) {
+          throw new Error(
+            `Portable C# type '${readableType}' has a cyclic inheritance contract.`
+          );
+        }
+        stagingTypeIds.add(type);
+        const assignableTo = new Set(
+          Array.isArray(
+            installedTypeInformation.assignableTo
+          )
+            ? installedTypeInformation.assignableTo
+            : []
+        );
+        try {
+          for (const baseCsType of
+            typeContract.assignableToCsTypes) {
+            const baseGraphType =
+              uniqueGraphTypeForCsType(
+                baseCsType
+              );
+            if (
+              !typeDefinitions[baseGraphType] &&
+              !stagedTypes.has(baseGraphType)
+            ) {
+              stageType(
+                baseGraphType,
+                baseCsType,
+                portableTypeContractsById.get(
+                  baseGraphType
+                ) || null
+              );
+            }
+            assignableTo.add(baseGraphType);
+          }
+          const assemblyReferences =
+            normalizedPortableAssemblyReferences([
+              ...normalizedPortableAssemblyReferences(
+                installedTypeInformation
+                  .assemblyReferences
+              ),
+              ...typeContract.assemblyReferences
+            ]);
+          const structuralConstraints =
+            (Array.isArray(
+              installedTypeInformation.constraints
+            )
+              ? installedTypeInformation.constraints
+              : [])
+              .filter(constraint =>
+                !["reference", "value"].includes(
+                  String(constraint || "")
+                )
+              );
+          const adoptingCatalogProvisional =
+            catalogOwnedProvisionalTypeInformation(
+              type,
+              installedTypeInformation
+            );
+          const languagePresentation =
+            catalogLanguageExactTypePresentation(
+              normalizedCsType,
+              type
+            );
+          const projectedLanguageInformation = {
+            ...installedTypeInformation,
+            ...(adoptingCatalogProvisional
+              ? languagePresentation
+              : {}),
+            csType: normalizedCsType,
+            defaultCs:
+              typeContract.referenceType === false
+                ? `default(${normalizedCsType})`
+                : "null!",
+            referenceType:
+              typeContract.referenceType,
+            valueType:
+              installedTypeInformation.valueType === true ||
+              typeContract.valueType === true,
+            languageExactType: true,
+            assignableTo: [...assignableTo],
+            constraints: [
+              ...new Set([
+                ...structuralConstraints,
+                typeContract.referenceType === false
+                  ? "value"
+                  : "reference",
+                "serializable"
+              ])
+            ],
+            assembly:
+              installedTypeInformation.assembly ||
+              assemblyReferences[0]?.include ||
+              "",
+            assemblies: [
+              ...new Set([
+                ...(Array.isArray(
+                  installedTypeInformation.assemblies
+                )
+                  ? installedTypeInformation.assemblies
+                  : []),
+                ...assemblyReferences.map(reference =>
+                  reference.include
+                )
+              ].filter(Boolean))
+            ],
+            assemblyReferences
+          };
+          delete projectedLanguageInformation
+            .catalogGenerated;
+          delete projectedLanguageInformation
+            .apiCatalogType;
+          delete projectedLanguageInformation
+            .unavailableApiType;
+          delete projectedLanguageInformation
+            .portableApiType;
+          stagedTypes.set(
+            type,
+            projectedLanguageInformation
+          );
+        } finally {
+          stagingTypeIds.delete(type);
+        }
+        return;
+      }
       if (
         Object.prototype
           .hasOwnProperty.call(
             typeDefinitions,
             type
-        )
+        ) &&
+        !replaceProvisionalType
       ) {
         const existingCsType =
           normalizedPortableCsType(
@@ -3786,6 +4209,11 @@
         if (typeContract) {
           const information =
             typeDefinitions[type];
+          const compatibility =
+            portableTypeCompatibility(
+              typeContract,
+              information
+            );
           const actualAssignable =
             (Array.isArray(
               information?.assignableTo
@@ -3812,13 +4240,7 @@
                 )
               );
           if (
-            typeContract.referenceType !==
-              (information?.referenceType ===
-                true) ||
-            (
-              typeContract.valueType === true &&
-              information?.valueType !== true
-            )
+            !compatibility.compatible
           ) {
             throw new Error(
               `Portable C# type '${readableType}' conflicts with the installed inheritance contract.`
@@ -3959,12 +4381,28 @@
           );
         }
       }
+      const stagedAssemblyReferences =
+        normalizedPortableAssemblyReferences(
+          typeContract?.assemblyReferences || []
+        );
+      const languageExactGraphType =
+        typeContract?.typeAuthority ===
+          "language-exact";
+      const languagePresentation =
+        catalogLanguageExactTypePresentation(
+          normalizedCsType,
+          type
+        );
       stagedTypes.set(type, {
-        label: catalogUnavailableTypeLabel(
-          normalizedCsType
-        ),
-        short: "API?",
-        color: "#ff6f91",
+        ...(languageExactGraphType
+          ? languagePresentation
+          : {
+              label: catalogUnavailableTypeLabel(
+                normalizedCsType
+              ),
+              short: "API?",
+              color: "#ff6f91"
+            }),
         csType:
           normalizedCsType || "object",
         defaultCs:
@@ -3981,7 +4419,17 @@
             ? typeContract.valueType
             : true,
         globalGenericCandidate: false,
-        unavailableApiType: true,
+        ...(languageExactGraphType
+          ? {
+              languageExactType: true,
+              ...(String(type).startsWith("normalExact:")
+                ? { normalExactType: true }
+                : {}),
+              ...(String(type).startsWith("csharpExact:")
+                ? { csharpExactType: true }
+                : {})
+            }
+          : { unavailableApiType: true }),
         assignableTo:
           [...assignableTo],
         constraints: [
@@ -3990,16 +4438,19 @@
             false
             ? []
             : ["reference"]),
+          "serializable",
           ...(elementGraphType
-            ? [
-                "enumerable",
-                "serializable"
-              ]
+            ? ["enumerable"]
             : [])
         ],
+        assembly:
+          stagedAssemblyReferences[0]?.include || "",
+        assemblies:
+          stagedAssemblyReferences.map(reference =>
+            reference.include
+          ),
         assemblyReferences:
-          typeContract
-            ?.assemblyReferences || [],
+          stagedAssemblyReferences,
         ...(elementGraphType
           ? {
               collectionType: true,
@@ -4676,7 +5127,11 @@
       const parameters = genericParameters.map(row => ({
         key:
           `api${row.prefix.charAt(0).toUpperCase()}${row.prefix.slice(1)}${row.position}`,
-        label: `Compile-time type ${row.name}`,
+        label: apiFormat(
+          "api.catalog.parameter.compile_time_type",
+          "Compile-time type {name}",
+          { name: row.name }
+        ),
         kind: "text",
         default: "",
         affectsPorts: true,
@@ -4692,7 +5147,10 @@
           );
         parameters.push({
           key: "value",
-          label: "Value",
+          label: apiText(
+            "api.catalog.parameter.value",
+            "Value"
+          ),
           kind: "select",
           options: enumValueNames.map(
             value => [value, value]
@@ -4702,7 +5160,11 @@
       }
 
       const definition = {
-        title: `Portable API · ${displayName}`,
+        title: apiFormat(
+          "api.catalog.title.portable",
+          "Portable API · {name}",
+          { name: displayName }
+        ),
         group:
           contract.kind === "enum" ||
           contract.kind === "type"
@@ -4715,8 +5177,11 @@
                   ? API_GROUPS.constructors
                   : API_GROUPS.methods,
         symbol: "API",
-        description:
-          `Verified portable direct API contract for ${displayName}.`,
+        description: apiFormat(
+          "api.catalog.description.portable",
+          "Verified portable direct API contract for {name}.",
+          { name: displayName }
+        ),
         hiddenFromPalette: true,
         expertOnly: false,
         catalogGenerated: true,
@@ -5160,14 +5625,6 @@
             port
           );
 
-        /*
-        * Unavailable/dead portable contracts are recovery data.
-        *
-        * Their stored C# specialization must NEVER be allowed to reject
-        * project import or redefine an already known graph type.
-        *
-        * The original C# type is deliberately retained as apiCsType.
-        */
         stageType(
           port.type,
           ""
@@ -5208,8 +5665,14 @@
         catalogContractDisplayName(
           contract,
           isApi
-            ? "Unavailable API"
-            : "Unavailable Operator"
+            ? apiText(
+                "api.catalog.title.unavailable_api",
+                "Unavailable API"
+              )
+            : apiText(
+                "api.catalog.title.unavailable_operator",
+                "Unavailable Operator"
+              )
         );
       let stagedDefinition;
       if (executablePortableHook) {
@@ -5253,14 +5716,21 @@
         });
         stagedDefinition = {
           ...portableHookTemplate,
-          title:
-            `Hook · ${displayName}`,
+          title: apiFormat(
+            "api.catalog.title.hook",
+            "Hook · {name}",
+            { name: displayName }
+          ),
           group: API_GROUPS.hooks,
           symbol: "H<T>",
           description:
             String(
               contract.signature ||
-              `Typed Harmony hook for ${displayName}.`
+              apiFormat(
+                "api.catalog.description.harmony_hook",
+                "Typed Harmony hook for {name}.",
+                { name: displayName }
+              )
             ),
           hiddenFromPalette: true,
           expertOnly: false,
@@ -5326,7 +5796,7 @@
           group: UNAVAILABLE_GROUP,
           symbol: "API?",
           description:
-            `The original ${isApi ? "API contract" : "node contract"} is preserved, but the current Builder has no safely equivalent operator. The project remains editable; only export of this unresolved runtime path is blocked.`,
+            catalogUnavailableDescription(isApi),
           hiddenFromPalette: true,
           expertOnly: true,
           unavailableApiContract: true,
@@ -6099,8 +6569,10 @@
           current &&
           current.catalogGenerated !==
             true &&
-          current.unavailableApiType !==
-            true
+          !catalogOwnedProvisionalTypeInformation(
+            id,
+            current
+          )
         ) {
           throw new Error(
             `Live API type '${catalogVisibleText(stagedTypes[id]?.csType || stagedTypes[id]?.label, [id]) || "Unavailable API type"}' collides with a non-catalog graph type. The existing type was retained.`
@@ -6316,8 +6788,6 @@
           "The rebuilt API catalog changed before its final publication notification."
         );
       }
-      // From this point onward observers can see the new generation.  Every
-      // rollback-capable check has already completed synchronously.
       publicationNotificationStarted = true;
       completeFactoryReady(report);
       try {
@@ -6333,17 +6803,12 @@
           factoryEventError
         );
       }
-      // This is deliberately the final irreversible synchronous action.
-      // There must be no await, cancellation check, or rollback-capable work
-      // after observers have been told that this generation is committed.
       if (catalogPublication) {
         catalogPublication.notify();
       }
       return report;
     } catch (error) {
       if (publicationNotificationStarted) {
-        // Notification is irreversible.  Never manufacture a mixed
-        // generation by rolling the registry back after observers ran.
         throw error;
       }
       if (registryMutationStarted) {
@@ -6675,7 +7140,12 @@
     } = registry;
 
     for (const [name, options] of [
-      [API_GROUPS.types, { after: window.RMLI18n.t("ui.auto.cb9729d42e95") }],
+      [API_GROUPS.types, {
+        after: apiText(
+          "api.catalog.group.values_anchor",
+          "Values"
+        )
+      }],
       [API_GROUPS.constructors, { after: API_GROUPS.types }],
       [API_GROUPS.methods, { after: API_GROUPS.constructors }],
       [API_GROUPS.hooks, { after: API_GROUPS.methods }],
@@ -7272,28 +7742,61 @@
       return information;
     }
 
+    function provisionalApiTypeInformation(
+      graphType,
+      information
+    ) {
+      return catalogOwnedProvisionalTypeInformation(
+        graphType,
+        information
+      );
+    }
+
     function registerApiType(fullName, row = null) {
       const csType = normalizeCsType(fullName);
       if (!csType || csType === "System.Void" || csType === "void") {
         return null;
       }
 
+      let replacementGraphType = "";
+      let languageExactInformation = null;
       const known = graphTypeByCs.get(csType);
+      const knownInformation = known
+        ? getTypeInformation(known)
+        : null;
       if (
         known &&
-        getTypeInformation(known)
+        knownInformation
       ) {
-        ensureDynamicGraphTypePublished(
-          known
-        );
-        enrichGraphTypeAssemblies(
-          known,
-          csType,
-          row || typeByName.get(csType) || null
-        );
-        return known;
+        if (
+          provisionalApiTypeInformation(
+            known,
+            knownInformation
+          )
+        ) {
+          replacementGraphType = known;
+        } else if (
+          languageOwnedExactTypeInformation(
+            known,
+            knownInformation
+          )
+        ) {
+          replacementGraphType = known;
+          languageExactInformation =
+            knownInformation;
+        } else {
+          ensureDynamicGraphTypePublished(
+            known
+          );
+          enrichGraphTypeAssemblies(
+            known,
+            csType,
+            row || typeByName.get(csType) || null
+          );
+          return known;
+        }
       }
-      if (known) {
+      if (known && !knownInformation) {
         graphTypeByCs.delete(csType);
         graphTypeByNormalizedCs.delete(
           normalizeTypeForLookup(csType)
@@ -7307,20 +7810,45 @@
           normalizedLookup
         );
       if (
+        !replacementGraphType &&
         existing &&
         getTypeInformation(existing)
       ) {
-        ensureDynamicGraphTypePublished(
-          existing
-        );
-        enrichGraphTypeAssemblies(
-          existing,
-          csType,
-          row || typeByName.get(csType) || null
-        );
-        return existing;
+        const existingInformation =
+          getTypeInformation(existing);
+        if (
+          provisionalApiTypeInformation(
+            existing,
+            existingInformation
+          )
+        ) {
+          replacementGraphType = existing;
+        } else if (
+          languageOwnedExactTypeInformation(
+            existing,
+            existingInformation
+          )
+        ) {
+          replacementGraphType = existing;
+          languageExactInformation =
+            existingInformation;
+        } else {
+          ensureDynamicGraphTypePublished(
+            existing
+          );
+          enrichGraphTypeAssemblies(
+            existing,
+            csType,
+            row || typeByName.get(csType) || null
+          );
+          return existing;
+        }
       }
-      if (existing) {
+      if (
+        !replacementGraphType &&
+        existing &&
+        !getTypeInformation(existing)
+      ) {
         graphTypeByNormalizedCs.delete(
           normalizedLookup
         );
@@ -7335,9 +7863,13 @@
       const enumType =
         information.kind === "enum" ||
         enumTypeNames.has(csType);
-      const graphType = enumType
-        ? `apiEnum:${csType}`
-        : apiGraphTypeId(csType);
+      const graphType =
+        replacementGraphType ||
+        (
+          enumType
+            ? `apiEnum:${csType}`
+            : apiGraphTypeId(csType)
+        );
       const referenceType =
         !enumType &&
         (
@@ -7359,7 +7891,7 @@
           information
         );
 
-      const graphTypeInformation = {
+      let graphTypeInformation = {
           label,
           short: shortBadge(label),
           color,
@@ -7404,6 +7936,26 @@
                 information
               )
       };
+      if (languageExactInformation) {
+        graphTypeInformation = {
+          ...languageExactInformation,
+          ...graphTypeInformation,
+          label:
+            languageExactInformation.label ||
+            graphTypeInformation.label,
+          short:
+            languageExactInformation.short ||
+            graphTypeInformation.short,
+          color:
+            languageExactInformation.color ||
+            graphTypeInformation.color,
+          languageExactType: true
+        };
+        delete graphTypeInformation.catalogGenerated;
+        delete graphTypeInformation.apiCatalogType;
+        delete graphTypeInformation.unavailableApiType;
+        delete graphTypeInformation.portableApiType;
+      }
       registerType(
         graphType,
         graphTypeInformation
@@ -7704,19 +8256,39 @@
         continue;
       }
       registerGeneratedNode(id, withReloadContract({
-        title: `${row.kind === "enum" ? "Enum type" : "Type"} · ${displayTypeName(row)}`,
+        title: apiFormat(
+          row.kind === "enum"
+            ? "api.catalog.title.enum_type"
+            : "api.catalog.title.type",
+          row.kind === "enum"
+            ? "Enum type · {name}"
+            : "Type · {name}",
+          { name: displayTypeName(row) }
+        ),
         group: groupForType(row, API_GROUPS.types),
         symbol: "TYPE",
         description: openGeneric
-          ? `Constructs an exact closed System.Type for ${csType}.`
-          : `Exact System.Type constant for ${csType}.`,
+          ? apiFormat(
+              "api.catalog.description.closed_type",
+              "Constructs an exact closed System.Type for {type}.",
+              { type: csType }
+            )
+          : apiFormat(
+              "api.catalog.description.type_constant",
+              "Exact System.Type constant for {type}.",
+              { type: csType }
+            ),
         inputs: openGeneric
           ? genericTypeInputPorts(
               typeGenericParameters,
               "generic"
             )
           : [],
-        outputs: [port("value", window.RMLI18n.t("ui.auto.c9b8f9dc7b1e"), "type")],
+        outputs: [port(
+          "value",
+          apiText("api.catalog.port.type", "Type"),
+          "type"
+        )],
         codegenExpression(api) {
           if (!openGeneric) {
             return `typeof(${csType})`;
@@ -7793,7 +8365,11 @@
       );
 
       registerGeneratedNode(id, withReloadContract({
-        title: `Enum · ${shortTypeName(csType)}`,
+        title: apiFormat(
+          "api.catalog.title.enum",
+          "Enum · {name}",
+          { name: shortTypeName(csType) }
+        ),
         group: enumRow.isObsolete === true
           ? API_GROUPS.advanced
           : groupForType(
@@ -7801,18 +8377,35 @@
               API_GROUPS.types
             ),
         symbol: "ENUM",
-        description: `Typed constant for ${csType}.`,
+        description: apiFormat(
+          "api.catalog.description.enum_constant",
+          "Typed constant for {type}.",
+          { type: csType }
+        ),
         parameters: [{
           key: "value",
-          label: window.RMLI18n.t("ui.auto.3b53ce63a0cc"),
+          label: apiText(
+            "api.catalog.parameter.value",
+            "Value"
+          ),
           kind: "select",
           options,
           default: defaultValue,
           help: enumRow.isFlags
-            ? "This is a [Flags] enum. This constant selects one declared value."
-            : "Select one declared enum value."
+            ? apiText(
+                "api.catalog.enum.help.flags",
+                "This is a [Flags] enum. This constant selects one declared value."
+              )
+            : apiText(
+                "api.catalog.enum.help.select",
+                "Select one declared enum value."
+              )
         }],
-        outputs: [port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), graphType || "object")],
+        outputs: [port(
+          "value",
+          apiText("api.catalog.port.value", "Value"),
+          graphType || "object"
+        )],
         codegenExpression(api) {
           const selected = String(api.node.parameters?.value || defaultValue);
           const selectedRow = values.find(value =>
@@ -8836,113 +9429,81 @@
           }
         }
 
-        const scannedUntil = new Map();
-        const scanStages = [
-          256,
-          512,
-          1024,
-          2048
+        const candidateEntries = [
+          ...new Set(
+            [...requiredIds].flatMap(id =>
+              [
+                ...(hintedLegacyEntriesById
+                  .get(id) || [])
+              ]
+            )
+          )
         ];
 
-        for (const scanStage of
-          scanStages) {
+        for (const entry of
+          candidateEntries) {
           if (requiredIds.size === 0) {
             break;
           }
 
-          const candidateEntries = [
-            ...new Set(
-              [...requiredIds].flatMap(id =>
-                [
-                  ...(hintedLegacyEntriesById
-                    .get(id) || [])
-                ]
-              )
-            )
-          ];
-
-          for (const entry of
-            candidateEntries) {
-            if (requiredIds.size === 0) {
-              break;
-            }
-
-            const relevantIds =
-              [...requiredIds].filter(id =>
-                !conflictingFamilyIds.has(id) &&
-                (
-                  hintedLegacyEntriesById
-                    .get(id)
-                )?.has(entry) === true
-              );
-            if (relevantIds.length === 0) {
-              continue;
-            }
-
-            const start =
-              scannedUntil.get(entry) ||
-              0;
-            const limit = Math.min(
-              2048,
-              Math.max(
-                scanStage,
-                entry.groupSize + 128,
-                entry.currentIndex + 1
-              )
+          const relevantIds =
+            [...requiredIds].filter(id =>
+              !conflictingFamilyIds.has(id) &&
+              (
+                hintedLegacyEntriesById
+                  .get(id)
+              )?.has(entry) === true
             );
-
-            for (
-              let historicalIndex = start;
-              historicalIndex < limit;
-              historicalIndex += 1
-            ) {
-              const legacyId =
-                `${entry.prefix}${stableHash(`${entry.legacyBase}|${historicalIndex}`)}`;
-              attempts += 1;
-
-              if (
-                relevantIds.includes(legacyId) &&
-                exactReferencedPortsExist(
-                  legacyId,
-                  entry
-                ) &&
-                registerResolutionLegacyAlias(
-                  legacyId,
-                  entry
-                )
-              ) {
-                requiredIds.delete(
-                  legacyId
-                );
-                resolved += 1;
-                migrations[legacyId] =
-                  stagedResolutionDefinitions[
-                    legacyId
-                  ]
-                    ?.canonicalOperatorId ||
-                  legacyId;
-                if (
-                  relevantIds.every(id =>
-                    !requiredIds.has(id)
-                  )
-                ) {
-                  break;
-                }
-              }
-
-              if (attempts % 4096 === 0) {
-                await yieldToBrowser();
-              }
-            }
-
-            scannedUntil.set(
-              entry,
-              limit
-            );
+          if (relevantIds.length === 0) {
+            continue;
           }
 
-          if (requiredIds.size > 0) {
-            await yieldToBrowser();
+          const ordinalDomainSize = Math.max(
+            entry.groupSize,
+            entry.currentIndex + 1
+          );
+          for (
+            let historicalIndex = 0;
+            historicalIndex < ordinalDomainSize;
+            historicalIndex += 1
+          ) {
+            const legacyId =
+              `${entry.prefix}${stableHash(`${entry.legacyBase}|${historicalIndex}`)}`;
+            attempts += 1;
+
+            if (
+              relevantIds.includes(legacyId) &&
+              exactReferencedPortsExist(
+                legacyId,
+                entry
+              ) &&
+              registerResolutionLegacyAlias(
+                legacyId,
+                entry
+              )
+            ) {
+              requiredIds.delete(
+                legacyId
+              );
+              resolved += 1;
+              migrations[legacyId] =
+                stagedResolutionDefinitions[
+                  legacyId
+                ]
+                  ?.canonicalOperatorId ||
+                legacyId;
+              if (
+                relevantIds.every(id =>
+                  !requiredIds.has(id)
+                )
+              ) {
+                break;
+              }
+            }
+
+            if (attempts % 4096 === 0) {
+              await yieldToBrowser();
+            }
           }
         }
 
@@ -9576,11 +10137,6 @@
         return false;
       }
 
-      /*
-       * This marker is applied only inside the verified factory build that
-       * consumes the active scanner catalog. Portable project placeholders
-       * never pass through this registration path.
-       */
       definition.scannerCatalogGenerated = true;
       definition.apiDefinitionSource =
         "scanner-catalog";
@@ -10070,12 +10626,18 @@
               row.prefix,
               row.position
             ),
-            label:
-              `Compile-time type ${row.name}`,
+            label: apiFormat(
+              "api.catalog.parameter.compile_time_type",
+              "Compile-time type {name}",
+              { name: row.name }
+            ),
             kind: "text",
             default: "",
-            help:
-              `Exact closed C# type for ${row.name}. This makes generic result, argument, ref and out ports concrete and portable without reflection.`,
+            help: apiFormat(
+              "api.catalog.parameter.compile_time_type_help",
+              "Exact closed C# type for {name}. This makes generic result, argument, ref and out ports concrete and portable without reflection.",
+              { name: row.name }
+            ),
             affectsPorts: true,
             affectsNode: true,
             commitImmediately: true,
@@ -11160,7 +11722,7 @@
         !owner.isInterface &&
         canDirectlyReferenceType(ownerCs) &&
         parameters.every(canDirectlyPassParameter);
-      const inputs = [port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse")];
+      const inputs = [port("call", API_PORT_LABELS.call, "impulse")];
       inputs.push(
         ...genericTypeInputPorts(
           ownerGenerics,
@@ -11179,28 +11741,40 @@
         )
       );
       const outputs = [
-        port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
+        port("done", API_PORT_LABELS.done, "impulse"),
         port("result", displayTypeName(owner), direct ? ownerGraph : "object")
       ];
       for (const parameter of outParameters) {
         outputs.push(port(
           `out${parameter.position}`,
-          parameter.name || `Arg ${parameter.position}`,
+          parameter.name || apiFormat(
+            "api.catalog.port.argument_short",
+            "Arg {index}",
+            { index: parameter.position }
+          ),
           direct
             ? graphTypeFor(parameter.elementType || parameter.type)
             : "object"
         ));
       }
       outputs.push(
-        port("success", window.RMLI18n.t("ui.auto.c053e4f819dd"), "bool"),
-        port("exception", window.RMLI18n.t("ui.auto.c2fc0d913a4a"), "exception")
+        port("success", API_PORT_LABELS.success, "bool"),
+        port("exception", API_PORT_LABELS.exception, "exception")
       );
 
       return withReloadContract({
-        title: `New · ${displayTypeName(owner)}`,
+        title: apiFormat(
+          "api.catalog.title.constructor",
+          "New · {type}",
+          { type: displayTypeName(owner) }
+        ),
         group: groupForType(owner, API_GROUPS.constructors),
         symbol: "new",
-        description: constructor.signature || `Constructs ${ownerCs}.`,
+        description: constructor.signature || apiFormat(
+          "api.catalog.description.constructor",
+          "Constructs {type}.",
+          { type: ownerCs }
+        ),
         inputs,
         outputs,
         catalogGenerated: true,
@@ -11353,7 +11927,7 @@
       const resultGraph = !isVoid
         ? (direct ? graphTypeFor(returnCs) : "object")
         : null;
-      const inputs = [port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse")];
+      const inputs = [port("call", API_PORT_LABELS.call, "impulse")];
 
       inputs.push(
         ...genericTypeInputPorts(
@@ -11363,7 +11937,7 @@
       );
 
       if (!method.isStatic) {
-        inputs.push(port("target", window.RMLI18n.t("ui.auto.ba52d97729b9"), ownerGraph));
+        inputs.push(port("target", API_PORT_LABELS.target, ownerGraph));
       }
 
       if (method.isGenericMethodDefinition) {
@@ -11387,30 +11961,44 @@
           parameter.isIn !== true
         )
       );
-      const outputs = [port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse")];
+      const outputs = [port("done", API_PORT_LABELS.done, "impulse")];
       if (!isVoid) {
-        outputs.push(port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), resultGraph || "object"));
+        outputs.push(port("result", API_PORT_LABELS.result, resultGraph || "object"));
       }
       for (const parameter of outParameters) {
         outputs.push(port(
           `out${parameter.position}`,
-          parameter.name || `Arg ${parameter.position}`,
+          parameter.name || apiFormat(
+            "api.catalog.port.argument_short",
+            "Arg {index}",
+            { index: parameter.position }
+          ),
           direct
             ? graphTypeFor(parameter.elementType || parameter.type)
             : "object"
         ));
       }
       outputs.push(
-        port("success", window.RMLI18n.t("ui.auto.c053e4f819dd"), "bool"),
-        port("exception", window.RMLI18n.t("ui.auto.c2fc0d913a4a"), "exception")
+        port("success", API_PORT_LABELS.success, "bool"),
+        port("exception", API_PORT_LABELS.exception, "exception")
       );
 
       const noisy = isNoisyType(owner) || !direct;
       const group = noisy ? ADVANCED_GROUP : API_GROUPS.methods;
-      const titlePrefix = method.isStatic ? "Static" : "Call";
 
       return withReloadContract({
-        title: `${titlePrefix} · ${displayTypeName(owner)}.${method.name}`,
+        title: apiFormat(
+          method.isStatic
+            ? "api.catalog.title.static_method"
+            : "api.catalog.title.method_call",
+          method.isStatic
+            ? "Static · {type}.{member}"
+            : "Call · {type}.{member}",
+          {
+            type: displayTypeName(owner),
+            member: method.name
+          }
+        ),
         group,
         symbol: "ƒ",
         description: method.signature || `${ownerCs}.${method.name}`,
@@ -11600,7 +12188,7 @@
       const outputs = [
         port(
           "called",
-          window.RMLI18n.t("ui.auto.6e8b938b82e2"),
+          API_PORT_LABELS.called,
           "impulse"
         )
       ];
@@ -11608,7 +12196,7 @@
         outputs.push(
           port(
             "instance",
-            "Instance",
+            API_PORT_LABELS.instance,
             graphTypeFor(ownerCs)
           )
         );
@@ -11619,7 +12207,11 @@
             port(
               `argument${index}`,
               parameter.name ||
-                `Argument ${index + 1}`,
+                apiFormat(
+                  "api.catalog.port.argument",
+                  "Argument {index}",
+                  { index: index + 1 }
+                ),
               graphTypeFor(
                 parameter.elementType ||
                 parameter.type ||
@@ -11636,7 +12228,7 @@
         outputs.push(
           port(
             "result",
-            "Result",
+            API_PORT_LABELS.result,
             graphTypeFor(returnCs)
           )
         );
@@ -11644,8 +12236,14 @@
 
       const definition = {
         ...template,
-        title:
-          `Hook · ${displayTypeName(owner)}.${fixedMethod.name}`,
+        title: apiFormat(
+          "api.catalog.title.hook",
+          "Hook · {name}",
+          {
+            name:
+              `${displayTypeName(owner)}.${fixedMethod.name}`
+          }
+        ),
         group: API_GROUPS.hooks,
         symbol: "H<T>",
         description:
@@ -11736,19 +12334,34 @@
         "ownerGeneric"
       );
       if (!property.isStatic) {
-        inputs.push(port("target", window.RMLI18n.t("ui.auto.ba52d97729b9"), ownerGraph));
+        inputs.push(port("target", API_PORT_LABELS.target, ownerGraph));
       }
       for (const parameter of indexes) {
         inputs.push(parameterPort(parameter));
       }
 
       return withReloadContract({
-        title: `Get · ${displayTypeName(owner)}.${property.name}`,
+        title: apiFormat(
+          "api.catalog.title.property_get",
+          "Get · {type}.{member}",
+          {
+            type: displayTypeName(owner),
+            member: property.name
+          }
+        ),
         group: groupForType(owner, API_GROUPS.properties),
         symbol: "get",
-        description: `Reads ${ownerCs}.${property.name} (${valueCs}).`,
+        description: apiFormat(
+          "api.catalog.description.property_get",
+          "Reads {type}.{member} ({valueType}).",
+          {
+            type: ownerCs,
+            member: property.name,
+            valueType: valueCs
+          }
+        ),
         inputs,
-        outputs: [port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), valueGraph)],
+        outputs: [port("value", API_PORT_LABELS.value, valueGraph)],
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: property.name,
@@ -11832,7 +12445,7 @@
       ) {
         return null;
       }
-      const inputs = [port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse")];
+      const inputs = [port("call", API_PORT_LABELS.call, "impulse")];
       inputs.push(
         ...genericTypeInputPorts(
           ownerGenerics,
@@ -11840,29 +12453,44 @@
         )
       );
       if (!property.isStatic) {
-        inputs.push(port("target", window.RMLI18n.t("ui.auto.ba52d97729b9"), ownerGraph));
+        inputs.push(port("target", API_PORT_LABELS.target, ownerGraph));
       }
       for (const parameter of indexes) {
         inputs.push(parameterPort(parameter));
       }
       inputs.push(port(
         "value",
-        window.RMLI18n.t("ui.auto.3b53ce63a0cc"),
+        API_PORT_LABELS.value,
         ownerGenerics.length > 0
           ? "object"
           : graphTypeFor(valueCs)
       ));
 
       return withReloadContract({
-        title: `Set · ${displayTypeName(owner)}.${property.name}`,
+        title: apiFormat(
+          "api.catalog.title.property_set",
+          "Set · {type}.{member}",
+          {
+            type: displayTypeName(owner),
+            member: property.name
+          }
+        ),
         group: groupForType(owner, API_GROUPS.properties),
         symbol: "set",
-        description: `Writes ${ownerCs}.${property.name} (${valueCs}).`,
+        description: apiFormat(
+          "api.catalog.description.property_set",
+          "Writes {type}.{member} ({valueType}).",
+          {
+            type: ownerCs,
+            member: property.name,
+            valueType: valueCs
+          }
+        ),
         inputs,
         outputs: [
-          port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
-          port("success", window.RMLI18n.t("ui.auto.c053e4f819dd"), "bool"),
-          port("exception", window.RMLI18n.t("ui.auto.c2fc0d913a4a"), "exception")
+          port("done", API_PORT_LABELS.done, "impulse"),
+          port("success", API_PORT_LABELS.success, "bool"),
+          port("exception", API_PORT_LABELS.exception, "exception")
         ],
         catalogGenerated: true,
         catalogType: ownerCs,
@@ -11964,7 +12592,7 @@
       if (!field.isStatic) {
         inputs.push(port(
           "target",
-          window.RMLI18n.t("ui.auto.ba52d97729b9"),
+          API_PORT_LABELS.target,
           ownerGraph
         ));
       }
@@ -11977,14 +12605,29 @@
       }
 
       return withReloadContract({
-        title: `Read · ${displayTypeName(owner)}.${field.name}`,
+        title: apiFormat(
+          "api.catalog.title.field_read",
+          "Read · {type}.{member}",
+          {
+            type: displayTypeName(owner),
+            member: field.name
+          }
+        ),
         group: groupForType(owner, API_GROUPS.fields),
         symbol: "fld",
-        description: `Reads field ${ownerCs}.${field.name} (${valueCs}).`,
+        description: apiFormat(
+          "api.catalog.description.field_read",
+          "Reads field {type}.{member} ({valueType}).",
+          {
+            type: ownerCs,
+            member: field.name,
+            valueType: valueCs
+          }
+        ),
         inputs,
         outputs: [port(
           "value",
-          window.RMLI18n.t("ui.auto.3b53ce63a0cc"),
+          API_PORT_LABELS.value,
           ownerGenerics.length > 0
             ? "object"
             : graphTypeFor(valueCs)
@@ -12060,7 +12703,7 @@
       const ownerGenerics =
         ownerGenericParameters(ownerCs, owner);
       const valueCs = normalizeCsType(field.type || "System.Object");
-      const inputs = [port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse")];
+      const inputs = [port("call", API_PORT_LABELS.call, "impulse")];
       if (
         field.isPublic === false ||
         !isCSharpIdentifier(field.name) ||
@@ -12075,26 +12718,41 @@
         )
       );
       if (!field.isStatic) {
-        inputs.push(port("target", window.RMLI18n.t("ui.auto.ba52d97729b9"), ownerGraph));
+        inputs.push(port("target", API_PORT_LABELS.target, ownerGraph));
       }
       inputs.push(port(
         "value",
-        window.RMLI18n.t("ui.auto.3b53ce63a0cc"),
+        API_PORT_LABELS.value,
         ownerGenerics.length > 0
           ? "object"
           : graphTypeFor(valueCs)
       ));
 
       return withReloadContract({
-        title: `Write · ${displayTypeName(owner)}.${field.name}`,
+        title: apiFormat(
+          "api.catalog.title.field_write",
+          "Write · {type}.{member}",
+          {
+            type: displayTypeName(owner),
+            member: field.name
+          }
+        ),
         group: groupForType(owner, API_GROUPS.fields),
         symbol: "fld=",
-        description: `Writes field ${ownerCs}.${field.name} (${valueCs}).`,
+        description: apiFormat(
+          "api.catalog.description.field_write",
+          "Writes field {type}.{member} ({valueType}).",
+          {
+            type: ownerCs,
+            member: field.name,
+            valueType: valueCs
+          }
+        ),
         inputs,
         outputs: [
-          port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"),
-          port("success", window.RMLI18n.t("ui.auto.c053e4f819dd"), "bool"),
-          port("exception", window.RMLI18n.t("ui.auto.c2fc0d913a4a"), "exception")
+          port("done", API_PORT_LABELS.done, "impulse"),
+          port("success", API_PORT_LABELS.success, "bool"),
+          port("exception", API_PORT_LABELS.exception, "exception")
         ],
         catalogGenerated: true,
         catalogType: ownerCs,
@@ -12183,10 +12841,27 @@
       const ownerGraph = registerApiType(ownerCs, owner) || "object";
       const definition = withReloadContract({
         ...template,
-        title: `On · ${displayTypeName(owner)}.${eventInfo.name}`,
+        title: apiFormat(
+          "api.catalog.title.event",
+          "On · {type}.{member}",
+          {
+            type: displayTypeName(owner),
+            member: eventInfo.name
+          }
+        ),
         group: groupForType(owner, API_GROUPS.events),
         symbol: "evt",
-        description: `Typed catalog event wrapper for ${ownerCs}.${eventInfo.name} (${eventInfo.handlerType || "delegate"}).`,
+        description: apiFormat(
+          "api.catalog.description.event",
+          "Typed catalog event wrapper for {type}.{member} ({handler}).",
+          {
+            type: ownerCs,
+            member: eventInfo.name,
+            handler:
+              eventInfo.handlerType ||
+              "delegate"
+          }
+        ),
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: eventInfo.name,
@@ -12281,13 +12956,21 @@
           );
           return port(
             `${prefix}${position}`,
-            `Type ${name}`,
+            apiFormat(
+              "api.catalog.port.type_argument",
+              "Type {name}",
+              { name }
+            ),
             "type",
             {
               help: generic &&
                 typeof generic === "object"
                 ? genericConstraintHelp(generic)
-                : `Select the concrete type argument for ${name}.`
+                : apiFormat(
+                    "api.catalog.generic.select_named",
+                    "Select the concrete type argument for {name}.",
+                    { name }
+                  )
             }
           );
         }
@@ -12542,14 +13225,26 @@
       const csType = normalizeCsType(parameter.elementType || parameter.type || "System.Object");
       return port(
         `arg${Number(parameter.position || 0)}`,
-        parameter.name || `Arg ${Number(parameter.position || 0)}`,
+        parameter.name || apiFormat(
+          "api.catalog.port.argument_short",
+          "Arg {index}",
+          { index: Number(parameter.position || 0) }
+        ),
         graphTypeFor(csType),
         {
           optional: parameter.isOptional === true,
           defaultCs: parameter.defaultValueCSharp || undefined,
           apiParameterType: csType,
           help: parameter.hasDefaultValue
-            ? `Default: ${parameter.defaultValueCSharp || "default"}`
+            ? apiFormat(
+                "api.catalog.parameter.default_help",
+                "Default: {value}",
+                {
+                  value:
+                    parameter.defaultValueCSharp ||
+                    "default"
+                }
+              )
             : ""
         }
       );
@@ -14242,8 +14937,15 @@
     for (const constraint of generic.constraints || []) parts.push(constraint);
     if (generic.defaultConstructorConstraint) parts.push("new()");
     return parts.length > 0
-      ? `Constraints: ${parts.join(", ")}`
-      : "Select the concrete generic type argument.";
+      ? apiFormat(
+          "api.catalog.generic.constraints",
+          "Constraints: {constraints}",
+          { constraints: parts.join(", ") }
+        )
+      : apiText(
+          "api.catalog.generic.select",
+          "Select the concrete generic type argument."
+        );
   }
 
   if (document.readyState === "loading") {

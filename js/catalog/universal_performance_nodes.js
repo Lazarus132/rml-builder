@@ -16,11 +16,245 @@
   }
 
   const {
-    port,
-    genericPort,
+    port: registryPort,
+    genericPort: registryGenericPort,
     registerNode,
     registerType
   } = registry;
+
+  const UNIVERSAL_TEXT_KEYS = Object.freeze({
+    "A": "universal.performance.port.a",
+    "Add or remove values directly. Each empty type is inferred independently from its wire.": "universal.performance.help.value_types",
+    "Array": "universal.performance.port.array",
+    "B": "universal.performance.port.b",
+    "Cache ID": "universal.performance.parameter.cache_id",
+    "Cached Typed Array": "universal.performance.node.cached_array.title",
+    "Call": "universal.performance.port.call",
+    "Called": "universal.performance.port.called",
+    "Capture Value": "universal.performance.node.capture_value.title",
+    "Changed": "universal.performance.port.changed",
+    "Collections": "universal.performance.group.collections",
+    "Constants": "universal.performance.group.constants",
+    "Count": "universal.performance.port.count",
+    "Creates one shared typed array from literal inputs and reuses it. Treat the result as read-only. Dynamic inputs are rejected because they cannot have stable process-lifetime cache semantics.": "universal.performance.node.cached_array.description",
+    "Done": "universal.performance.port.done",
+    "Double": "universal.performance.option.double",
+    "Emits a strongly typed member of an enum declared by the current Builder project without strings, boxing or reflection.": "universal.performance.node.enum_literal.description",
+    "Enable unload tracking when needed. Keeping this disabled gives the direct zero-allocation callback path.": "universal.performance.help.track_graph_scope",
+    "Enum Literal": "universal.performance.node.enum_literal.title",
+    "Enum name": "universal.performance.parameter.enum_name",
+    "Evaluates a value once for the following flow. The captured value is scoped to the current graph execution and restored across nested/reentrant calls.": "universal.performance.node.capture_value.description",
+    "Exact graph type, for example bool, colorX, slot or enum:MyEnum.": "universal.performance.help.exact_graph_type",
+    "Exact stable scanner hook contract. Scanner-generated api.hook.* nodes store the full portable method contract instead.": "universal.performance.help.scanner_method_contract",
+    "Float": "universal.performance.option.float",
+    "Flow": "universal.performance.group.flow",
+    "Geometry": "universal.performance.group.geometry",
+    "Get Typed Array Item At Index": "universal.performance.node.get_array_item.title",
+    "Harmony": "universal.performance.group.harmony",
+    "Harmony Typed Method Hook": "universal.performance.node.harmony_hook.title",
+    "Index": "universal.performance.port.index",
+    "Is Finite": "universal.performance.node.is_finite.title",
+    "Item": "universal.performance.port.item",
+    "Item type": "universal.performance.parameter.item_type",
+    "Key": "universal.performance.port.key",
+    "Key type": "universal.performance.parameter.key_type",
+    "Keyed Snapshot Changed": "universal.performance.node.keyed_snapshot_changed.title",
+    "Logic": "universal.performance.group.logic",
+    "Member": "universal.performance.parameter.enum_member",
+    "Nodes with the same State ID and identical key/value schema intentionally share one typed snapshot dictionary.": "universal.performance.help.state_id",
+    "Normalized position": "universal.performance.port.normalized_position",
+    "Optional exact graph type for the key. Leave blank to infer it.": "universal.performance.help.key_type",
+    "Optional exact graph type. Leave blank for inferred generic behavior.": "universal.performance.help.optional_graph_type",
+    "Optional sharing namespace. Equal non-empty IDs, item types and literal definitions share one array; mismatched definitions remain isolated.": "universal.performance.help.cache_id",
+    "Patch kind": "universal.performance.parameter.patch_kind",
+    "Path": "universal.performance.port.path",
+    "Postfix": "universal.performance.option.postfix",
+    "Prefix": "universal.performance.option.prefix",
+    "Priority": "universal.performance.parameter.priority",
+    "Reads a typed array directly without object conversion, boxing or reflection.": "universal.performance.node.get_array_item.description",
+    "Relays a value through an explicitly selected graph type. This is useful at reusable graph and composite boundaries and emits no runtime conversion.": "universal.performance.node.typed_value_relay.description",
+    "Remember Keyed Snapshot": "universal.performance.node.keyed_snapshot_remember.title",
+    "Reports whether a variadic tuple of strongly typed values differs from the last tuple stored for the same key and State ID.": "universal.performance.node.keyed_snapshot_changed.description",
+    "Result": "universal.performance.port.result",
+    "Returns true only when a floating-point value is neither NaN nor positive or negative infinity.": "universal.performance.node.is_finite.description",
+    "Sample 2D Polyline": "universal.performance.node.sample_polyline.title",
+    "Samples a float2 polyline by normalized repeated distance. Traversal uses typed locals and allocates nothing.": "universal.performance.node.sample_polyline.description",
+    "Scanner method contract": "universal.performance.parameter.scanner_method_contract",
+    "Select Typed Array By Index": "universal.performance.node.select_array.title",
+    "Selects one typed array by index. The index is evaluated once, only the selected input is evaluated, and an out-of-range index returns an empty typed array.": "universal.performance.node.select_array.description",
+    "State": "universal.performance.group.state",
+    "State ID": "universal.performance.parameter.state_id",
+    "Stores a variadic tuple of strongly typed values as the latest snapshot for the same key and State ID.": "universal.performance.node.keyed_snapshot_remember.description",
+    "Success": "universal.performance.port.success",
+    "Template for scanner-generated typed API hook nodes. It contains no eager catalog option list.": "universal.performance.node.harmony_hook.description",
+    "The enum member to emit.": "universal.performance.help.enum_member",
+    "The project-defined enum type name.": "universal.performance.help.enum_name",
+    "Track graph execution scope": "universal.performance.parameter.track_graph_scope",
+    "Typed Value Relay": "universal.performance.node.typed_value_relay.title",
+    "Value": "universal.performance.port.value",
+    "Value type": "universal.performance.parameter.value_type",
+    "Value types": "universal.performance.parameter.value_types"
+  });
+
+  const UNIVERSAL_PRESENTATION = Symbol(
+    "rmlUniversalPresentation"
+  );
+  const UNIVERSAL_NODE_IDS = [];
+
+  function rememberUniversalField(
+    target,
+    field,
+    fallback
+  ) {
+    if (!target || typeof target !== "object") {
+      return target;
+    }
+    let metadata = target[UNIVERSAL_PRESENTATION];
+    if (!metadata) {
+      metadata = { fields: Object.create(null) };
+      Object.defineProperty(
+        target,
+        UNIVERSAL_PRESENTATION,
+        {
+          value: metadata,
+          configurable: false,
+          enumerable: false,
+          writable: false
+        }
+      );
+    }
+    metadata.fields[field] = String(fallback ?? "");
+    target[field] = universalText(fallback);
+    return target;
+  }
+
+  function rememberUniversalOptions(
+    target,
+    options
+  ) {
+    if (!target || typeof target !== "object") {
+      return target;
+    }
+    let metadata = target[UNIVERSAL_PRESENTATION];
+    if (!metadata) {
+      metadata = { fields: Object.create(null) };
+      Object.defineProperty(
+        target,
+        UNIVERSAL_PRESENTATION,
+        {
+          value: metadata,
+          configurable: false,
+          enumerable: false,
+          writable: false
+        }
+      );
+    }
+    metadata.options = options;
+    target.options = universalSelectOptions(options);
+    return target;
+  }
+
+  function universalText(value) {
+    const fallback = String(value ?? "");
+    if (!fallback) return fallback;
+    const indexedValue = fallback.match(/^Value (\d+)$/);
+    if (indexedValue) {
+      const key = "universal.performance.port.value_index";
+      const translated = window.RMLI18n?.format?.(
+        key,
+        { index: indexedValue[1] }
+      );
+      return translated && translated !== key
+        ? String(translated)
+        : fallback;
+    }
+    const key = UNIVERSAL_TEXT_KEYS[fallback];
+    if (!key) return fallback;
+    const translated = window.RMLI18n?.t?.(key);
+    return translated && translated !== key
+      ? String(translated)
+      : fallback;
+  }
+
+  function universalFormat(
+    key,
+    fallback,
+    values = {}
+  ) {
+    const translated = window.RMLI18n?.format?.(
+      key,
+      values
+    );
+    if (translated && translated !== key) {
+      return String(translated);
+    }
+    let result = String(fallback || "");
+    for (const [name, value] of Object.entries(values)) {
+      result = result.replaceAll(
+        `{${name}}`,
+        String(value ?? "")
+      );
+    }
+    return result;
+  }
+
+  const port = (id, label, type, extra) =>
+    rememberUniversalField(
+      registryPort(
+      id,
+      universalText(label),
+      type,
+      extra
+      ),
+      "label",
+      label
+    );
+
+  const genericPort = (
+    id,
+    label,
+    generic,
+    constraint,
+    extra
+  ) => rememberUniversalField(
+    registryGenericPort(
+      id,
+      universalText(label),
+      generic,
+      constraint,
+      extra
+    ),
+    "label",
+    label
+  );
+
+  function universalSelectOptions(options) {
+    if (!Array.isArray(options)) return options;
+    return options.map(option => {
+      if (Array.isArray(option)) {
+        return option.length > 1
+          ? [
+              option[0],
+              universalText(option[1]),
+              ...option.slice(2)
+            ]
+          : [...option];
+      }
+      if (
+        option &&
+        typeof option === "object" &&
+        !Array.isArray(option)
+      ) {
+        return {
+          ...option,
+          ...(typeof option.label === "string"
+            ? { label: universalText(option.label) }
+            : {})
+        };
+      }
+      return option;
+    });
+  }
 
   const pText = (
     key,
@@ -28,14 +262,19 @@
     defaultValue = "",
     help = "",
     extra = {}
-  ) => ({
-    key,
-    label,
-    kind: "text",
-    default: defaultValue,
-    help,
-    ...extra
-  });
+  ) => {
+    const parameter = {
+      key,
+      label: universalText(label),
+      kind: "text",
+      default: defaultValue,
+      help: universalText(help),
+      ...extra
+    };
+    rememberUniversalField(parameter, "label", label);
+    rememberUniversalField(parameter, "help", help);
+    return parameter;
+  };
 
   const pCode = (
     key,
@@ -43,29 +282,39 @@
     defaultValue = "",
     help = "",
     rows = 8
-  ) => ({
-    key,
-    label,
-    kind: "code",
-    default: defaultValue,
-    help,
-    rows,
-    monospace: true,
-    spellcheck: false
-  });
+  ) => {
+    const parameter = {
+      key,
+      label: universalText(label),
+      kind: "code",
+      default: defaultValue,
+      help: universalText(help),
+      rows,
+      monospace: true,
+      spellcheck: false
+    };
+    rememberUniversalField(parameter, "label", label);
+    rememberUniversalField(parameter, "help", help);
+    return parameter;
+  };
 
   const pBool = (
     key,
     label,
     defaultValue = false,
     help = ""
-  ) => ({
-    key,
-    label,
-    kind: "bool",
-    default: defaultValue,
-    help
-  });
+  ) => {
+    const parameter = {
+      key,
+      label: universalText(label),
+      kind: "bool",
+      default: defaultValue,
+      help: universalText(help)
+    };
+    rememberUniversalField(parameter, "label", label);
+    rememberUniversalField(parameter, "help", help);
+    return parameter;
+  };
 
   const pSelect = (
     key,
@@ -74,34 +323,115 @@
     defaultValue,
     help = "",
     extra = {}
-  ) => ({
-    key,
-    label,
-    kind: "select",
-    options,
-    default: defaultValue,
-    help,
-    ...extra
-  });
+  ) => {
+    const parameter = {
+      key,
+      label: universalText(label),
+      kind: "select",
+      options: universalSelectOptions(options),
+      default: defaultValue,
+      help: universalText(help),
+      ...extra
+    };
+    rememberUniversalField(parameter, "label", label);
+    rememberUniversalField(parameter, "help", help);
+    rememberUniversalOptions(parameter, options);
+    return parameter;
+  };
 
   const pNumber = (
     key,
     label,
     defaultValue = 0,
     help = ""
-  ) => ({
-    key,
-    label,
-    kind: "number",
-    default: defaultValue,
-    storeAsNumber: true,
-    help
-  });
+  ) => {
+    const parameter = {
+      key,
+      label: universalText(label),
+      kind: "number",
+      default: defaultValue,
+      storeAsNumber: true,
+      help: universalText(help)
+    };
+    rememberUniversalField(parameter, "label", label);
+    rememberUniversalField(parameter, "help", help);
+    return parameter;
+  };
 
   function registerUniversalNode(id, definition) {
     if (!registry.getNodeDefinition(id)) {
-      registerNode(id, definition);
+      const registered = {
+        ...definition,
+        title: universalText(definition.title),
+        group: universalText(definition.group),
+        description: universalText(
+          definition.description
+        )
+      };
+      rememberUniversalField(
+        registered,
+        "title",
+        definition.title
+      );
+      rememberUniversalField(
+        registered,
+        "group",
+        definition.group
+      );
+      rememberUniversalField(
+        registered,
+        "description",
+        definition.description
+      );
+      registerNode(id, registered);
+      UNIVERSAL_NODE_IDS.push(id);
     }
+  }
+
+  function refreshUniversalPresentationObject(
+    value,
+    seen = new WeakSet()
+  ) {
+    if (
+      !value ||
+      typeof value !== "object" ||
+      seen.has(value)
+    ) {
+      return;
+    }
+    seen.add(value);
+    const metadata = value[UNIVERSAL_PRESENTATION];
+    if (metadata) {
+      for (const [field, fallback] of Object.entries(
+        metadata.fields || {}
+      )) {
+        value[field] = universalText(fallback);
+      }
+      if (Object.hasOwn(metadata, "options")) {
+        value.options = universalSelectOptions(
+          metadata.options
+        );
+      }
+    }
+    for (const child of Object.values(value)) {
+      refreshUniversalPresentationObject(child, seen);
+    }
+  }
+
+  function refreshUniversalLanguagePresentation() {
+    for (const id of UNIVERSAL_NODE_IDS) {
+      refreshUniversalPresentationObject(
+        registry.getNodeDefinition(id)
+      );
+    }
+  }
+
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener(
+      "rml-language-changed",
+      refreshUniversalLanguagePresentation,
+      { capture: true }
+    );
   }
 
   function nodeToken(api) {
@@ -537,69 +867,66 @@ private static ${csType} _capturedValue${token} = default!;`
 
   const KEYED_SNAPSHOT_MAX_VALUES = 32;
 
+  const KEYED_SNAPSHOT_TYPE_LIST_SPECIFICATION =
+    Object.freeze({
+      ...pCode(
+        "valueTypes",
+        "Value types",
+        "",
+        "Add or remove values directly. Each empty type is inferred independently from its wire.",
+        5
+      ),
+      affectsPorts: true,
+      affectsNode: true,
+      commitImmediately: true,
+      graphTypeList: true,
+      structuralList: Object.freeze({
+        itemsKey: "valueSlots",
+        idPrefix: "value",
+        minimum: 1,
+        defaultCount: 2,
+        maximum:
+          KEYED_SNAPSHOT_MAX_VALUES,
+        legacyCountKeys: Object.freeze([
+          "valueCount",
+          "variadicInputCount"
+        ]),
+        legacyItemPrefix: "value",
+        legacyItemSuffix: "Type"
+      })
+    });
+
+  function keyedSnapshotValueSlots(node) {
+    const entries =
+      registry.structuralListEntries?.(
+        node?.parameters || {},
+        KEYED_SNAPSHOT_TYPE_LIST_SPECIFICATION
+      );
+    if (Array.isArray(entries)) {
+      return entries;
+    }
+    return [
+      { id: "value1", type: "" },
+      { id: "value2", type: "" }
+    ];
+  }
+
   function keyedSnapshotConfiguredValueTypes(
     node
   ) {
-    return String(
-      node?.parameters?.valueTypes || ""
-    )
-      .split(/[\r\n,;]+/)
-      .map(value => value.trim())
-      .filter(Boolean);
+    return keyedSnapshotValueSlots(node)
+      .map(entry =>
+        String(entry?.type || "").trim()
+      );
   }
 
   function keyedSnapshotValueCount(node) {
-    const configured = Math.trunc(
-      Number(
-        node?.parameters?.valueCount ??
-          node?.parameters
-            ?.variadicInputCount
-      ) || 0
-    );
-    const listed =
-      keyedSnapshotConfiguredValueTypes(
-        node
-      ).length;
-    let legacy = 0;
-
-    for (
-      let index = 1;
-      index <= KEYED_SNAPSHOT_MAX_VALUES;
-      index += 1
-    ) {
-      if (
-        String(
-          node?.parameters?.[
-            `value${index}Type`
-          ] || ""
-        ).trim()
-      ) {
-        legacy = index;
-      }
-    }
-
-    return Math.max(
-      1,
-      Math.min(
-        KEYED_SNAPSHOT_MAX_VALUES,
-        Math.max(
-          configured,
-          listed,
-          legacy,
-          2
-        )
-      )
-    );
+    return keyedSnapshotValueSlots(node).length;
   }
 
   function keyedSnapshotValueIds(node) {
-    return Array.from(
-      {
-        length:
-          keyedSnapshotValueCount(node)
-      },
-      (_, index) => `value${index + 1}`
-    );
+    return keyedSnapshotValueSlots(node)
+      .map(entry => entry.id);
   }
 
   function keyedSnapshotConfiguredType(
@@ -610,13 +937,8 @@ private static ${csType} _capturedValue${token} = default!;`
       keyedSnapshotConfiguredValueTypes(
         node
       );
-    return String(
-      listed[index] ||
-        node?.parameters?.[
-          `value${index + 1}Type`
-        ] ||
-        ""
-    ).trim();
+    return String(listed[index] || "")
+      .trim();
   }
 
   function keyedSnapshotInputs(
@@ -822,33 +1144,7 @@ ${assignments}
           graphTypeReference: true
         }
       ),
-      {
-        ...pNumber(
-          "valueCount",
-          "Value count",
-          2,
-          `Number of independently typed values (1-${KEYED_SNAPSHOT_MAX_VALUES}).`
-        ),
-        minimum: 1,
-        maximum: KEYED_SNAPSHOT_MAX_VALUES,
-        step: 1,
-        affectsPorts: true,
-        affectsNode: true,
-        commitImmediately: true
-      },
-      {
-        ...pCode(
-          "valueTypes",
-          "Value types",
-          "",
-          "Optional fixed value types in port order. Add them with the type picker; omitted values are inferred independently from their wires.",
-          5
-        ),
-        affectsPorts: true,
-        affectsNode: true,
-        commitImmediately: true,
-        graphTypeList: true
-      }
+      KEYED_SNAPSHOT_TYPE_LIST_SPECIFICATION
     ];
   }
 
@@ -1154,7 +1450,14 @@ ${assignments}
             !definition.constant
           ) {
             api.diagnostic(
-              `Cached typed array '${cacheId}' only accepts disconnected defaults or literal constant inputs; input '${inputIds[index]}' is dynamic.`
+              universalFormat(
+                "universal.performance.diagnostic.cached_array_dynamic",
+                "Cached typed array '{cacheId}' only accepts disconnected defaults or literal constant inputs; input '{input}' is dynamic.",
+                {
+                  cacheId,
+                  input: inputIds[index]
+                }
+              )
             );
           }
         }
@@ -1586,7 +1889,10 @@ private static ${csType} ${field} = default!;`
       pSelect(
         "patchKind",
         "Patch kind",
-        ["prefix", "postfix"],
+        [
+          ["prefix", "Prefix"],
+          ["postfix", "Postfix"]
+        ],
         "postfix"
       ),
       pNumber("priority", "Priority", 400),
@@ -1602,7 +1908,11 @@ private static ${csType} ${field} = default!;`
       const method = selectedHookMethod(api);
       if (!method) {
         api.diagnostic(
-          `${api.definition.title}: no scanner hook contract is available.`
+          universalFormat(
+            "universal.performance.diagnostic.missing_hook_contract",
+            "{title}: no scanner hook contract is available.",
+            { title: api.definition.title }
+          )
         );
         return;
       }

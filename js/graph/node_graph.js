@@ -2,7 +2,7 @@
   "use strict";
 
   const NODE_GRAPH_RELEASE_ID =
-    "1.24.31-compile-only-on-zip";
+    "1.24.92-progress-liveness-no-total-limit";
 
   if (
     window.RMLTypedNodeGraphGenerator?.moduleId ===
@@ -24,8 +24,11 @@
   const workerFiles = [
     "../core/code_templates.js?v=797-readable-visual-functions-node-index",
     "../core/guidance.js?v=793",
-    "node_graph_registry.js?v=1-physical-modules-v752-catalog-cache-equivalent",
-    "node_graph_codegen.js?v=1.24.31-compile-only-on-zip"
+    "../core/csharp_contracts.js?v=1.24.92-progress-liveness-no-total-limit",
+    "node_graph_registry.js?v=1.24.92-progress-liveness-no-total-limit",
+    "../catalog/csharp_nodes.js?v=1.24.92-progress-liveness-no-total-limit",
+    "node_graph_type_migration.js?v=1.24.40-all-ports-fix2&type-migration=2&portable-types=1",
+    "node_graph_codegen.js?v=1.24.92-progress-liveness-no-total-limit"
   ];
 
   if (
@@ -82,7 +85,7 @@
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL(
-      "../../styles/features/styles.runtime-graph.css?v=1.24.31-compile-only-on-zip",
+      "../../styles/features/styles.runtime-graph.css?v=1.24.92-progress-liveness-no-total-limit",
       scriptUrl
     ).href;
     link.dataset.rmlStyleBundle = "runtime-graph";
@@ -99,23 +102,26 @@
   const files = [
     ...(window.RMLCodeTemplates ? [] : ["../core/code_templates.js?v=797-readable-visual-functions-node-index"]),
     ...(window.RMLGuidance ? [] : ["../core/guidance.js?v=793"]),
+    ...(window.RMLCSharpContracts ? [] : ["../core/csharp_contracts.js?v=1.24.92-progress-liveness-no-total-limit"]),
     ...(
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=1.24.31-compile-only-on-zip"
+            "../loaders/style_loader.js?v=1.24.92-progress-liveness-no-total-limit"
           ]
     ),
-    "node_graph_registry.js?v=1-physical-modules-v752-catalog-cache-equivalent",
-    "node_graph_codegen.js?v=1.24.31-compile-only-on-zip",
-    "runtime_bridge.js?v=1.24.31-compile-only-on-zip&status-runtime=4",
-    "../workers/saved_api_composite_compare_worker.js?v=1.24.31-compile-only-on-zip",
-    "node_graph_composites.js?v=1.24.31-compile-only-on-zip",
-    "node_graph_custom_csharp.js?v=1.24.31-compile-only-on-zip",
+    "node_graph_registry.js?v=1.24.92-progress-liveness-no-total-limit",
+    "../catalog/csharp_nodes.js?v=1.24.92-progress-liveness-no-total-limit",
+    "node_graph_type_migration.js?v=1.24.40-all-ports-fix2&type-migration=2&portable-types=1",
+    "node_graph_codegen.js?v=1.24.92-progress-liveness-no-total-limit",
+    "runtime_bridge.js?v=1.24.92-progress-liveness-no-total-limit&status-runtime=4",
+    "../workers/saved_api_composite_compare_worker.js?v=1.24.92-progress-liveness-no-total-limit",
+    "node_graph_composites.js?v=1.24.92-progress-liveness-no-total-limit",
+    "node_graph_custom_csharp.js?v=1.24.92-progress-liveness-no-total-limit&worker-null-fallback=3",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=1.24.31-compile-only-on-zip&status-readiness=4",
-    "graph_gpu_renderer.js?v=1.24.31-compile-only-on-zip",
-    "node_graph_bootstrap.js?v=1.24.31-compile-only-on-zip"
+    "node_graph_view.js?v=1.24.92-progress-liveness-no-total-limit&status-readiness=5&schema=4",
+    "graph_gpu_renderer.js?v=1.24.92-progress-liveness-no-total-limit",
+    "node_graph_bootstrap.js?v=1.24.92-progress-liveness-no-total-limit&type-migration=1&portable-types=1&specializations=1"
   ];
 
   const ready = files.reduce(

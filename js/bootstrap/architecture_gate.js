@@ -482,6 +482,14 @@
         await waitForProceed();
       }
 
+      const i18nReady = window.RMLI18n?.ready;
+      if (
+        i18nReady &&
+        typeof i18nReady.then === "function"
+      ) {
+        await i18nReady;
+      }
+
       releaseOverlay();
       state = "starting";
       setRootState("starting");

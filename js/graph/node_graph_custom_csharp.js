@@ -29,6 +29,16 @@ function localizedCSharpContractEditorText(
       : fallback;
   }
 
+function customCSharpUiText(key, fallback = "") {
+  const translated = String(window.RMLI18n?.t?.(key) ?? "");
+  return translated && translated !== key ? translated : fallback;
+}
+
+function customCSharpUiFormat(key, values, fallback = "") {
+  const translated = String(window.RMLI18n?.format?.(key, values) ?? "");
+  return translated && translated !== key ? translated : fallback;
+}
+
 const customCSharpBuildWorkers = new Map();
 const customCSharpSynchronizations = new Set();
 const customCSharpSynchronizationStatus = new Map();
@@ -99,7 +109,11 @@ function createEmptyCustomCSharpFileGraph(fileNode) {
           y: 260,
           width: null,
           height: null,
-          label: `Output · ${String(fileNode?.parameters?.fileName || "Custom C# File")}`,
+          label: customCSharpUiFormat(
+            "custom_csharp.node.output",
+            { file: String(fileNode?.parameters?.fileName || customCSharpUiText("custom_csharp.file.default_label", "Custom C# File")) },
+            `Output · ${String(fileNode?.parameters?.fileName || "Custom C# File")}`
+          ),
           parameters: {}
         }
       ],
@@ -139,7 +153,6 @@ function customCSharpCatalogStampMatches(
       second &&
       first.fingerprint === second.fingerprint &&
       first.engineVersion === second.engineVersion &&
-      first.source === second.source &&
       first.definitionRevision ===
         second.definitionRevision
     );
@@ -1396,8 +1409,8 @@ function closeCustomCSharpFileGraph({
     const workSession = commit
       ? beginGraphTransitionWork({
           kicker: apiCompositeEditor
-            ? "API Composite"
-            : "Runtime Graph",
+            ? customCSharpUiText("custom_csharp.context.api_composite", "API Composite")
+            : customCSharpUiText("custom_csharp.context.runtime_graph", "Runtime Graph"),
           title: apiCompositeEditor
             ? window.RMLI18n.t("ui.literal.c619cdf95be9")
             : window.RMLI18n.t("ui.literal.cbc56b0ebb34"),
@@ -1671,7 +1684,10 @@ async function validateCustomCSharpValueLive(parameterKey, value) {
     if (!customCSharpSupportsLiveDiagnostics(parameterKey)) return null;
     const roslyn = window.RMLCSharp14Roslyn;
     if (typeof roslyn?.validateEditor !== "function") {
-      throw new Error("The isolated Roslyn live-diagnostics worker is unavailable. Reload the Builder.");
+      throw new Error(customCSharpUiText(
+        "custom_csharp.error.live_diagnostics_unavailable",
+        "The isolated Roslyn live-diagnostics worker is unavailable. Reload the Builder."
+      ));
     }
     return roslyn.validateEditor(parameterKey, value);
   }
@@ -1713,7 +1729,11 @@ function drainCustomCSharpLiveDiagnostics() {
       .catch(error => {
         if (!customCSharpLiveJobCurrent(job)) return;
         setCustomCSharpLiveDiagnosticSnapshot(job.nodeId, [
-          `Roslyn live diagnostics failed: ${error instanceof Error ? error.message : String(error)}`
+          customCSharpUiFormat(
+            "custom_csharp.error.live_diagnostics_failed",
+            { error: error instanceof Error ? error.message : String(error) },
+            `Roslyn live diagnostics failed: ${error instanceof Error ? error.message : String(error)}`
+          )
         ], { logOutput: true });
         setCustomCSharpLiveValidationPending(job.nodeId, false);
       })
@@ -1857,8 +1877,15 @@ function setCustomCSharpSynchronizationStatus(
       ) {
         editor.setStatus({
           message: status
-            ? `Custom C# · ${String(status)}`
-            : "Synchronized with Builder",
+            ? customCSharpUiFormat(
+                "custom_csharp.status.with_detail",
+                { status: String(status) },
+                `Custom C# · ${String(status)}`
+              )
+            : customCSharpUiText(
+                "custom_csharp.status.synchronized",
+                "Synchronized with Builder"
+              ),
           tone: options.tone || "info"
         });
       }
@@ -1982,7 +2009,11 @@ function updateCustomCSharpSynchronizationToast(
       toast.dataset
         .rmlCustomCSharpOperation = id;
       toast.textContent =
-        `Custom C# · ${String(status)}`;
+        customCSharpUiFormat(
+          "custom_csharp.status.with_detail",
+          { status: String(status) },
+          `Custom C# · ${String(status)}`
+        );
       toast.className =
         "rml-graph-toast progress";
       toast.setAttribute(
@@ -2026,7 +2057,10 @@ function cancelCustomCSharpSynchronization(
     );
     setCustomCSharpSynchronizationStatus(
       id,
-      "Abbruch wird ausgeführt…",
+      customCSharpUiText(
+        "custom_csharp.status.cancelling",
+        "Cancelling…"
+      ),
       {
         tone: "warning",
         source: "Builder"
@@ -2394,7 +2428,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.24.90-reliable-folder-direct-dll-build",
+        "js/workers/graph_codegen_worker.js?v=1.25.00-canonical-type-reconciliation-startup-recovery",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -2660,7 +2694,14 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
         }
         setCustomCSharpSynchronizationStatus(
           nodeId,
-          `Worker: received bounded input (${payloadTransport.chunks + supportTransport.chunks} chunks, ${support.requirements.length.toLocaleString()} candidate API contracts)…`,
+          customCSharpUiFormat(
+            "custom_csharp.status.worker_input",
+            {
+              chunks: (payloadTransport.chunks + supportTransport.chunks).toLocaleString(window.RMLI18n?.language || undefined),
+              contracts: support.requirements.length.toLocaleString(window.RMLI18n?.language || undefined)
+            },
+            `Worker: received bounded input (${payloadTransport.chunks + supportTransport.chunks} chunks, ${support.requirements.length.toLocaleString()} candidate API contracts)…`
+          ),
           { source: "Worker" }
         );
         worker.postMessage({
@@ -3650,7 +3691,10 @@ async function synchronizeCustomCSharpFileGraph(
       let activeBuild = initialBuild;
       let fragment = activeBuild.fragment;
       assertCurrentOwnerContext();
-      if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The Roslyn Node Graph synchronization failed.");
+      if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || customCSharpUiText(
+        "custom_csharp.error.synchronization_failed",
+        "The Roslyn Node Graph synchronization failed."
+      ));
       const selectedCatalogNodeIds = [...new Set(
         fragment.nodes
           .map(node => String(node?.operatorId || ""))
@@ -3659,12 +3703,21 @@ async function synchronizeCustomCSharpFileGraph(
       if (selectedCatalogNodeIds.length > 0) {
         setCustomCSharpSynchronizationStatus(
           ownerId,
-          `Using ${selectedCatalogNodeIds.length.toLocaleString()} API node${selectedCatalogNodeIds.length === 1 ? "" : "s"} from the currently loaded catalog…`,
+          customCSharpUiFormat(
+            selectedCatalogNodeIds.length === 1
+              ? "custom_csharp.status.catalog_nodes.one"
+              : "custom_csharp.status.catalog_nodes.other",
+            { count: selectedCatalogNodeIds.length.toLocaleString(window.RMLI18n?.language || undefined) },
+            `Using ${selectedCatalogNodeIds.length.toLocaleString()} API node${selectedCatalogNodeIds.length === 1 ? "" : "s"} from the currently loaded catalog…`
+          ),
           { progress: 35 }
         );
       }
       let prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
-      if (!prepared?.ok) throw new Error(prepared?.diagnostics?.[0] || "The Custom C# File graph could not be created.");
+      if (!prepared?.ok) throw new Error(prepared?.diagnostics?.[0] || customCSharpUiText(
+        "custom_csharp.error.graph_creation_failed",
+        "The Custom C# File graph could not be created."
+      ));
 
       let preparedGraphValidationFailure = "";
       const validatePreparedGraph = async candidate => {
@@ -3776,7 +3829,10 @@ async function synchronizeCustomCSharpFileGraph(
         activeBuild = semanticBuild;
         fragment = activeBuild.fragment;
         assertCurrentOwnerContext();
-        if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The catalog-independent semantic graph could not be created.");
+        if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || customCSharpUiText(
+          "custom_csharp.error.semantic_graph_failed",
+          "The catalog-independent semantic graph could not be created."
+        ));
         prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
       }
       if (!prepared?.ok || !await validatePreparedGraph(prepared)) {
@@ -3815,7 +3871,11 @@ async function synchronizeCustomCSharpFileGraph(
       }
       if (!prepared?.ok || !await validatePreparedGraph(prepared)) {
         throw new Error(
-          `Roslyn accepted this file as valid C# 14, but even the exact raw Roslyn graph could not reproduce it losslessly. ${preparedGraphValidationFailure || window.RMLI18n.t("ui.literal.a810e88a8993")} This is an internal visual-importer error. The previous valid graph and the original source were preserved.`
+          customCSharpUiFormat(
+            "custom_csharp.error.lossless_reproduction_failed",
+            { reason: preparedGraphValidationFailure || window.RMLI18n.t("ui.literal.a810e88a8993") },
+            `Roslyn accepted this file as valid C# 14, but even the exact raw Roslyn graph could not reproduce it losslessly. ${preparedGraphValidationFailure || window.RMLI18n.t("ui.literal.a810e88a8993")} This is an internal visual-importer error. The previous valid graph and the original source were preserved.`
+          )
         );
       }
       if (String(currentBoundOwner()?.parameters?.source || "") !== source) {
@@ -3963,7 +4023,14 @@ async function synchronizeCustomCSharpFileGraph(
         const catalogCount = synchronizedNodes.filter(node => String(node.operatorId || "").startsWith("api.")).length;
         appendCustomCSharpDebugOutput(
           ownerId,
-          `Validation completed with ${prepared.importedSyntaxNodeCount.toLocaleString()} editable C# nodes and ${catalogCount.toLocaleString()} verified scanner API nodes.`,
+          customCSharpUiFormat(
+            "custom_csharp.validation.completed",
+            {
+              nodes: prepared.importedSyntaxNodeCount.toLocaleString(window.RMLI18n?.language || undefined),
+              apiNodes: catalogCount.toLocaleString(window.RMLI18n?.language || undefined)
+            },
+            `Validation completed with ${prepared.importedSyntaxNodeCount.toLocaleString()} editable C# nodes and ${catalogCount.toLocaleString()} verified scanner API nodes.`
+          ),
           {
             tone: "success",
             source: "Roslyn"
@@ -4421,7 +4488,7 @@ function loadCustomCSharpDetachedEditorModule() {
         const script =
           document.createElement("script");
         script.src = new URL(
-          "js/editor/custom_csharp_editor.js?v=1.24.90-reliable-folder-direct-dll-build",
+          "js/editor/custom_csharp_editor.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&i18n-rev=2",
           document.baseURI
         ).href;
         script.async = true;
@@ -5517,7 +5584,7 @@ function createCustomCSharpInlineFrame(
       "rml-custom-csharp-inline-editor";
     frame.src = "about:blank";
     frame.title = String(
-      title || "Custom C# code editor"
+      title || customCSharpUiText("custom_csharp.editor.title", "Custom C# code editor")
     );
     frame.setAttribute(
       "aria-label",
@@ -5597,7 +5664,7 @@ function createCustomCSharpOverlayFrame(
     overlay.setAttribute("role", "dialog");
     overlay.setAttribute(
       "aria-label",
-      String(title || "Custom C# code editor")
+      String(title || customCSharpUiText("custom_csharp.editor.title", "Custom C# code editor"))
     );
     const refreshScrollLayerVisual = () =>
       window.RMLUniversalScrollLayers
@@ -5610,14 +5677,14 @@ function createCustomCSharpOverlayFrame(
     const heading =
       document.createElement("strong");
     heading.textContent = String(
-      title || "Custom C# code editor"
+      title || customCSharpUiText("custom_csharp.editor.title", "Custom C# code editor")
     );
     const actions =
       document.createElement("div");
     actions.className =
       "rml-custom-csharp-overlay-window-actions";
     const windowIcon = name =>
-      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${name}"></use></svg>`;
+      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-${name}"></use></svg>`;
     const returnIcon = windowIcon("back");
     const minimizeIcon = windowIcon("minimize");
     const maximizeIcon = windowIcon("maximize");
@@ -5655,7 +5722,7 @@ function createCustomCSharpOverlayFrame(
         )
     );
     const minimize = windowButton(
-      "Minimize editor overlay",
+      customCSharpUiText("custom_csharp.editor.minimize", "Minimize editor overlay"),
       minimizeIcon,
       button => {
         const minimized =
@@ -5677,8 +5744,8 @@ function createCustomCSharpOverlayFrame(
         button.setAttribute(
           "aria-label",
           minimized
-            ? "Restore editor overlay"
-            : "Minimize editor overlay"
+            ? customCSharpUiText("custom_csharp.editor.restore", "Restore editor overlay")
+            : customCSharpUiText("custom_csharp.editor.minimize", "Minimize editor overlay")
         );
         button.title =
           button.getAttribute("aria-label");
@@ -5689,7 +5756,7 @@ function createCustomCSharpOverlayFrame(
       }
     );
     const maximize = windowButton(
-      "Maximize editor overlay",
+      customCSharpUiText("custom_csharp.editor.maximize", "Maximize editor overlay"),
       maximizeIcon,
       button => {
         overlay.classList.remove(
@@ -5710,8 +5777,8 @@ function createCustomCSharpOverlayFrame(
         button.setAttribute(
           "aria-label",
           maximized
-            ? "Restore editor overlay"
-            : "Maximize editor overlay"
+            ? customCSharpUiText("custom_csharp.editor.restore", "Restore editor overlay")
+            : customCSharpUiText("custom_csharp.editor.maximize", "Maximize editor overlay")
         );
         button.title =
           button.getAttribute("aria-label");
@@ -5722,7 +5789,7 @@ function createCustomCSharpOverlayFrame(
       }
     );
     const close = windowButton(
-      "Close editor overlay",
+      customCSharpUiText("custom_csharp.editor.close", "Close editor overlay"),
       closeIcon,
       () =>
         closeCustomCSharpEditorRecord(
@@ -5746,7 +5813,7 @@ function createCustomCSharpOverlayFrame(
       "rml-custom-csharp-overlay-frame";
     frame.src = "about:blank";
     frame.title = String(
-      title || "Custom C# code editor"
+      title || customCSharpUiText("custom_csharp.editor.title", "Custom C# code editor")
     );
     frame.setAttribute(
       "aria-label",
@@ -5886,10 +5953,10 @@ function restoreGraphAfterCustomCSharpInlineEditor(
     const workSession =
       beginGraphTransitionWork({
         kicker: customCSharpEditor
-          ? "Custom C#"
+          ? customCSharpUiText("custom_csharp.context.custom_csharp", "Custom C#")
           : apiCompositeEditor
-            ? "API Composite"
-            : "Runtime Graph",
+            ? customCSharpUiText("custom_csharp.context.api_composite", "API Composite")
+            : customCSharpUiText("custom_csharp.context.runtime_graph", "Runtime Graph"),
         title: window.RMLI18n.t("ui.auto.dd2ed6d98fd7"),
         message:
           window.RMLI18n.t("ui.auto.d660539cad69"),
@@ -5908,10 +5975,10 @@ function restoreGraphAfterCustomCSharpInlineEditor(
     if (dom.activeContainerName) {
       dom.activeContainerName.textContent =
         customCSharpEditor
-          ? `Isolated · ${customCSharpEditor.fileName}`
+          ? customCSharpUiFormat("custom_csharp.context.isolated", { file: customCSharpEditor.fileName }, `Isolated · ${customCSharpEditor.fileName}`)
           : apiCompositeEditor
-            ? `Composite · ${apiCompositeEditor.title}`
-            : "Exact type matching";
+            ? customCSharpUiFormat("custom_csharp.context.composite", { title: apiCompositeEditor.title }, `Composite · ${apiCompositeEditor.title}`)
+            : customCSharpUiText("custom_csharp.context.exact_type_matching", "Exact type matching");
     }
     if (
       graph?.active &&
@@ -6166,7 +6233,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.24.90-reliable-folder-direct-dll-build",
+      "styles/features/styles.runtime-graph.css?v=1.25.00-canonical-type-reconciliation-startup-recovery",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6240,7 +6307,7 @@ async function createCustomCSharpExternalHost(
       return null;
     }
     hostWindow.document.title = String(
-      title || "Custom C# code editor"
+      title || customCSharpUiText("custom_csharp.editor.title", "Custom C# code editor")
     );
     hostWindow.focus?.();
     return { hostWindow };
@@ -6880,7 +6947,11 @@ function customCSharpNodeDropSnippet(
     return {
       snippet,
       status:
-        `${title} was inserted as C# at the cursor.`
+        customCSharpUiFormat(
+          "custom_csharp.editor.inserted",
+          { title },
+          `${title} was inserted as C# at the cursor.`
+        )
     };
   }
 
@@ -6908,7 +6979,11 @@ function mountCustomCSharpEditorPresentation({
       initialValue
     );
     const title =
-      `${String(specification?.label || "Custom C#")} · Code editor`;
+      customCSharpUiFormat(
+        "custom_csharp.editor.window_title",
+        { label: String(specification?.label || "Custom C#") },
+        `${String(specification?.label || "Custom C#")} · Code editor`
+      );
     const shortcutBootstrap = prepareCustomCSharpEditorHost(
       hostWindow,
       title
@@ -7002,14 +7077,25 @@ function mountCustomCSharpEditorPresentation({
             document.documentElement.lang || "en",
           documentTitle: title,
           tabTitle:
-            `${node.label || nodeDefinition(node)?.title || "Custom C#"} · ${String(specification?.label || parameterKey)}`,
+            customCSharpUiFormat(
+              "custom_csharp.editor.tab_title",
+              {
+                node: node.label || nodeDefinition(node)?.title || "Custom C#",
+                label: String(specification?.label || parameterKey)
+              },
+              `${node.label || nodeDefinition(node)?.title || "Custom C#"} · ${String(specification?.label || parameterKey)}`
+            ),
           ariaLabel: String(
             specification?.label || window.RMLI18n.t("ui.auto.ec4bfc434347")
           ),
           scrollLayerKey:
             `custom-csharp:${editorKey}`,
           scrollLayerLabel:
-            `${String(specification?.label || "Custom C#")} code and line numbers`,
+            customCSharpUiFormat(
+              "custom_csharp.editor.code_and_lines",
+              { label: String(specification?.label || "Custom C#") },
+              `${String(specification?.label || "Custom C#")} code and line numbers`
+            ),
           value: customCSharpEditorCurrentValue(
             nodeId,
             parameterKey,
@@ -7036,7 +7122,7 @@ function mountCustomCSharpEditorPresentation({
             }
             let colorEditor = null;
             colorEditor = bridge.createColorXEditor({
-              label: String(label || "Editor color"),
+              label: String(label || customCSharpUiText("custom_csharp.editor.color", "Editor color")),
               expression: normalizedCustomCSharpEditorColor(
                 value,
                 "#7f7f7f"
@@ -7110,7 +7196,7 @@ function mountCustomCSharpEditorPresentation({
                 )
               : customCSharpSynchronizationStatus.get(
                   nodeId
-                ) || "Synchronized with Builder",
+                ) || customCSharpUiText("custom_csharp.status.synchronized", "Synchronized with Builder"),
           output:
             customCSharpDebugOutput.get(nodeId) || [],
           diagnostics:
@@ -7264,7 +7350,7 @@ function mountCustomCSharpEditorPresentation({
         mounted.applySnapshot?.({
           value: customCSharpEditorCurrentValue(nodeId, parameterKey, initialValue),
           appearance: customCSharpEditorAppearance(latestNode || node),
-          status: customCSharpSynchronizationStatus.get(nodeId) || "Synchronized with Builder",
+          status: customCSharpSynchronizationStatus.get(nodeId) || customCSharpUiText("custom_csharp.status.synchronized", "Synchronized with Builder"),
           output: customCSharpDebugOutput.get(nodeId) || [],
           diagnostics: customCSharpDiagnostics.get(nodeId) || []
         });
@@ -7418,20 +7504,32 @@ async function moveCustomCSharpEditorToMode(
     ) {
       return false;
     }
+    const targetModeLabel = customCSharpUiText(
+      `custom_csharp.editor.mode.${targetMode}`,
+      targetMode
+    );
 
     const workSession =
       window.RMLBuilderWork?.begin?.({
         kicker: window.RMLI18n.t("ui.text.ba090b5e07cf"),
-        title: "Switching Custom C# editor view…",
-        message: "The selected editor presentation is being prepared.",
-        detail: `Mounting the ${targetMode} editor with the current document state.`,
+        title: customCSharpUiText("custom_csharp.editor.switching", "Switching Custom C# editor view…"),
+        message: customCSharpUiText("custom_csharp.editor.preparing_view", "The selected editor presentation is being prepared."),
+        detail: customCSharpUiFormat(
+          "custom_csharp.editor.mounting",
+          { mode: targetModeLabel },
+          `Mounting the ${targetMode} editor with the current document state.`
+        ),
         progress: 44
       });
     existing.presentationTransition = true;
     try {
       await window.RMLBuilderWork?.paint?.();
       const title =
-        `${String(existing.specification?.label || "Custom C#")} · Code editor`;
+        customCSharpUiFormat(
+          "custom_csharp.editor.window_title",
+          { label: String(existing.specification?.label || "Custom C#") },
+          `${String(existing.specification?.label || "Custom C#")} · Code editor`
+        );
       let externalHost = null;
       if (targetMode === "external") {
         externalHost =
@@ -7589,9 +7687,13 @@ async function openCustomCSharpDetachedEditor(
     const workSession =
       beginGraphTransitionWork({
         kicker: window.RMLI18n.t("ui.text.ba090b5e07cf"),
-        title: `Opening ${String(specification?.label || "Custom C#")} editor…`,
-        message: "The Custom C# editor is being prepared.",
-        detail: "Loading the editor and restoring its current document state.",
+        title: customCSharpUiFormat(
+          "custom_csharp.editor.opening",
+          { label: String(specification?.label || "Custom C#") },
+          `Opening ${String(specification?.label || "Custom C#")} editor…`
+        ),
+        message: customCSharpUiText("custom_csharp.editor.preparing", "The Custom C# editor is being prepared."),
+        detail: customCSharpUiText("custom_csharp.editor.loading", "Loading the editor and restoring its current document state."),
         progress: 36
       });
     try {
@@ -7612,7 +7714,11 @@ async function openCustomCSharpDetachedEditor(
     }
     const frame = createCustomCSharpInlineFrame(
       editorKey,
-      `${String(specification?.label || "Custom C#")} · Code editor`
+      customCSharpUiFormat(
+        "custom_csharp.editor.window_title",
+        { label: String(specification?.label || "Custom C#") },
+        `${String(specification?.label || "Custom C#")} · Code editor`
+      )
     );
     return Boolean(
       await mountCustomCSharpEditorPresentation({
@@ -7731,7 +7837,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.24.90-reliable-folder-direct-dll-build",
+      "1.25.00-canonical-type-reconciliation-startup-recovery",
     writable: false,
     enumerable: true,
     configurable: true

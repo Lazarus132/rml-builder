@@ -30,6 +30,15 @@
     syntax: window.RMLI18n.t("ui.literal.be73a4b879b0")
   };
 
+  const visualCSharpUiText = (key, fallback = "") => {
+    const translated = String(window.RMLI18n?.t?.(key) ?? "");
+    return translated && translated !== key ? translated : fallback;
+  };
+  const visualCSharpUiFormat = (key, values, fallback = "") => {
+    const translated = String(window.RMLI18n?.format?.(key, values) ?? "");
+    return translated && translated !== key ? translated : fallback;
+  };
+
   const text = (key, label, defaultValue = "", help = "", extra = {}) => ({
     key,
     label,
@@ -253,7 +262,7 @@
     symbol: "CSPROJ",
     description: window.RMLI18n.t("ui.auto.b3101ec2f02c"),
     parameters: [
-      text("projectId", window.RMLI18n.t("ui.auto.7f16f0d44ba9"), "main", "Use 'main' for the normal generated mod project."),
+      text("projectId", window.RMLI18n.t("ui.auto.7f16f0d44ba9"), "main", visualCSharpUiText("visual_csharp.project.main_help", "Use 'main' for the normal generated mod project.")),
       text("assemblyName", window.RMLI18n.t("ui.auto.82b30572427c"), "GeneratedVisualMod"),
       text("rootNamespace", window.RMLI18n.t("ui.auto.bc35cfbb0c0d"), "GeneratedVisualMod"),
       select("deployDirectory", window.RMLI18n.t("ui.auto.bd67e8655e1f"), ["rml_mods", "rml_libs"], "rml_mods"),
@@ -4337,13 +4346,62 @@ internal static class EarlyHarmonyPatches
     )}`;
   }
 
+  function collisionFreeCSharpImportFragment(
+    usedIds,
+    prefix,
+    createCandidate
+  ) {
+    const seenCandidateIdentities = new Set();
+    let sequence = 1;
+    while (true) {
+      const fragment = createCandidate(
+        `${prefix}-${sequence}`,
+        sequence
+      );
+      if (!fragment?.ok) {
+        return { fragment, sequence };
+      }
+      const candidateIds = [
+        ...(Array.isArray(fragment.nodes)
+          ? fragment.nodes
+          : []),
+        ...(Array.isArray(fragment.connections)
+          ? fragment.connections
+          : [])
+      ].map(item => String(item?.id || ""));
+      if (!candidateIds.some(id =>
+        usedIds.has(id)
+      )) {
+        return { fragment, sequence };
+      }
+      const identity = JSON.stringify(
+        [...candidateIds].sort()
+      );
+      if (
+        seenCandidateIdentities.has(identity)
+      ) {
+        return {
+          sequence,
+          fragment: {
+            ok: false,
+            diagnostics: [
+              "The C# importer produced the same colliding graph identity twice. The deterministic identity cycle was stopped without imposing an arbitrary attempt limit."
+            ],
+            nodes: [],
+            connections: []
+          }
+        };
+      }
+      seenCandidateIdentities.add(identity);
+      sequence += 1;
+    }
+  }
+
   function importIntoCurrentGraph(source, options = {}) {
     const target =
       resolveCSharpImportTarget(options);
     if (!target.ok) return target;
     const { host, state } = target;
-    let attempt = 0;
-    let fragment;
     const usedIds = csharpImportUsedIds(
       host,
       state
@@ -4354,13 +4412,16 @@ internal static class EarlyHarmonyPatches
       options,
       "csharp-import"
     );
-    do {
-      fragment = createImportFragment(source, {
-        ...options,
-        prefix: `${prefix}-${attempt || 1}`
-      });
-      attempt += 1;
-    } while (fragment.ok && [...fragment.nodes, ...fragment.connections].some(item => usedIds.has(item.id)) && attempt < 100);
+    const { fragment } =
+      collisionFreeCSharpImportFragment(
+        usedIds,
+        prefix,
+        candidatePrefix =>
+          createImportFragment(source, {
+            ...options,
+            prefix: candidatePrefix
+          })
+      );
     if (!fragment.ok) return fragment;
     return storeCustomCSharpFragment(
       fragment,
@@ -4376,8 +4437,6 @@ internal static class EarlyHarmonyPatches
       resolveCSharpImportTarget(options);
     if (!target.ok) return target;
     const { host, state } = target;
-    let attempt = 0;
-    let fragment;
     const usedIds = csharpImportUsedIds(
       host,
       state
@@ -4388,13 +4447,20 @@ internal static class EarlyHarmonyPatches
       options,
       "csharp14-roslyn-import"
     );
-    do {
-      fragment = createRoslynImportFragment(source, parseResult, {
-        ...options,
-        prefix: `${prefix}-${attempt || 1}`
-      });
-      attempt += 1;
-    } while (fragment.ok && [...fragment.nodes, ...fragment.connections].some(item => usedIds.has(item.id)) && attempt < 100);
+    let { fragment } =
+      collisionFreeCSharpImportFragment(
+        usedIds,
+        prefix,
+        candidatePrefix =>
+          createRoslynImportFragment(
+            source,
+            parseResult,
+            {
+              ...options,
+              prefix: candidatePrefix
+            }
+          )
+      );
     if (!fragment.ok) return fragment;
     const validateFragment = async candidate => {
       const prepared = createCustomCSharpFileGraphFromFragment(candidate);
@@ -4406,19 +4472,39 @@ internal static class EarlyHarmonyPatches
         roslynStructuralSignature(parseResult.root) === roslynStructuralSignature(reparsed.root);
     };
     if (!await validateFragment(fragment)) {
-      fragment = createRoslynImportFragment(source, parseResult, {
-        ...options,
-        prefix: `${prefix}-semantic-${attempt}`,
-        disableCatalogNodes: true
-      });
+      ({ fragment } =
+        collisionFreeCSharpImportFragment(
+          usedIds,
+          `${prefix}-semantic`,
+          candidatePrefix =>
+            createRoslynImportFragment(
+              source,
+              parseResult,
+              {
+                ...options,
+                prefix: candidatePrefix,
+                disableCatalogNodes: true
+              }
+            )
+        ));
     }
     if (!fragment.ok || !await validateFragment(fragment)) {
-      fragment = createRoslynImportFragment(source, parseResult, {
-        ...options,
-        prefix: `${prefix}-exact-${attempt}`,
-        disableCatalogNodes: true,
-        semanticOptimization: false
-      });
+      ({ fragment } =
+        collisionFreeCSharpImportFragment(
+          usedIds,
+          `${prefix}-exact`,
+          candidatePrefix =>
+            createRoslynImportFragment(
+              source,
+              parseResult,
+              {
+                ...options,
+                prefix: candidatePrefix,
+                disableCatalogNodes: true,
+                semanticOptimization: false
+              }
+            )
+        ));
       if (!fragment.ok || !await validateFragment(fragment)) {
         return {
           ok: false,
@@ -4837,12 +4923,12 @@ internal static class EarlyHarmonyPatches
       if (!file) return;
       const workSession =
         window.RMLBuilderWork?.begin?.({
-          kicker: "Custom C# import",
-          title: `Importing ${file.name}…`,
+          kicker: visualCSharpUiText("visual_csharp.import.kicker", "Custom C# import"),
+          title: visualCSharpUiFormat("visual_csharp.import.importing", { file: file.name }, `Importing ${file.name}…`),
           message:
-            "Roslyn is validating the complete C# source.",
+            visualCSharpUiText("visual_csharp.import.validating", "Roslyn is validating the complete C# source."),
           detail:
-            "The editable syntax graph is built automatically after validation.",
+            visualCSharpUiText("visual_csharp.import.graph_after_validation", "The editable syntax graph is built automatically after validation."),
           progress: 18,
         }) || 0;
       try {
@@ -4901,11 +4987,15 @@ internal static class EarlyHarmonyPatches
         window.RMLBuilderWork?.update?.(
           workSession,
           {
-            title: `Building ${file.name}…`,
+            title: visualCSharpUiFormat("visual_csharp.import.building", { file: file.name }, `Building ${file.name}…`),
             message:
-              "The complete Roslyn AST is being converted into editable nodes.",
+              visualCSharpUiText("visual_csharp.import.converting", "The complete Roslyn AST is being converted into editable nodes."),
             detail:
-              `${syntaxItemCount.toLocaleString(window.RMLI18n?.language || undefined)} syntax items were validated.`,
+              visualCSharpUiFormat(
+                "visual_csharp.import.syntax_items",
+                { count: syntaxItemCount.toLocaleString(window.RMLI18n?.language || undefined) },
+                `${syntaxItemCount.toLocaleString(window.RMLI18n?.language || undefined)} syntax items were validated.`
+              ),
             progress: 56
           }
         );
@@ -5008,11 +5098,15 @@ internal static class EarlyHarmonyPatches
         await window.RMLBuilderWork?.complete?.(
           workSession,
           {
-            title: `Imported ${importedFileName}`,
+            title: visualCSharpUiFormat("visual_csharp.import.imported", { file: importedFileName }, `Imported ${importedFileName}`),
             message:
-              "The complete editable Custom C# graph is ready.",
+              visualCSharpUiText("visual_csharp.import.ready", "The complete editable Custom C# graph is ready."),
             detail:
-              `${result.importedSyntaxNodeCount.toLocaleString(window.RMLI18n?.language || undefined)} nodes were constructed automatically.`
+              visualCSharpUiFormat(
+                "visual_csharp.import.nodes_constructed",
+                { count: result.importedSyntaxNodeCount.toLocaleString(window.RMLI18n?.language || undefined) },
+                `${result.importedSyntaxNodeCount.toLocaleString(window.RMLI18n?.language || undefined)} nodes were constructed automatically.`
+              )
           }
         );
       } catch (error) {

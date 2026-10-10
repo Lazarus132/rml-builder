@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.24.90-reliable-folder-direct-dll-build";
+    "1.25.00-canonical-type-reconciliation-startup-recovery";
 
   if (
     window.RMLBuilderReplacementDialog
@@ -474,11 +474,6 @@
             )
           : [];
 
-      /*
-       * Search must never lose the suggestions already visible before the
-       * user starts typing. Build one deduplicated index from BOTH the
-       * conservative suggestion set and the full-catalog browse set.
-       */
       const catalogSearchValues = [
         ...new Map(
           [
@@ -508,11 +503,6 @@
       const list =
         elements.builderWorkReplacementList;
 
-      /*
-       * Explicit replacement scope: safe suggestions by default, or the
-       * complete catalog when the user deliberately asks for maximum freedom.
-       * The search field always searches only inside the active scope.
-       */
       const scopeHost =
         document.createElement("div");
       scopeHost.className =
@@ -1191,12 +1181,6 @@
           paletteIcon:
             definition.paletteIcon || null,
           semanticProof: "catalog-search",
-          /*
-           * Full-catalog search is an explicit user override surface.
-           * Auto-replacement remains strict elsewhere, but a user may
-           * deliberately choose any catalog node here. Keep the warning
-           * instead of disabling the result.
-           */
           selectable: true,
           manualOverride: true,
           compatibilityWarning: true,
@@ -1271,12 +1255,6 @@
               "true"
             );
 
-            /*
-             * queryPalette intentionally caps one request at 100 rows.
-             * Build the requested render window page-by-page so "All"
-             * immediately browses the catalog even with an empty query,
-             * and "Load more" can genuinely grow beyond the first page.
-             */
             const pageSize = 100;
             const requestedEntries = [];
             let reportedTotal = 0;
@@ -1337,10 +1315,6 @@
                 catalogEntryCandidate
               );
 
-            /*
-             * Known suggestions remain in the union so a proven compatible
-             * candidate keeps its richer compatibility metadata.
-             */
             const suggestedMatches =
               filterSuggested(values);
             const union = [
@@ -1360,10 +1334,6 @@
               matches.length
             );
           } else {
-            /*
-             * Offline/fallback path: browse the complete locally indexed
-             * candidate set. Empty query means "all", non-empty query filters.
-             */
             matches = query
               ? catalogSearchValues.filter(
                   candidate => {

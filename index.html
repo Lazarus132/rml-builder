@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" name="viewport"/>
-<meta content="1.24.90-reliable-folder-direct-dll-build" name="rml-builder-build"/>
+<meta content="1.25.00-canonical-type-reconciliation-startup-recovery" name="rml-builder-build"/>
 <meta content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback." name="description"/>
 <title>{{i18n:index.text.ad442c43ebad}}</title>
 <script>
@@ -13,7 +13,7 @@
         "RMLBuilderBuildId",
         {
            value:
-             "1.24.90-reliable-folder-direct-dll-build",
+             "1.25.00-canonical-type-reconciliation-startup-recovery",
            writable: false,
            enumerable: true,
            configurable: false
@@ -36,8 +36,8 @@
         );
       })();
     </script>
-<script src="js/i18n.js?v=1.24.90-reliable-folder-direct-dll-build"></script>
-<script src="js/bootstrap/architecture_gate.js?v=1.24.42-demand-import-fix6"></script>
+<script src="js/i18n.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&amp;localization-rev=2"></script>
+<script src="js/bootstrap/architecture_gate.js?v=1.24.42-demand-import-fix6&amp;i18n-ready=1"></script>
 <link href="styles/base/styles.css?v=287-replacement-status-icons" rel="stylesheet"/>
 <link href="assets/icons/favicon.svg" rel="shortcut icon"/>
 <link href="assets/icons/favicon.svg" rel="icon"/>
@@ -284,7 +284,7 @@
 </button>
 </div>
 <div class="diagnostics" hidden="" id="diagnostics"></div>
-<pre data-rml-scroll-layer="always" data-rml-scroll-layer-key="generated-code" data-scroll-label="Generated code"><code data-rml-i18n-skip id="generated-code"></code></pre>
+<pre data-rml-scroll-layer="always" data-rml-scroll-layer-key="generated-code" data-scroll-label="{{i18n:graph.generated_code.scroll_label}}"><code data-rml-i18n-skip id="generated-code"></code></pre>
 </section>
 </main>
 <div id="lazy-dialog-host"></div>
@@ -522,17 +522,17 @@
 <span></span>
 </div>
 <div class="builder-work-copy">
-<small id="builder-work-kicker">{{i18n:index.text.26ab7b3db86d}}</small>
-<h2 id="builder-work-title">{{i18n:index.text.2ea901f12493}}</h2>
-<p id="builder-work-message">
-            {{i18n:index.text.3116d0ce4cab}}
+<small data-i18n-key="index.text.26ab7b3db86d" id="builder-work-kicker">Project loading</small>
+<h2 data-i18n-key="index.text.2ea901f12493" id="builder-work-title">Preparing the project…</h2>
+<p data-i18n-key="index.text.3116d0ce4cab" id="builder-work-message">
+            The restored project is being prepared before the first usable frame is shown.
           </p>
 </div>
 <div aria-label="{{i18n:index.aria_label.ff631ae7572d}}" aria-valuemax="100" aria-valuemin="0" class="builder-work-progress" id="builder-work-progress" role="progressbar">
 <span id="builder-work-progress-fill"></span>
 </div>
-<small class="builder-work-detail" id="builder-work-detail">
-          {{i18n:index.text.de938f99e4e9}}
+<small class="builder-work-detail" data-i18n-key="index.text.de938f99e4e9" id="builder-work-detail">
+          No project data is discarded while startup completes.
         </small>
 <div class="builder-work-replacement" hidden="" id="builder-work-replacement">
 <div>
@@ -568,8 +568,8 @@
 </div>
 <script>
       window.RMLArchitectureGate.bootstrap([
-        "js/loaders/style_loader.js?v=1.24.90-reliable-folder-direct-dll-build",
-        "js/loaders/script_loader.js?v=1.24.90-reliable-folder-direct-dll-build",
+        "js/loaders/style_loader.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&readiness-rev=2",
+        "js/loaders/script_loader.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&readiness-rev=4",
         "js/ui/scroll_manager.js?v=35-custom-csharp-atomic-scroll-tabs-v784",
         "js/ui/scroll_hierarchy.js?v=10-custom-csharp-atomic-scroll-tabs-v784",
         "js/core/crypto.js?v=5-guidance-comments-global-v723",
@@ -577,8 +577,8 @@
         "js/io/project_io_client.js?v=1.24.42-demand-import-fix6",
         "js/profile/profile_presentation.js?v=1.24.42-demand-import-fix6",
         "js/ui/ux_timing.js?v=1.24.42-demand-import-fix6",
-        "js/bootstrap/app.js?v=1.24.90-reliable-folder-direct-dll-build",
-        "js/core/dynamic_settings.js?v=1.24.90-reliable-folder-direct-dll-build"
+        "js/bootstrap/app.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&readiness-rev=2&i18n-rev=1",
+        "js/core/dynamic_settings.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&i18n-rev=1"
       ]).catch(error => {
         console.error(
           "The Builder could not start after its architecture check.",

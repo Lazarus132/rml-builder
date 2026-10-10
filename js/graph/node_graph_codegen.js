@@ -1758,9 +1758,64 @@ function typeMatchesConstraint(
     return false;
   }
 
-function connectionTypesCompatible(
+  function graphExactCsTypeIdentity(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    try {
+      const identity =
+        window.RMLCSharpContracts
+          ?.canonicalTypeIdentity?.(
+            text,
+            { allowOpen: true }
+          );
+      if (identity) return identity;
+    } catch {}
+
+    return text
+      .replace(/global::/g, "")
+      .replace(/\s+/g, "")
+      .replace(
+        /\b(bool|byte|sbyte|short|ushort|int|uint|long|ulong|half|char|float|double|decimal|string|object|void|nint|nuint)\b/g,
+        alias =>
+          GRAPH_CSHARP_PRIMITIVE_NAMES[
+            alias
+          ] || alias
+      );
+  }
+
+  function graphPortCsTypeIdentity(
+    type,
+    specification = null
+  ) {
+    const explicit = String(
+      specification?.apiCsType ||
+      specification?.csType ||
+      ""
+    ).trim();
+    if (explicit) {
+      return graphExactCsTypeIdentity(
+        explicit
+      );
+    }
+
+    const canonical = canonicalGraphType(type);
+    const information =
+      TYPE_INFO[type] ||
+      TYPE_INFO[canonical] ||
+      TYPE_INFO[typeBase(type)] ||
+      null;
+    return information?.csType
+      ? graphExactCsTypeIdentity(
+          information.csType
+        )
+      : "";
+  }
+
+  function connectionTypesCompatible(
     fromType,
-    toType
+    toType,
+    fromSpecification = null,
+    toSpecification = null
   ) {
     if (customCSharpEditor) {
       return true;
@@ -1769,11 +1824,34 @@ function connectionTypesCompatible(
       return false;
     }
 
+    const fromPortCsType =
+      graphPortCsTypeIdentity(
+        fromType,
+        fromSpecification
+      );
+    const toPortCsType =
+      graphPortCsTypeIdentity(
+        toType,
+        toSpecification
+      );
+    if (
+      fromPortCsType &&
+      toPortCsType &&
+      fromPortCsType === toPortCsType
+    ) {
+      return true;
+    }
+    const resolvedIdentityConflict = Boolean(
+      fromPortCsType &&
+      toPortCsType &&
+      fromPortCsType !== toPortCsType
+    );
+
     fromType = canonicalGraphType(fromType);
     toType = canonicalGraphType(toType);
 
     if (fromType === toType) {
-      return true;
+      return !resolvedIdentityConflict;
     }
 
     if (
@@ -5937,7 +6015,9 @@ function repairVisualFunctionConnectionsInGraph(
           !toPort.typeVar &&
           !connectionTypesCompatible(
             fromPort.type,
-            toPort.type
+            toPort.type,
+            fromPort,
+            toPort
           );
         if (!missing && !incompatible) {
           return true;
@@ -8195,7 +8275,9 @@ function graphAnalysisPortContract(spec) {
       String(spec?.type || ""),
       String(spec?.typeVar || ""),
       String(spec?.constraint || ""),
-      String(spec?.reaction || "")
+      String(spec?.reaction || ""),
+      String(spec?.apiCsType || ""),
+      String(spec?.csType || "")
     ];
   }
 
@@ -8745,7 +8827,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.24.90-reliable-folder-direct-dll-build",
+        "1.25.00-canonical-type-reconciliation-startup-recovery",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8778,7 +8860,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.24.90-reliable-folder-direct-dll-build" &&
+        "1.25.00-canonical-type-reconciliation-startup-recovery" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -8972,29 +9054,45 @@ function analyzeConnectionsCore(
     const compatibilityBySourceType = new Map();
     const typesCompatible = (
       fromType,
-      toType
+      toType,
+      fromSpecification = null,
+      toSpecification = null
     ) => {
+      const sourceIdentity =
+        graphPortCsTypeIdentity(
+          fromType,
+          fromSpecification
+        );
+      const targetIdentity =
+        graphPortCsTypeIdentity(
+          toType,
+          toSpecification
+        );
+      const sourceKey = `${fromType}\u0000${sourceIdentity}`;
+      const targetKey = `${toType}\u0000${targetIdentity}`;
       let byTargetType =
         compatibilityBySourceType.get(
-          fromType
+          sourceKey
         );
       if (!byTargetType) {
         byTargetType = new Map();
         compatibilityBySourceType.set(
-          fromType,
+          sourceKey,
           byTargetType
         );
       }
-      if (byTargetType.has(toType)) {
-        return byTargetType.get(toType);
+      if (byTargetType.has(targetKey)) {
+        return byTargetType.get(targetKey);
       }
       const compatible =
         connectionTypesCompatible(
           fromType,
-          toType
+          toType,
+          fromSpecification,
+          toSpecification
         );
       byTargetType.set(
-        toType,
+        targetKey,
         compatible
       );
       return compatible;
@@ -9395,7 +9493,16 @@ function analyzeConnectionsCore(
         if (
           !fromValues.some(fromType =>
             toValues.some(toType =>
-              typesCompatible(fromType, toType)
+              typesCompatible(
+                fromType,
+                toType,
+                edge.from.fixed
+                  ? edge.from.portRef.spec
+                  : null,
+                edge.to.fixed
+                  ? edge.to.portRef.spec
+                  : null
+              )
             )
           )
         ) {
@@ -9411,7 +9518,14 @@ function analyzeConnectionsCore(
           for (const type of fromValues) {
             if (
               !toValues.some(toType =>
-                typesCompatible(type, toType)
+                typesCompatible(
+                  type,
+                  toType,
+                  null,
+                  edge.to.fixed
+                    ? edge.to.portRef.spec
+                    : null
+                )
               )
             ) {
               edge.from.variable.domain.delete(type);
@@ -9425,7 +9539,14 @@ function analyzeConnectionsCore(
           for (const type of toValues) {
             if (
               !latestFromValues.some(fromType =>
-                typesCompatible(fromType, type)
+                typesCompatible(
+                  fromType,
+                  type,
+                  edge.from.fixed
+                    ? edge.from.portRef.spec
+                    : null,
+                  null
+                )
               )
             ) {
               edge.to.variable.domain.delete(type);
@@ -9573,7 +9694,12 @@ function analyzeConnectionsCore(
         if (
           fromType &&
           toType &&
-          !typesCompatible(fromType, toType)
+          !typesCompatible(
+            fromType,
+            toType,
+            edge.from.fixed ? edge.from.portRef.spec : null,
+            edge.to.fixed ? edge.to.portRef.spec : null
+          )
         ) {
           return false;
         }
@@ -9949,7 +10075,18 @@ function analyzeConnectionsCore(
         ? edge.to.type
         : assignments.get(edge.to.key);
 
-      if (!typesCompatible(fromType, toType)) {
+      if (
+        !typesCompatible(
+          fromType,
+          toType,
+          edge.from.fixed
+            ? edge.from.portRef.spec
+            : null,
+          edge.to.fixed
+            ? edge.to.portRef.spec
+            : null
+        )
+      ) {
         return {
           valid: false,
           reason:
@@ -11116,7 +11253,9 @@ function connectionProposal(
         ) ||
         connectionTypesCompatible(
           sourceType,
-          targetType
+          targetType,
+          sourcePort.spec,
+          targetPort.spec
         );
       return {
         valid: compatible,
@@ -14751,11 +14890,6 @@ function buildTypedNodeGraphCSharpContribution(
           String(
             window.RMLApiNodeFactoryReport
               ?.catalogFingerprint || ""
-          ),
-        apiCatalogSource:
-          String(
-            window.RMLApiNodeFactoryReport
-              ?.catalogSource || ""
           ),
         apiFactoryVerificationPassed:
           window.RMLApiNodeFactoryReport
@@ -19192,7 +19326,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.24.90-reliable-folder-direct-dll-build",
+          "1.25.00-canonical-type-reconciliation-startup-recovery",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

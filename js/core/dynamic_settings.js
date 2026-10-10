@@ -426,10 +426,10 @@
     heading.className = "inspector-heading";
     const title = document.createElement("h3");
     title.textContent = node.dynamicSettingKind === KINDS.choice
-      ? "Dynamic Choice"
+      ? window.RMLI18n.t("dynamic_settings.inspector.title.choice")
       : node.dynamicSettingKind === KINDS.action
-        ? "Dynamic Action List"
-        : "Dynamic Toggle List";
+        ? window.RMLI18n.t("dynamic_settings.inspector.title.action")
+        : window.RMLI18n.t("dynamic_settings.inspector.title.toggle");
     heading.appendChild(title);
     inspectorBody.appendChild(heading);
 
@@ -440,7 +440,12 @@
       node._rmlDynamicLabelCustomized = true;
       requestRefresh({ refreshInspector: false });
     });
-    inspectorBody.appendChild(field("Menu label", name));
+    inspectorBody.appendChild(
+      field(
+        window.RMLI18n.t("dynamic_settings.field.menu_label"),
+        name
+      )
+    );
 
     const description = document.createElement("textarea");
     description.value = node.description || "";
@@ -449,7 +454,12 @@
       node.description = description.value;
       requestRefresh({ refreshInspector: false });
     });
-    inspectorBody.appendChild(field("Description", description));
+    inspectorBody.appendChild(
+      field(
+        window.RMLI18n.t("dynamic_settings.field.description"),
+        description
+      )
+    );
 
     const directCollectionBound =
       Boolean(
@@ -473,7 +483,7 @@
 
       inspectorBody.appendChild(
         field(
-          "Labels collection",
+          window.RMLI18n.t("dynamic_settings.field.labels_collection"),
           labels
         )
       );
@@ -494,7 +504,7 @@
 
       inspectorBody.appendChild(
         field(
-          "Stable values collection (optional)",
+          window.RMLI18n.t("dynamic_settings.field.stable_values_collection_optional"),
           values
         )
       );
@@ -521,7 +531,12 @@
         node.dynamicAllowEmpty = empty.checked;
         requestRefresh({ refreshInspector: false });
       });
-      inspectorBody.appendChild(field("Allow empty selection", empty));
+      inspectorBody.appendChild(
+        field(
+          window.RMLI18n.t("dynamic_settings.field.allow_empty_selection"),
+          empty
+        )
+      );
 
       if (directCollectionBound) {
         const channel =
@@ -552,7 +567,10 @@
 
           automatic.value = "";
           automatic.textContent =
-            `Automatic · first runtime item (${options[0].label})`;
+            window.RMLI18n.format(
+              "dynamic_settings.option.automatic_first_runtime_item",
+              { label: options[0].label }
+            );
 
           fallback.appendChild(
             automatic
@@ -603,7 +621,7 @@
 
           inspectorBody.appendChild(
             field(
-              "Default selection",
+              window.RMLI18n.t("dynamic_settings.field.default_selection"),
               fallback
             )
           );
@@ -641,7 +659,7 @@
 
         inspectorBody.appendChild(
           field(
-            "Default stable value",
+            window.RMLI18n.t("dynamic_settings.field.default_stable_value"),
             fallback
           )
         );
@@ -655,7 +673,12 @@
         node.dynamicButtonLabel = buttonLabel.value;
         requestRefresh({ refreshInspector: false });
       });
-      inspectorBody.appendChild(field("Action label", buttonLabel));
+      inspectorBody.appendChild(
+        field(
+          window.RMLI18n.t("dynamic_settings.field.action_label"),
+          buttonLabel
+        )
+      );
     }
 
     if (node.dynamicSettingKind === KINDS.toggle) {
@@ -664,7 +687,12 @@
         node.dynamicStateMonitorId = states.value;
         requestRefresh({ refreshInspector: false });
       });
-      inspectorBody.appendChild(field("Boolean states collection", states));
+      inspectorBody.appendChild(
+        field(
+          window.RMLI18n.t("dynamic_settings.field.boolean_states_collection"),
+          states
+        )
+      );
     }
 
     const outputs = document.createElement("div");
@@ -1447,7 +1475,7 @@
 
       title.textContent =
         node.keyName ||
-        "Dynamic control";
+        window.RMLI18n.t("dynamic_settings.fallback.dynamic_control");
 
       if (
         window.RMLInlineRowLayout
@@ -1505,7 +1533,7 @@
         previousButton.type = "button";
         previousButton.className =
           "rml-preview-control rml-preview-enum-step";
-        previousButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-triangle-left"></use></svg>`;
+        previousButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-triangle-left"></use></svg>`;
         previousButton.setAttribute(
           "aria-label",
           window.RMLI18n.t("{{i18n:js.presentation.5caa1fc4e7c2}}")
@@ -1517,7 +1545,7 @@
         nextButton.type = "button";
         nextButton.className =
           "rml-preview-control rml-preview-enum-step";
-        nextButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-triangle-right"></use></svg>`;
+        nextButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-triangle-right"></use></svg>`;
         nextButton.setAttribute(
           "aria-label",
           window.RMLI18n.t("{{i18n:js.presentation.c400ec237248}}")
@@ -1532,7 +1560,7 @@
         const refreshSwitch = () => {
           valueButton.textContent =
             selection.item?.label ||
-            "Runtime options unavailable";
+            window.RMLI18n.t("dynamic_settings.fallback.runtime_options_unavailable");
 
           const canStep =
             items.length > 1 &&
@@ -2142,6 +2170,15 @@ csString(graphClass)]);
   document.addEventListener(
     "rml-builder:project-replacement",
     stopRuntimeBridgeSubscription
+  );
+
+  window.addEventListener(
+    "rml-language-changed",
+    () => {
+      if (graphViewActive()) return;
+      try { renderInspector?.(); } catch {}
+      try { window.renderPreview?.(); } catch {}
+    }
   );
 
   document.addEventListener(
@@ -2848,7 +2885,7 @@ csString(graphClass)]);
 
       const plus =
         document.createElement("b");
-      plus.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-add"></use></svg>`;
+      plus.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-add"></use></svg>`;
 
       button.append(
         badge,

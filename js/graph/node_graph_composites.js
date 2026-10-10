@@ -790,7 +790,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.24.90-reliable-folder-direct-dll-build";
+    "1.25.00-canonical-type-reconciliation-startup-recovery";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -1025,7 +1025,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.24.90-reliable-folder-direct-dll-build&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -7474,7 +7474,30 @@ function exposeApiCompositeNodePorts(
     if (!quiet) {
       showGraphMessage(
         changed
-          ? `${result.added.toLocaleString(window.RMLI18n?.language || undefined)} open port${result.added === 1 ? " was" : "s were"} exposed and forwarded through every open Composite level.${propagation.stoppedAtInternalWire > 0 ? ` Forwarding stopped at ${propagation.stoppedAtInternalWire.toLocaleString(window.RMLI18n?.language || undefined)} internally connected level${propagation.stoppedAtInternalWire === 1 ? "" : "s"}.` : ""}`
+          ? `${window.RMLI18n.format(
+              result.added === 1
+                ? "composite.ports.exposed.one"
+                : "composite.ports.exposed.other",
+              {
+                count: result.added.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                )
+              }
+            )}${
+              propagation.stoppedAtInternalWire > 0
+                ? ` ${window.RMLI18n.format(
+                    propagation.stoppedAtInternalWire === 1
+                      ? "composite.ports.forwarding_stopped.one"
+                      : "composite.ports.forwarding_stopped.other",
+                    {
+                      count:
+                        propagation.stoppedAtInternalWire.toLocaleString(
+                          window.RMLI18n?.language || undefined
+                        )
+                    }
+                  )}`
+                : ""
+            }`
           : window.RMLI18n.t("ui.literal.e87751cd22ae"),
         changed
           ? "success"
@@ -7577,7 +7600,10 @@ function hideUnusedApiCompositeNodePorts(
       );
     if (result.aborted) {
       showGraphMessage(
-        `${result.reason} No port or wire was changed.`,
+        window.RMLI18n.format(
+          "composite.ports.change_aborted",
+          { reason: result.reason }
+        ),
         "error"
       );
       return false;
@@ -7616,7 +7642,16 @@ function hideUnusedApiCompositeNodePorts(
       mutationClass: "boundary"
     });
     showGraphMessage(
-      `${removed.toLocaleString(window.RMLI18n?.language || undefined)} unused exposed port${removed === 1 ? " was" : "s were"} hidden through the complete unused Composite chain. No wire, branch, route or node geometry was changed. The port definitions remain available for Expose unconnected ports.`,
+      window.RMLI18n.format(
+        removed === 1
+          ? "composite.ports.hidden.one"
+          : "composite.ports.hidden.other",
+        {
+          count: removed.toLocaleString(
+            window.RMLI18n?.language || undefined
+          )
+        }
+      ),
       "success"
     );
     return true;
@@ -7722,7 +7757,15 @@ async function openApiCompositeGraph(
         SAVED_API_COMPOSITE_NESTING_LIMIT
     ) {
       showGraphMessage(
-        `API Composite nesting cannot exceed the safe depth limit of ${SAVED_API_COMPOSITE_NESTING_LIMIT}.`,
+        window.RMLI18n.format(
+          "composite.nesting.depth_limit",
+          {
+            limit:
+              SAVED_API_COMPOSITE_NESTING_LIMIT.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+          }
+        ),
         "error"
       );
       return false;
@@ -9163,7 +9206,22 @@ function createApiCompositeFromSelection() {
         ).length > 0
       );
       showGraphMessage(
-        `${transaction.addedNodeCount.toLocaleString(window.RMLI18n?.language || undefined)} node${transaction.addedNodeCount === 1 ? "" : "s"} added to '${targetName}'. The existing Composite identity and outer connections were preserved.${savedUpdateAvailable ? ` ${window.RMLI18n.t("ui.literal.82044ba6c457")}` : ""}`,
+        `${window.RMLI18n.format(
+          transaction.addedNodeCount === 1
+            ? "composite.extend.nodes_added.one"
+            : "composite.extend.nodes_added.other",
+          {
+            count:
+              transaction.addedNodeCount.toLocaleString(
+                window.RMLI18n?.language || undefined
+              ),
+            name: targetName
+          }
+        )}${
+          savedUpdateAvailable
+            ? ` ${window.RMLI18n.t("ui.literal.82044ba6c457")}`
+            : ""
+        }`,
         "success"
       );
       return true;
@@ -9483,7 +9541,16 @@ function createApiCompositeFromSelection() {
       mutationClass: "topology"
     });
     showGraphMessage(
-      `${selectedNodes.length.toLocaleString(window.RMLI18n?.language || undefined)} nodes combined. Existing connections crossing the new Composite boundary were preserved; explicitly exposed ports remain available and no other unconnected ports were exposed automatically.`,
+      window.RMLI18n.format(
+        selectedNodes.length === 1
+          ? "composite.create.nodes_combined.one"
+          : "composite.create.nodes_combined.other",
+        {
+          count: selectedNodes.length.toLocaleString(
+            window.RMLI18n?.language || undefined
+          )
+        }
+      ),
       "success"
     );
     return true;
@@ -9716,7 +9783,16 @@ function unpackApiCompositeNode(
       mutationClass: "topology"
     });
     showGraphMessage(
-      `API Composite unpacked. ${composite.nodes.length.toLocaleString(window.RMLI18n?.language || undefined)} node positions and all stored wire routes were restored.`,
+      window.RMLI18n.format(
+        composite.nodes.length === 1
+          ? "composite.unpack.success.one"
+          : "composite.unpack.success.other",
+        {
+          count: composite.nodes.length.toLocaleString(
+            window.RMLI18n?.language || undefined
+          )
+        }
+      ),
       "success"
     );
     return true;
@@ -9995,7 +10071,10 @@ async function saveApiCompositeNode(
     if (target.mode === "ambiguous") {
       throw new Error(
         target.issue ||
-        `The Saved API Composite identity for '${target.name}' is ambiguous.`
+        window.RMLI18n.format(
+          "composite.identity.ambiguous",
+          { name: target.name }
+        )
       );
     }
     if (
@@ -10003,7 +10082,10 @@ async function saveApiCompositeNode(
       target.mode !== "save"
     ) {
       throw new Error(
-        `A Saved API Composite named '${target.name}' already exists. Choose a new name before saving a new Composite.`
+        window.RMLI18n.format(
+          "composite.save.name_exists",
+          { name: target.name }
+        )
       );
     }
     const existing =
@@ -10016,8 +10098,14 @@ async function saveApiCompositeNode(
     refreshVisibleApiCompositeInspectorSaveActions();
     showGraphMessage(
       existing
-        ? `Preparing Saved API Composite '${target.name}' for update…`
-        : `Preparing Saved API Composite '${target.name}'…`
+        ? window.RMLI18n.format(
+            "composite.save.preparing_update",
+            { name: target.name }
+          )
+        : window.RMLI18n.format(
+            "composite.save.preparing",
+            { name: target.name }
+          )
     );
     await savedApiCompositePaintOpportunity();
     let stagedRecordBaselineIdentity = "";
@@ -10642,6 +10730,19 @@ async function confirmSavedApiCompositeUpdate(
     if (typeof confirm !== "function") {
       return false;
     }
+    const duplicateDetails =
+      duplicateCount > 0
+        ? window.RMLI18n.format(
+            duplicateCount === 1
+              ? "composite.import.update_duplicate.one"
+              : "composite.import.update_duplicate.other",
+            {
+              count: duplicateCount.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+            }
+          )
+        : "";
     return Boolean(
       await confirm({
         tone: "warning",
@@ -10664,7 +10765,30 @@ async function confirmSavedApiCompositeUpdate(
               ? window.RMLI18n.t("ui.literal.53a401cc672c")
             : window.RMLI18n.t("ui.literal.b74ddf09775f"),
         details:
-          `Existing: ${existing.composite.nodes.length.toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${existing.composite.connections.length.toLocaleString(window.RMLI18n?.language || undefined)} connections. Imported: ${incoming.composite.nodes.length.toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${incoming.composite.connections.length.toLocaleString(window.RMLI18n?.language || undefined)} connections.${duplicateCount > 0 ? ` ${duplicateCount.toLocaleString(window.RMLI18n?.language || undefined)} duplicate Saved Composite entr${duplicateCount === 1 ? "y" : "ies"} with this exact normalized name will be consolidated into the retained identity.` : ""} After the library update, matching placed graph instances are offered for replacement separately.`,
+          window.RMLI18n.format(
+            "composite.import.update_details",
+            {
+              existingNodes:
+                existing.composite.nodes.length.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                ),
+              existingConnections:
+                existing.composite.connections.length.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                ),
+              importedNodes:
+                incoming.composite.nodes.length.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                ),
+              importedConnections:
+                incoming.composite.connections.length.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                ),
+              duplicates: duplicateDetails
+                ? ` ${duplicateDetails}`
+                : ""
+            }
+          ),
         confirmLabel:
           window.RMLI18n.t("ui.literal.fdc53a8e7d75"),
         cancelLabel:
@@ -10945,7 +11069,26 @@ async function reconcileSavedApiCompositeLibraryForCatalog(
       )
     ) {
       showGraphMessage(
-        `Saved API Composites checked individually: ${summary.verified.toLocaleString(window.RMLI18n?.language || undefined)} unchanged, ${summary.refreshed.toLocaleString(window.RMLI18n?.language || undefined)} catalog-refreshed, ${summary.updated.toLocaleString(window.RMLI18n?.language || undefined)} updated, ${summary.unavailable.toLocaleString(window.RMLI18n?.language || undefined)} unavailable and ${summary.deleted.toLocaleString(window.RMLI18n?.language || undefined)} deleted.`,
+        window.RMLI18n.format(
+          "composite.catalog.check_summary",
+          {
+            unchanged: summary.verified.toLocaleString(
+              window.RMLI18n?.language || undefined
+            ),
+            refreshed: summary.refreshed.toLocaleString(
+              window.RMLI18n?.language || undefined
+            ),
+            updated: summary.updated.toLocaleString(
+              window.RMLI18n?.language || undefined
+            ),
+            unavailable: summary.unavailable.toLocaleString(
+              window.RMLI18n?.language || undefined
+            ),
+            deleted: summary.deleted.toLocaleString(
+              window.RMLI18n?.language || undefined
+            )
+          }
+        ),
         summary.unavailable > 0
           ? "error"
           : "success"
@@ -11791,8 +11934,142 @@ function scheduleSavedApiCompositeCatalogReconciliation() {
           configurable: false
         }
       );
+      const localizedSummaryCount = value =>
+        value.toLocaleString(
+          window.RMLI18n?.language || undefined
+        );
+      const importSummaryParts = [
+        window.RMLI18n.format(
+          "composite.import.summary.base",
+          {
+            added: localizedSummaryCount(summary.added),
+            updated: localizedSummaryCount(summary.updated),
+            unchanged: localizedSummaryCount(summary.unchanged),
+            discarded: localizedSummaryCount(summary.discarded)
+          }
+        )
+      ];
+      if (summary.omittedApiNodes > 0) {
+        importSummaryParts.push(
+          `${window.RMLI18n.format(
+            summary.omittedApiNodes === 1
+              ? "composite.import.summary.omitted_nodes.one"
+              : "composite.import.summary.omitted_nodes.other",
+            {
+              count: localizedSummaryCount(
+                summary.omittedApiNodes
+              )
+            }
+          )} ${window.RMLI18n.format(
+            summary.omittedApiConnections === 1
+              ? "composite.import.summary.omitted_connections.one"
+              : "composite.import.summary.omitted_connections.other",
+            {
+              count: localizedSummaryCount(
+                summary.omittedApiConnections
+              )
+            }
+          )}`
+        );
+      }
+      if (summary.offlinePreservedApiNodes > 0) {
+        importSummaryParts.push(
+          window.RMLI18n.format(
+            summary.offlinePreservedApiNodes === 1
+              ? "composite.import.summary.offline_preserved.one"
+              : "composite.import.summary.offline_preserved.other",
+            {
+              count: localizedSummaryCount(
+                summary.offlinePreservedApiNodes
+              )
+            }
+          )
+        );
+      }
+      if (summary.duplicatesConsolidated > 0) {
+        importSummaryParts.push(
+          window.RMLI18n.format(
+            summary.duplicatesConsolidated === 1
+              ? "composite.import.summary.duplicates.one"
+              : "composite.import.summary.duplicates.other",
+            {
+              count: localizedSummaryCount(
+                summary.duplicatesConsolidated
+              )
+            }
+          )
+        );
+      }
+      if (summary.instancesReplaced > 0) {
+        importSummaryParts.push(
+          window.RMLI18n.format(
+            summary.instancesReplaced === 1
+              ? "composite.import.summary.instances_replaced.one"
+              : "composite.import.summary.instances_replaced.other",
+            {
+              count: localizedSummaryCount(
+                summary.instancesReplaced
+              )
+            }
+          )
+        );
+        if (summary.instancesLinkedByName > 0) {
+          importSummaryParts.push(
+            window.RMLI18n.format(
+              "composite.import.summary.instances_linked_by_name",
+              {
+                count: localizedSummaryCount(
+                  summary.instancesLinkedByName
+                )
+              }
+            )
+          );
+        }
+      }
+      if (summary.instanceUpdatesDeclined > 0) {
+        importSummaryParts.push(
+          window.RMLI18n.format(
+            summary.instanceUpdatesDeclined === 1
+              ? "composite.import.summary.updates_declined.one"
+              : "composite.import.summary.updates_declined.other",
+            {
+              count: localizedSummaryCount(
+                summary.instanceUpdatesDeclined
+              )
+            }
+          )
+        );
+      }
+      if (summary.disconnectedWires > 0) {
+        importSummaryParts.push(
+          window.RMLI18n.format(
+            summary.disconnectedWires === 1
+              ? "composite.import.summary.wires_disconnected.one"
+              : "composite.import.summary.wires_disconnected.other",
+            {
+              count: localizedSummaryCount(
+                summary.disconnectedWires
+              )
+            }
+          )
+        );
+      }
+      if (summary.instanceUpdateErrors > 0) {
+        importSummaryParts.push(
+          window.RMLI18n.format(
+            summary.instanceUpdateErrors === 1
+              ? "composite.import.summary.update_errors.one"
+              : "composite.import.summary.update_errors.other",
+            {
+              count: localizedSummaryCount(
+                summary.instanceUpdateErrors
+              )
+            }
+          )
+        );
+      }
       showGraphMessage(
-        `Saved API Composite import completed: ${summary.added.toLocaleString(window.RMLI18n?.language || undefined)} new, ${summary.updated.toLocaleString(window.RMLI18n?.language || undefined)} updated, ${summary.unchanged.toLocaleString(window.RMLI18n?.language || undefined)} unchanged and ${summary.discarded.toLocaleString(window.RMLI18n?.language || undefined)} discarded.${summary.omittedApiNodes > 0 ? ` ${summary.omittedApiNodes.toLocaleString(window.RMLI18n?.language || undefined)} unavailable API node${summary.omittedApiNodes === 1 ? " was" : "s were"} omitted together with ${summary.omittedApiConnections.toLocaleString(window.RMLI18n?.language || undefined)} dependent connection${summary.omittedApiConnections === 1 ? "" : "s"}; the remaining graph was imported.` : ""}${summary.offlinePreservedApiNodes > 0 ? ` ${summary.offlinePreservedApiNodes.toLocaleString(window.RMLI18n?.language || undefined)} API node${summary.offlinePreservedApiNodes === 1 ? " was" : "s were"} retained from complete stored portable contracts pending a verified catalog.` : ""}${summary.duplicatesConsolidated > 0 ? ` ${summary.duplicatesConsolidated.toLocaleString(window.RMLI18n?.language || undefined)} duplicate Saved Composite entr${summary.duplicatesConsolidated === 1 ? "y was" : "ies were"} consolidated.` : ""}${summary.instancesReplaced > 0 ? ` ${summary.instancesReplaced.toLocaleString(window.RMLI18n?.language || undefined)} placed instance${summary.instancesReplaced === 1 ? " was" : "s were"} replaced.${summary.instancesLinkedByName > 0 ? ` ${summary.instancesLinkedByName.toLocaleString(window.RMLI18n?.language || undefined)} matched by exact normalized name and received the imported fingerprint.` : ""}` : ""}${summary.instanceUpdatesDeclined > 0 ? ` ${summary.instanceUpdatesDeclined.toLocaleString(window.RMLI18n?.language || undefined)} optional graph replacement${summary.instanceUpdatesDeclined === 1 ? " was" : "s were"} declined; the Library import remains stored.` : ""}${summary.disconnectedWires > 0 ? ` ${summary.disconnectedWires.toLocaleString(window.RMLI18n?.language || undefined)} obsolete outer wire${summary.disconnectedWires === 1 ? " was" : "s were"} removed after the confirmed replacement and must be reconnected where still needed.` : ""}${summary.instanceUpdateErrors > 0 ? ` ${summary.instanceUpdateErrors.toLocaleString(window.RMLI18n?.language || undefined)} graph replacement${summary.instanceUpdateErrors === 1 ? " failed" : "s failed"} without changing those instances; the Library import remains stored.` : ""}`,
+        importSummaryParts.join(" "),
         summary.instanceUpdateErrors > 0 ||
         summary.omittedApiNodes > 0 ||
         summary.offlinePreservedApiNodes >
@@ -12821,11 +13098,15 @@ function savedApiCompositeBoundaryTypeCompatible(
         return previous.direction === "input"
           ? connectionTypesCompatible(
               previousType,
-              replacementType
+              replacementType,
+              previous,
+              replacement
             )
           : connectionTypesCompatible(
               replacementType,
-              previousType
+              previousType,
+              replacement,
+              previous
             );
       } finally {
         customCSharpEditor =
@@ -15712,7 +15993,10 @@ async function applySavedApiCompositeVersion(
       "before placed Saved Composite instances could be checked"
     );
     showGraphMessage(
-      `Preparing replacement check for Saved API Composite '${record.name}'…`
+      window.RMLI18n.format(
+        "composite.instances.preparing_check",
+        { name: record.name }
+      )
     );
     await savedApiCompositePaintOpportunity();
     const matching =
@@ -15839,6 +16123,76 @@ async function applySavedApiCompositeVersion(
         window.RMLI18n.t("ui.literal.dbcb506567a4")
       );
     }
+    const localizedReplacementCount = value =>
+      value.toLocaleString(
+        window.RMLI18n?.language || undefined
+      );
+    const nestedCompositeDetail =
+      impact.promotedComposites > 0
+        ? window.RMLI18n.format(
+            impact.promotedComposites === 1
+              ? "composite.instances.details.nested_composites.one"
+              : "composite.instances.details.nested_composites.other",
+            {
+              count: localizedReplacementCount(
+                impact.promotedComposites
+              )
+            }
+          )
+        : "";
+    const replacementDetails = [
+      window.RMLI18n.format(
+        impact.preservedWires === 1
+          ? "composite.instances.details.preserved_wires.one"
+          : "composite.instances.details.preserved_wires.other",
+        {
+          count: localizedReplacementCount(
+            impact.preservedWires
+          )
+        }
+      ),
+      impact.disconnectedWires > 0
+        ? window.RMLI18n.format(
+            impact.disconnectedWires === 1
+              ? "composite.instances.details.disconnect_warning.one"
+              : "composite.instances.details.disconnect_warning.other",
+            {
+              count: localizedReplacementCount(
+                impact.disconnectedWires
+              )
+            }
+          )
+        : window.RMLI18n.t(
+            "composite.instances.details.no_disconnected_wires"
+          ),
+      window.RMLI18n.format(
+        impact.promotedNodes === 1
+          ? "composite.instances.details.promoted_nodes.one"
+          : "composite.instances.details.promoted_nodes.other",
+        {
+          count: localizedReplacementCount(
+            impact.promotedNodes
+          ),
+          nested: nestedCompositeDetail
+            ? `, ${nestedCompositeDetail}`
+            : ""
+        }
+      )
+    ];
+    if (skippedOpen > 0) {
+      replacementDetails.push(
+        window.RMLI18n.format(
+          skippedOpen === 1
+            ? "composite.instances.details.skipped_open.one"
+            : "composite.instances.details.skipped_open.other",
+          {
+            count: localizedReplacementCount(
+              skippedOpen
+            )
+          }
+        )
+      );
+    }
     const confirmed = Boolean(
       await confirm({
         tone:
@@ -15871,16 +16225,30 @@ async function applySavedApiCompositeVersion(
                 : window.RMLI18n.t("ui.literal.d2898d6f979d")
               : window.RMLI18n.t("ui.literal.0b635071d16f")
           }`,
-        details:
-          `${impact.preservedWires.toLocaleString(window.RMLI18n?.language || undefined)} wire${impact.preservedWires === 1 ? " is" : "s are"} preserved with their IDs and route points. ${impact.disconnectedWires > 0 ? `Warning: continuing removes ${impact.disconnectedWires.toLocaleString(window.RMLI18n?.language || undefined)} outer wire${impact.disconnectedWires === 1 ? "" : "s"}, including branch descendants, because the real Composite port is missing or is now connected internally. The affected node connections must be created again where still needed.` : "No outer wire needs to be removed."} ${impact.promotedNodes.toLocaleString(window.RMLI18n?.language || undefined)} member node${impact.promotedNodes === 1 ? " is" : "s are"} restored to the immediate parent graph${impact.promotedComposites > 0 ? `, including ${impact.promotedComposites.toLocaleString(window.RMLI18n?.language || undefined)} nested Composite${impact.promotedComposites === 1 ? "" : "s"}` : ""}.${skippedOpen > 0 ? ` ${skippedOpen.toLocaleString(window.RMLI18n?.language || undefined)} currently open instance is skipped until you leave it through the Runtime Graph breadcrumb.` : ""}`,
+        details: replacementDetails.join(" "),
         confirmLabel:
           source === "import"
-            ? "Replace in Current Graph"
+            ? window.RMLI18n.t(
+                "composite.instances.confirm.current_graph"
+              )
             : impact.disconnectedWires > 0
-            ? `Replace & Disconnect ${impact.disconnectedWires.toLocaleString(window.RMLI18n?.language || undefined)} Wire${impact.disconnectedWires === 1 ? "" : "s"}`
+            ? window.RMLI18n.format(
+                impact.disconnectedWires === 1
+                  ? "composite.instances.confirm.disconnect.one"
+                  : "composite.instances.confirm.disconnect.other",
+                {
+                  count: localizedReplacementCount(
+                    impact.disconnectedWires
+                  )
+                }
+              )
             : replaceable.length === 1
-              ? "Replace Instance"
-              : "Replace Instances",
+              ? window.RMLI18n.t(
+                  "composite.instances.confirm.replace.one"
+                )
+              : window.RMLI18n.t(
+                  "composite.instances.confirm.replace.other"
+                ),
         cancelLabel:
           window.RMLI18n.t("ui.literal.950736fb351a")
       })
@@ -15895,7 +16263,10 @@ async function applySavedApiCompositeVersion(
       };
     }
     showGraphMessage(
-      `Applying Saved API Composite '${record.name}' to the confirmed graph instances…`
+      window.RMLI18n.format(
+        "composite.instances.applying",
+        { name: record.name }
+      )
     );
     await savedApiCompositePaintOpportunity();
     const stabilityLease =
@@ -16019,8 +16390,78 @@ async function applySavedApiCompositeVersion(
     }
     await bridge?.flushPersistence?.();
     scheduleGraphPaletteRender();
+    const replacementResultParts = [
+      window.RMLI18n.format(
+        result.replaced === 1
+          ? "composite.instances.result.replaced.one"
+          : "composite.instances.result.replaced.other",
+        {
+          count: localizedReplacementCount(
+            result.replaced
+          )
+        }
+      )
+    ];
+    if (linkedByName > 0) {
+      replacementResultParts.push(
+        window.RMLI18n.format(
+          linkToSaved
+            ? linkedByName === 1
+              ? "composite.instances.result.linked_saved.one"
+              : "composite.instances.result.linked_saved.other"
+            : linkedByName === 1
+              ? "composite.instances.result.linked_independent.one"
+              : "composite.instances.result.linked_independent.other",
+          {
+            count: localizedReplacementCount(
+              linkedByName
+            )
+          }
+        )
+      );
+    }
+    replacementResultParts.push(
+      window.RMLI18n.format(
+        result.preservedWires === 1
+          ? "composite.instances.result.preserved_wires.one"
+          : "composite.instances.result.preserved_wires.other",
+        {
+          count: localizedReplacementCount(
+            result.preservedWires
+          )
+        }
+      )
+    );
+    if (result.disconnectedWires > 0) {
+      replacementResultParts.push(
+        window.RMLI18n.format(
+          result.disconnectedWires === 1
+            ? "composite.instances.result.removed_wires.one"
+            : "composite.instances.result.removed_wires.other",
+          {
+            count: localizedReplacementCount(
+              result.disconnectedWires
+            )
+          }
+        )
+      );
+    }
+    if (result.promotedNodes > 0) {
+      replacementResultParts.push(
+        window.RMLI18n.format(
+          result.promotedNodes === 1
+            ? "composite.instances.result.restored_nodes.one"
+            : "composite.instances.result.restored_nodes.other",
+          {
+            count: localizedReplacementCount(
+              result.promotedNodes
+            )
+          }
+        )
+      );
+    }
     showGraphMessage(
-      `${result.replaced.toLocaleString(window.RMLI18n?.language || undefined)} placed Composite instance${result.replaced === 1 ? " was" : "s were"} replaced.${linkedByName > 0 ? linkToSaved ? ` ${linkedByName.toLocaleString(window.RMLI18n?.language || undefined)} unlinked or stale-linked instance${linkedByName === 1 ? " was" : "s were"} matched by exact normalized name and linked to this Saved Composite fingerprint.` : ` ${linkedByName.toLocaleString(window.RMLI18n?.language || undefined)} graph-only instance${linkedByName === 1 ? " was" : "s were"} matched by exact normalized name and remained independent from the Saved Composite library.` : ""} ${result.preservedWires.toLocaleString(window.RMLI18n?.language || undefined)} wire${result.preservedWires === 1 ? " was" : "s were"} preserved.${result.disconnectedWires > 0 ? ` ${result.disconnectedWires.toLocaleString(window.RMLI18n?.language || undefined)} obsolete outer wire${result.disconnectedWires === 1 ? " was" : "s were"} removed with its port chain.` : ""}${result.promotedNodes > 0 ? ` ${result.promotedNodes.toLocaleString(window.RMLI18n?.language || undefined)} locally added member node${result.promotedNodes === 1 ? " was" : "s were"} restored to the parent graph.` : ""}`,
+      replacementResultParts.join(" "),
       "success"
     );
     return {
@@ -16103,7 +16544,10 @@ async function instantiateSavedApiCompositeAt(
     savedApiCompositeOperations.add(id);
     scheduleGraphPaletteRender();
     showGraphMessage(
-      `Preparing Saved API Composite '${source.name}'…`
+      window.RMLI18n.format(
+        "composite.save.preparing",
+        { name: source.name }
+      )
     );
     await savedApiCompositePaintOpportunity();
     try {
@@ -16343,8 +16787,14 @@ async function instantiateSavedApiCompositeAt(
       }
       showGraphMessage(
         targetComposite
-          ? `Saved API Composite '${record.name}' inserted as an independent nested Composite with new node and wire identities.`
-          : `Saved API Composite '${record.name}' inserted with new node and wire identities.`,
+          ? window.RMLI18n.format(
+              "composite.insert.success_nested",
+              { name: record.name }
+            )
+          : window.RMLI18n.format(
+              "composite.insert.success",
+              { name: record.name }
+            ),
         "success"
       );
       return instance.container;
@@ -16720,8 +17170,14 @@ async function instantiateSavedApiCompositeAt(
         linkCleanupError || uiRefreshError;
       showGraphMessage(
         postCommitError
-          ? `Saved API Composite '${record.name}' was deleted, but its remaining graph-link or interface cleanup could not be completed. The graph instances themselves remain complete.`
-          : `Saved API Composite '${record.name}' deleted. Existing graph instances were not changed.`,
+          ? window.RMLI18n.format(
+              "composite.delete.cleanup_incomplete",
+              { name: record.name }
+            )
+          : window.RMLI18n.format(
+              "composite.delete.success",
+              { name: record.name }
+            ),
         postCommitError ? "warning" : "success"
       );
       return true;
@@ -16960,7 +17416,10 @@ function synchronizeApiCompositeInspectorSaveAction(
     const unavailableReason =
       target.mode === "ambiguous"
         ? target.issue ||
-          `The Saved API Composite identity for '${target.name}' is ambiguous.`
+          window.RMLI18n.format(
+            "composite.identity.ambiguous",
+            { name: target.name }
+          )
         : !apiCompositeCatalogAvailable()
           ? window.RMLI18n.t("ui.literal.ca0541899f1b")
           : savedApiCompositeLibraryBusy()
@@ -16999,7 +17458,10 @@ async function removeSavedApiCompositeForNode(
       showGraphMessage(
         target?.mode === "ambiguous"
           ? target.issue ||
-            `The Saved API Composite identity for '${target.name}' is ambiguous. Delete the intended entry from the Node Library.`
+            window.RMLI18n.format(
+              "composite.identity.ambiguous_delete",
+              { name: target.name }
+            )
           : window.RMLI18n.t("ui.literal.969132895c98"),
         "error"
       );
@@ -17100,7 +17562,7 @@ function setSavedApiCompositeIcon(
     const namespace =
       "http://www.w3.org/2000/svg";
     const href =
-      `assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${normalizedIconName}`;
+      `assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-${normalizedIconName}`;
     const existingSvg =
       element.firstElementChild;
     const existingUse =
@@ -17693,7 +18155,7 @@ function createSavedApiCompositePaletteItem(
     const add =
       document.createElement("small");
     if (!compatibilityIssue && !currentOpen && savedCompositeAvailable) {
-      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-add"></use></svg>`;
+      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-add"></use></svg>`;
     } else {
       add.textContent = compatibilityIssue ? "!" : currentOpen ? window.RMLI18n.t("composite.library.status_open") : "·";
     }
@@ -17757,7 +18219,7 @@ function createSavedApiCompositePaletteItem(
     const exportButton =
       document.createElement("button");
     exportButton.type = "button";
-    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-download"></use></svg>`;
+    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-download"></use></svg>`;
     exportButton.title =
       window.RMLI18n.format("composite.actions.export_title", { name: record.name });
     exportButton.addEventListener(
@@ -17816,7 +18278,7 @@ function createSavedApiCompositePaletteItem(
     const deleteButton =
       document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-close"></use></svg>`;
+    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-close"></use></svg>`;
     deleteButton.title =
       window.RMLI18n.format("composite.actions.delete_title", { name: record.name });
     deleteButton.addEventListener(
@@ -17845,7 +18307,7 @@ function createSavedApiCompositePaletteItem(
     const menuTrigger = document.createElement("button");
     menuTrigger.type = "button";
     menuTrigger.className = "rml-saved-api-composite-menu-trigger";
-    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-more"></use></svg>`;
+    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-more"></use></svg>`;
     menuTrigger.setAttribute("aria-haspopup", "menu");
     menuTrigger.setAttribute("aria-expanded", "false");
     menuTrigger.setAttribute(
@@ -17951,7 +18413,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.24.90-reliable-folder-direct-dll-build",
+      "1.25.00-canonical-type-reconciliation-startup-recovery",
     writable: false,
     enumerable: true,
     configurable: true

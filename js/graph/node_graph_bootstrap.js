@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.24.90-reliable-folder-direct-dll-build";
+  "1.25.00-canonical-type-reconciliation-startup-recovery";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];
@@ -273,6 +273,9 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         return graphPresentationVisible()
           ? true
           : togglePackedNodeMode();
+      },
+      whenHostReady() {
+        return graphHostReadyPromise;
       },
       whenViewReady: whenGraphViewReady,
       hasPendingEditorEdits() {
@@ -1559,7 +1562,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
             ) ||
             renderBlocked,
           viewFailed:
-            [
+            Boolean(graphHostError) || [
               "failed",
               "catalog-failed"
             ].includes(
@@ -1569,6 +1572,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           viewError:
             String(
               graphViewPreparation?.error ||
+              graphHostError?.message ||
               (
                 dom.root?.dataset
                   .rmlGraphPhase ===

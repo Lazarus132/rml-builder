@@ -29,7 +29,7 @@
     "use strict";
 
     const VERSION = 2;
-    const GROUP = "C# Language";
+    const GROUP = uiText("csharp.group.language", "C# Language");
     const EXACT_TYPE_PREFIX = "csharpExact:";
     const installedRegistries = new WeakSet();
 
@@ -38,6 +38,21 @@
       if (typeof translate !== "function") return fallback;
       const translated = String(translate.call(root.RMLI18n, key) ?? "");
       return translated && translated !== key ? translated : fallback;
+    }
+
+    function uiFormat(key, fallback, values = {}) {
+      const format = root?.RMLI18n?.format;
+      if (typeof format === "function") {
+        const translated = String(
+          format.call(root.RMLI18n, key, values) ?? ""
+        );
+        if (translated && translated !== key) return translated;
+      }
+      let result = String(fallback ?? "");
+      for (const [name, value] of Object.entries(values || {})) {
+        result = result.replaceAll(`{${name}}`, String(value ?? ""));
+      }
+      return result;
     }
 
     const CORE_ASSEMBLIES = new Set([
@@ -840,8 +855,6 @@
           const collected = contracts.collectAssemblyReferences(value);
           if (Array.isArray(collected)) collected.forEach(add);
         } catch {
-          // Normalization already validates the executable contract. A missing
-          // optional reference projection must not turn into raw code fallback.
         }
         const explicit = [
           ...(Array.isArray(value.assemblyReferences)
@@ -911,21 +924,116 @@
         const preferred = String(preferredGraphType || "").trim();
         return preferred && graphTypeDefinitions(registry)[preferred]
           ? preferred
-          : "object";
+            : "object";
       }
+
+      const adoptExistingExactType = (
+        graphType,
+        explicit = false
+      ) => {
+        const definitions =
+          graphTypeDefinitions(registry);
+        const information =
+          definitions[graphType] || null;
+        if (!information) return "";
+        const installedCsType = normalizedCsType(
+          information.csType || ""
+        );
+        const catalogProvisional =
+          information.unavailableApiType === true ||
+          information.portableApiType === true;
+        if (
+          installedCsType &&
+          installedCsType !== normalized &&
+          !(
+            catalogProvisional &&
+            installedCsType === "System.Object"
+          )
+        ) {
+          throw new Error(
+            `C# type '${normalized}' conflicts with the installed graph type '${graphType}' for '${installedCsType}'.`
+          );
+        }
+        const languageEvidence = Boolean(
+          information.languageExactType === true ||
+          information.csharpExactType === true ||
+          information.normalExactType === true ||
+          String(graphType).startsWith("csharpExact:") ||
+          String(graphType).startsWith("normalExact:")
+        );
+        const languageOwned = languageEvidence;
+        if (!languageOwned) return graphType;
+
+        const referenceMap = new Map();
+        for (const reference of [
+          ...(Array.isArray(information.assemblyReferences)
+            ? information.assemblyReferences
+            : []),
+          ...references
+        ]) {
+          const normalizedReferenceValue =
+            normalizedReference(reference);
+          if (!normalizedReferenceValue) continue;
+          referenceMap.set(
+            `${normalizedReferenceValue.include}|${normalizedReferenceValue.hintPath}|${normalizedReferenceValue.private === true}`,
+            normalizedReferenceValue
+          );
+        }
+        const adopted = {
+          ...information,
+          csType: normalized,
+          languageExactType: true,
+          assemblyReferences:
+            [...referenceMap.values()]
+        };
+        adopted.assemblies = [
+          ...new Set([
+            ...(Array.isArray(information.assemblies)
+              ? information.assemblies
+              : []),
+            ...adopted.assemblyReferences.map(reference =>
+              reference.include
+            )
+          ].filter(Boolean))
+        ];
+        adopted.assembly =
+          information.assembly ||
+          adopted.assemblyReferences[0]?.include ||
+          "";
+        delete adopted.catalogGenerated;
+        delete adopted.apiCatalogType;
+        delete adopted.unavailableApiType;
+        delete adopted.portableApiType;
+        if (
+          JSON.stringify(adopted) ===
+          JSON.stringify(information)
+        ) {
+          return graphType;
+        }
+        registry.registerType(
+          graphType,
+          adopted
+        );
+        return graphType;
+      };
 
       const preferred = String(preferredGraphType || "").trim();
       if (preferred && graphTypeDefinitions(registry)[preferred]) {
-        return preferred;
+        return adoptExistingExactType(
+          preferred,
+          true
+        );
       }
 
       const canonical = registry.canonicalType?.(normalized) || "";
       if (canonical && graphTypeDefinitions(registry)[canonical]) {
-        return canonical;
+        return adoptExistingExactType(canonical);
       }
 
       const indexed = graphTypeForCsType(registry, normalized);
-      if (indexed) return indexed;
+      if (indexed) {
+        return adoptExistingExactType(indexed);
+      }
 
       const id = preferred || `${EXACT_TYPE_PREFIX}${stableHash(normalized)}`;
       const assemblyReferences = references
@@ -944,6 +1052,7 @@
         referenceType: !valueType,
         valueType,
         globalGenericCandidate: false,
+        languageExactType: true,
         csharpExactType: true,
         assignableTo: ["object"],
         constraints: valueType
@@ -1035,10 +1144,10 @@
       const label = String(row?.label || row?.name || id);
       const role = semanticRole(row, direction, contracts);
       let csType = String(row?.csType || row?.csharpType || "").trim();
-      if (!csType && (row?.typeRef || row?.bindingTypeRef)) {
+      if (!csType && row?.typeRef) {
         csType = emitType(
           contracts,
-          row.typeRef || row.bindingTypeRef
+          row.typeRef
         );
       }
       const savedType = String(row?.type || row?.graphType || "").trim();
@@ -1118,7 +1227,6 @@
         const emitted = String(contracts.emitMemberNameSyntax(memberRef)).trim();
         if (emitted) return emitted;
       } catch {
-        // Fall through to the independently validated identifier projection.
       }
       return contracts.escapeIdentifier(String(memberRef?.name || ""));
     }
@@ -1351,8 +1459,6 @@
           ).trim();
           if (emitted) return emitted;
         } catch {
-          // Never inject the scanner's raw C# text. The typed default below is
-          // the safe failure value for an invalid hand-edited contract.
         }
       }
       return `default(${emitType(contracts, typeRef)})`;
@@ -1686,7 +1792,7 @@
         {
           id: "value",
           role: "output:value",
-          label: "Type",
+          label: uiText("csharp.contract.label.type", "Type"),
           typeRef: "System.Type"
         }
       )];
@@ -1717,7 +1823,7 @@
           "call",
           "input:call",
           "impulse",
-          "Call"
+          uiText("universal.performance.port.call", "Call")
         ));
       }
       member.ownerGenericArguments.forEach((argument, index) => {
@@ -1742,7 +1848,7 @@
         inputs.push(typed({
           id: "target",
           role: "input:target",
-          label: "Target",
+          label: uiText("csharp.port.target", "Target"),
           typeRef: member.declaringType
         }));
       }
@@ -1752,7 +1858,11 @@
         inputs.push(typed({
           id: `arg${position}`,
           role: `parameter:${position}:input`,
-          label: parameter.name || `arg${position}`,
+          label: parameter.name || uiFormat(
+            "csharp.port.argument_index",
+            "Argument {index}",
+            { index: position + 1 }
+          ),
           typeRef: parameter.typeRef,
           optional: parameter.optional === true
         }));
@@ -1761,7 +1871,7 @@
         inputs.push(typed({
           id: "value",
           role: "input:value",
-          label: "Value",
+          label: uiText("universal.performance.port.value", "Value"),
           typeRef: member.valueType
         }));
       }
@@ -1770,7 +1880,7 @@
         outputs.push(typed({
           id: "value",
           role: "output:value",
-          label: "Value",
+          label: uiText("universal.performance.port.value", "Value"),
           typeRef: member.returnType
         }));
       } else {
@@ -1778,7 +1888,7 @@
           "done",
           "output:done",
           "impulse",
-          "Done"
+          uiText("universal.performance.port.done", "Done")
         ));
         if (
           member.kind === "method" &&
@@ -1788,7 +1898,7 @@
           outputs.push(typed({
             id: "result",
             role: "output:result",
-            label: "Result",
+            label: uiText("universal.performance.port.result", "Result"),
             typeRef: member.returnType
           }));
         }
@@ -1798,7 +1908,11 @@
           outputs.push(typed({
             id: `out${position}`,
             role: `parameter:${position}:output`,
-            label: parameter.name || `out${position}`,
+            label: parameter.name || uiFormat(
+              "csharp.port.output_argument_index",
+              "Output argument {index}",
+              { index: position + 1 }
+            ),
             typeRef: parameter.typeRef
           }));
         });
@@ -1807,13 +1921,13 @@
             "success",
             "output:success",
             "bool",
-            "Success"
+            uiText("universal.performance.port.success", "Success")
           ),
           fixedEditorPortRow(
             "exception",
             "output:exception",
             "exception",
-            "Exception"
+            uiText("csharp.port.exception", "Exception")
           )
         );
       }
@@ -1949,7 +2063,7 @@
       return {
         inputs: [],
         outputs: [
-          { id: "value", label: "Type", type: "type", csType: "System.Type", role: "output:value" }
+          { id: "value", label: uiText("csharp.contract.label.type", "Type"), type: "type", csType: "System.Type", role: "output:value" }
         ]
       };
     }
@@ -1957,10 +2071,10 @@
     function getterPortFallback() {
       return {
         inputs: [
-          { id: "target", label: "Target", type: "object", csType: "System.String", role: "input:target" }
+          { id: "target", label: uiText("csharp.port.target", "Target"), type: "object", csType: "System.String", role: "input:target" }
         ],
         outputs: [
-          { id: "value", label: "Value", type: "int", csType: "System.Int32", role: "output:value" }
+          { id: "value", label: uiText("universal.performance.port.value", "Value"), type: "int", csType: "System.Int32", role: "output:value" }
         ]
       };
     }
@@ -1968,14 +2082,14 @@
     function setterPortFallback() {
       return {
         inputs: [
-          { id: "call", label: "Call", type: "impulse", role: "input:call" },
-          { id: "target", label: "Target", type: "object", csType: "System.Text.StringBuilder", role: "input:target" },
-          { id: "value", label: "Value", type: "int", csType: "System.Int32", role: "input:value" }
+          { id: "call", label: uiText("universal.performance.port.call", "Call"), type: "impulse", role: "input:call" },
+          { id: "target", label: uiText("csharp.port.target", "Target"), type: "object", csType: "System.Text.StringBuilder", role: "input:target" },
+          { id: "value", label: uiText("universal.performance.port.value", "Value"), type: "int", csType: "System.Int32", role: "input:value" }
         ],
         outputs: [
-          { id: "done", label: "Done", type: "impulse", role: "output:done" },
-          { id: "success", label: "Success", type: "bool", role: "output:success" },
-          { id: "exception", label: "Exception", type: "exception", role: "output:exception" }
+          { id: "done", label: uiText("universal.performance.port.done", "Done"), type: "impulse", role: "output:done" },
+          { id: "success", label: uiText("universal.performance.port.success", "Success"), type: "bool", role: "output:success" },
+          { id: "exception", label: uiText("csharp.port.exception", "Exception"), type: "exception", role: "output:exception" }
         ]
       };
     }
@@ -1983,15 +2097,15 @@
     function methodPortFallback() {
       return {
         inputs: [
-          { id: "call", label: "Call", type: "impulse", role: "input:call" },
-          { id: "target", label: "Target", type: "string", csType: "System.String", role: "input:target" },
+          { id: "call", label: uiText("universal.performance.port.call", "Call"), type: "impulse", role: "input:call" },
+          { id: "target", label: uiText("csharp.port.target", "Target"), type: "string", csType: "System.String", role: "input:target" },
           { id: "arg0", label: "value", type: "string", csType: "System.String", role: "parameter:0:input" }
         ],
         outputs: [
-          { id: "done", label: "Done", type: "impulse", role: "output:done" },
-          { id: "result", label: "Result", type: "bool", csType: "System.Boolean", role: "output:result" },
-          { id: "success", label: "Success", type: "bool", role: "output:success" },
-          { id: "exception", label: "Exception", type: "exception", role: "output:exception" }
+          { id: "done", label: uiText("universal.performance.port.done", "Done"), type: "impulse", role: "output:done" },
+          { id: "result", label: uiText("universal.performance.port.result", "Result"), type: "bool", csType: "System.Boolean", role: "output:result" },
+          { id: "success", label: uiText("universal.performance.port.success", "Success"), type: "bool", role: "output:success" },
+          { id: "exception", label: uiText("csharp.port.exception", "Exception"), type: "exception", role: "output:exception" }
         ]
       };
     }

@@ -2,7 +2,7 @@
   "use strict";
 
   const STYLE_LOADER_MODULE_ID =
-    "1.24.90-reliable-folder-direct-dll-build";
+    "1.25.00-canonical-type-reconciliation-startup-recovery";
 
   const CLASS_STYLE_VERSION = 3;
 
@@ -702,7 +702,7 @@
     information: "../../styles/features/styles.information.css?v=1.10-shortcut-key-groups",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.24.90-reliable-folder-direct-dll-build"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.25.00-canonical-type-reconciliation-startup-recovery"
   });
   const bundleOrder = Object.freeze([
     "preview",
@@ -714,7 +714,6 @@
   const states = new Map();
   const prefetchedBundles = new Set();
   const pendingWorkerRequests = new Map();
-  const STYLE_LOAD_TIMEOUT_MS = 15000;
   let worker = null;
   let nextRequestId = 1;
 
@@ -815,7 +814,6 @@
       const finish = (error = null) => {
         if (settled) return;
         settled = true;
-        window.clearTimeout(timeoutId);
         link.removeEventListener("load", onLoad);
         link.removeEventListener("error", onError);
         if (error) {
@@ -828,15 +826,6 @@
       const onLoad = () => finish();
       const onError = () =>
         finish(new Error(`${url} could not be loaded.`));
-      const timeoutId = window.setTimeout(
-        () =>
-          finish(
-            new Error(
-              `${url} did not finish loading within ${STYLE_LOAD_TIMEOUT_MS} ms.`
-            )
-          ),
-        STYLE_LOAD_TIMEOUT_MS
-      );
       link.addEventListener("load", onLoad, { once: true });
       link.addEventListener("error", onError, { once: true });
       if (!existing) insertBundleElement(link, name);
@@ -845,7 +834,6 @@
 
   function rejectWorkerRequests(error) {
     for (const request of pendingWorkerRequests.values()) {
-      window.clearTimeout(request.timeoutId);
       request.reject(error);
     }
     pendingWorkerRequests.clear();
@@ -869,7 +857,6 @@
         const request = pendingWorkerRequests.get(requestId);
         if (!request) return;
         pendingWorkerRequests.delete(requestId);
-        window.clearTimeout(request.timeoutId);
         if (event.data?.ok === true) {
           request.resolve(String(event.data.text || ""));
         } else {
@@ -905,25 +892,13 @@
     const requestId = nextRequestId;
     nextRequestId += 1;
     return new Promise((resolve, reject) => {
-      const timeoutId = window.setTimeout(() => {
-        const pending = pendingWorkerRequests.get(requestId);
-        if (!pending) return;
-        pendingWorkerRequests.delete(requestId);
-        pending.reject(
-          new Error(
-            `The stylesheet worker did not respond within ${STYLE_LOAD_TIMEOUT_MS} ms.`
-          )
-        );
-      }, STYLE_LOAD_TIMEOUT_MS);
       pendingWorkerRequests.set(requestId, {
         resolve,
-        reject,
-        timeoutId
+        reject
       });
       try {
         activeWorker.postMessage({ requestId, url });
       } catch (error) {
-        window.clearTimeout(timeoutId);
         pendingWorkerRequests.delete(requestId);
         reject(error);
       }
@@ -945,16 +920,7 @@
     const url = bundleUrl(name);
     state.status = "loading";
     state.error = null;
-    state.promise = fetchInWorker(url)
-      .then(text => installStyleText(name, url, text))
-      .catch(workerError =>
-        loadWithStylesheetLink(name, url).catch(linkError => {
-          throw new AggregateError(
-            [workerError, linkError],
-            `${name} styles could not be loaded.`
-          );
-        })
-      )
+    state.promise = loadWithStylesheetLink(name, url)
       .then(element => {
         state.status = "loaded";
         state.element = element;

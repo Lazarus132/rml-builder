@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.24.90-reliable-folder-direct-dll-build";
+  "1.25.00-canonical-type-reconciliation-startup-recovery";
 
 self.window = self;
 
@@ -768,28 +768,28 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../core/csharp_contracts.js?v=1.24.90-reliable-folder-direct-dll-build"
+      "../core/csharp_contracts.js?v=1.25.00-canonical-type-reconciliation-startup-recovery"
     );
     importScripts(
-      "../graph/node_graph_registry.js?v=1.24.90-reliable-folder-direct-dll-build&portable-types=1"
+      "../graph/node_graph_registry.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&portable-types=1&i18n-rev=1"
     );
     importScripts(
-      "../graph/node_graph_type_migration.js?v=1.24.40-all-ports-fix2&type-contract=2"
+      "../graph/node_graph_type_migration.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&type-contract=3"
     );
     importScripts(
-      "../catalog/mod_nodes.js?v=1.24.90-reliable-folder-direct-dll-build&null-fallback=3&portable-types=1"
+      "../catalog/mod_nodes.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&null-fallback=3&portable-types=1&i18n-rev=1"
     );
     importScripts(
-      "../catalog/csharp_nodes.js?v=1.24.90-reliable-folder-direct-dll-build"
+      "../catalog/csharp_nodes.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&i18n-rev=1"
     );
     importScripts(
-      "../catalog/universal_performance_nodes.js?v=1.24.90-reliable-folder-direct-dll-build"
+      "../catalog/universal_performance_nodes.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&i18n-rev=1"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=1.24.90-reliable-folder-direct-dll-build"
+      "../compiler/visual_csharp.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&i18n-rev=2"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.24.90-reliable-folder-direct-dll-build&factory=41&schema=4&portable-types=1&specializations=2&inherited-demand=1"
+      "../catalog/api_nodes.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&factory=41&schema=4&portable-types=1&specializations=2&inherited-demand=1&i18n-rev=1"
     );
 
     if (
@@ -814,7 +814,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.24.90-reliable-folder-direct-dll-build&portable-types=1&specializations=1"
+      "../graph/node_graph_codegen.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&portable-types=1&specializations=1"
     );
 
     if (
@@ -2311,6 +2311,9 @@ function installPortableTypeContracts(
     typeof migrations
       .normalizedTypeContracts !==
         "function" ||
+    typeof migrations
+      .typeContractCompatibility !==
+        "function" ||
     !registry ||
     typeof registry.getTypeDefinitions !==
       "function" ||
@@ -2404,19 +2407,31 @@ function installPortableTypeContracts(
       contract.graphType
     );
     const csType = normalize(contract.csType);
+    const languageExactGraphType =
+      contract.typeAuthority ===
+        "language-exact";
     const existing = definitions[graphType];
     if (existing) {
+      const compatibility =
+        migrations.typeContractCompatibility(
+          contract,
+          existing
+        );
       if (
-        normalize(existing.csType) !== csType ||
-        (existing.referenceType === true) !==
-          (contract.referenceType === true) ||
-        (
-          contract.valueType === true &&
-          existing.valueType !== true
-        )
+        !compatibility.compatible
       ) {
         throw new Error(
           `Portable graph type '${graphType}' conflicts with the worker registry.`
+        );
+      }
+      if (
+        languageExactGraphType &&
+        existing.languageExactType !== true &&
+        existing.normalExactType !== true &&
+        existing.csharpExactType !== true
+      ) {
+        throw new Error(
+          `Portable language type '${graphType}' conflicts with the worker registry authority.`
         );
       }
       continue;
@@ -2426,9 +2441,15 @@ function installPortableTypeContracts(
         contract.assemblyReferences
       );
     registry.registerType(graphType, {
-      label: `Portable · ${graphType}`,
-      short: "API",
-      color: "#ffb86b",
+      label: languageExactGraphType
+        ? csType.replace(/^System\./, "")
+        : `Portable · ${graphType}`,
+      short: languageExactGraphType
+        ? "C#"
+        : "API",
+      color: languageExactGraphType
+        ? "#91b9dd"
+        : "#ffb86b",
       csType,
       defaultCs:
         contract.referenceType === true
@@ -2439,14 +2460,25 @@ function installPortableTypeContracts(
       valueType:
         contract.valueType === true,
       globalGenericCandidate: false,
-      portableApiType: true,
+      ...(languageExactGraphType
+        ? {
+            languageExactType: true,
+            ...(graphType.startsWith("normalExact:")
+              ? { normalExactType: true }
+              : {}),
+            ...(graphType.startsWith("csharpExact:")
+              ? { csharpExactType: true }
+              : {})
+          }
+        : { portableApiType: true }),
       assignableTo:
         structuredClone([]),
       constraints: structuredClone(
         contract.referenceType === true
-          ? ["reference", "serializable"]
-          : ["serializable"]
+          ? ["value", "reference", "serializable"]
+          : ["value", "serializable"]
       ),
+      assembly: references[0]?.include || "",
       assemblies: structuredClone(
         references.map(
           reference => reference.include

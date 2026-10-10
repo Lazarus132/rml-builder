@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "1.24.90-reliable-folder-direct-dll-build";
+  const VERSION = "1.25.00-canonical-type-reconciliation-startup-recovery";
   const STORAGE_KEY = "rml-builder-language-v1";
   const state = { language: localStorage.getItem(STORAGE_KEY) || "en", fallback: {}, active: {}, previousCatalog: {}, manifest: null, ready: null, catalogs: new Map(), reverseCatalogs: new WeakMap() };
   const norm = value => String(value ?? "").replace(/\s+/g, " ").trim();
@@ -78,7 +78,7 @@
     const lead=(raw.match(/^\s*/) || [""])[0], tail=(raw.match(/\s*$/) || [""])[0];
     node.nodeValue=lead+String(translated)+tail;
   }
-  const ATTRS=["title","aria-label","placeholder","data-help","data-option-help-text"];
+  const ATTRS=["title","aria-label","placeholder","data-help","data-option-help-text","data-scroll-label"];
   function sourceAttr(el, attr) {
     let values=attrSources.get(el); if(!values){ values=new Map(); attrSources.set(el,values); }
     if(!values.has(attr)) values.set(attr,el.getAttribute(attr));
@@ -86,6 +86,11 @@
   }
   function translateElement(el) {
     if (!(el instanceof Element) || el.closest?.('[data-rml-i18n-skip]')) return;
+    const explicitTextKey=el.getAttribute("data-i18n-key");
+    if(explicitTextKey && el.childElementCount===0){
+      const translated=lookup(`{{i18n:${explicitTextKey}}}`);
+      if(translated!==`{{i18n:${explicitTextKey}}}`) el.textContent=String(translated);
+    }
     for (const attr of ATTRS) if (el.hasAttribute(attr)) { const raw=sourceAttr(el,attr); el.setAttribute(attr,lookup(raw)); }
     for (const n of el.childNodes) if(n.nodeType===Node.TEXT_NODE) translateTextNode(n);
   }
@@ -232,6 +237,6 @@
     for(const [name,value] of Object.entries(values || {})) text=text.replaceAll(`{${name}}`,String(value ?? ""));
     return text;
   }
-  window.RMLI18n=Object.freeze({ version:VERSION, t:lookup, format, relocalize, relocalizeValue, get language(){return state.language;}, setLanguage:loadLanguage, translate:translateTree });
+  window.RMLI18n=Object.freeze({ version:VERSION, t:lookup, format, relocalize, relocalizeValue, get language(){return state.language;}, get ready(){return state.ready;}, setLanguage:loadLanguage, translate:translateTree });
   state.ready=(async()=>{ try { state.manifest=await fetch(`assets/i18n/manifest.json?v=${VERSION}`).then(r=>r.json()); const wanted=state.manifest.languages?.[state.language]?state.language:(state.manifest.default||'en'); await loadLanguage(wanted); } catch(e) { console.warn('[RML i18n] language catalog unavailable; English source text remains active.',e); } installLanguageControl(); observer.observe(document.documentElement,{subtree:true,childList:true}); })();
 })();

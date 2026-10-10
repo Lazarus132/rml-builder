@@ -940,49 +940,6 @@
     }
   }
 
-  for (const enumInfo of CATALOG_ENUMS) {
-    const firstValue =
-      enumInfo.values[0]?.name ||
-      "0";
-
-    registerType(
-      catalogEnumGraphType(
-        enumInfo.fullName
-      ),
-      {
-        label:
-          enumInfo.fullName
-            .split(".")
-            .pop() ||
-          enumInfo.fullName,
-        short: window.RMLI18n.t("ui.literal.507ccbdaf83a"),
-        color: "#ffd181",
-        csType: enumInfo.fullName,
-        defaultCs:
-          `global::${enumInfo.fullName}.${csharpIdentifier(firstValue)}`,
-        valueType: false,
-        assembly:
-          CATALOG_TYPE_BY_CS.get(
-            enumInfo.fullName
-          )?.assembly || "",
-        assemblies:
-          catalogAssemblyReferencesForCsType(
-            enumInfo.fullName
-          ).map(reference =>
-            reference.include
-          ),
-        assemblyReferences:
-          catalogAssemblyReferencesForCsType(
-            enumInfo.fullName
-          ),
-        constraints: [
-          "value",
-          "serializable"
-        ]
-      }
-    );
-  }
-
   const groups = [
     [window.RMLI18n.t("ui.auto.5578a51dba94"), { after: window.RMLI18n.t("ui.literal.86eff8eb789b") }],
     [window.RMLI18n.t("ui.literal.6a455a999dee"), { after: window.RMLI18n.t("ui.literal.86eff8eb789b") }],
@@ -2775,7 +2732,8 @@
     parameters: visualMethodParameters(), outputs: [port("body", window.RMLI18n.t("ui.auto.ec672784079b"), "impulse")],
     resolveDefinition(node) {
       const signature = visualMethodSignature(node);
-      return { title: `Visual Function · ${String(node?.parameters?.methodName || "Method").trim() || "Method"}`, outputs: [port("body", window.RMLI18n.t("ui.auto.ec672784079b"), "impulse"), ...signature.parameters.map(parameter => port(parameter.id, parameter.name, parameter.graphType))] };
+      const methodName = String(node?.parameters?.methodName || window.RMLI18n.t("ui.auto.138927ca2c78")).trim() || window.RMLI18n.t("ui.auto.138927ca2c78");
+      return { title: `${window.RMLI18n.t("ui.visualFunctions.title")} · ${methodName}`, outputs: [port("body", window.RMLI18n.t("ui.auto.ec672784079b"), "impulse"), ...signature.parameters.map(parameter => port(parameter.id, parameter.name, parameter.graphType))] };
     },
     codegenCollect(api) {
       ensureGraphUserMethodRuntime(api);
@@ -2816,8 +2774,9 @@
     inputs: [port("call", window.RMLI18n.t("ui.auto.41a300724d29"), "impulse")],
     resolveDefinition(node) {
       const signature = visualMethodSignature(node);
+      const methodName = String(node?.parameters?.methodName || window.RMLI18n.t("ui.auto.138927ca2c78")).trim() || window.RMLI18n.t("ui.auto.138927ca2c78");
       return {
-        title: `Return · ${String(node?.parameters?.methodName || "Method").trim() || "Method"}`,
+        title: `${window.RMLI18n.t("ui.auto.41a300724d29")} · ${methodName}`,
         inputs: [
           port("call", window.RMLI18n.t("ui.auto.41a300724d29"), "impulse"),
           ...(signature.isVoid ? [] : [port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), signature.returnGraphType)])
@@ -2839,7 +2798,10 @@
   registerNode("language.methodReturnVoid", {
     expertOnly: true, hiddenFromPalette: true, title: window.RMLI18n.t("ui.auto.1bbd5fae7785"), group: window.RMLI18n.t("ui.visualFunctions.legacyGroup"), symbol: "RETURN", description: window.RMLI18n.t("ui.auto.150c3517aca5"),
     parameters: visualMethodReturnParameters(), inputs: [port("call", window.RMLI18n.t("ui.auto.41a300724d29"), "impulse")],
-    resolveDefinition(node) { return { title: `Return · ${String(node?.parameters?.methodName || "Method").trim() || "Method"}` }; },
+    resolveDefinition(node) {
+      const methodName = String(node?.parameters?.methodName || window.RMLI18n.t("ui.auto.138927ca2c78")).trim() || window.RMLI18n.t("ui.auto.138927ca2c78");
+      return { title: `${window.RMLI18n.t("ui.auto.41a300724d29")} · ${methodName}` };
+    },
     codegenCollect(api) { ensureGraphUserMethodRuntime(api); },
     codegenAction(api) {
       const methodName = String(api.node.parameters?.methodName || "").trim();
@@ -2857,8 +2819,9 @@
     outputs: [port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"), port("faulted", window.RMLI18n.t("ui.auto.d48b9bb3f79e"), "impulse"), port("success", window.RMLI18n.t("ui.auto.c053e4f819dd"), "bool"), port("exception", window.RMLI18n.t("ui.auto.c2fc0d913a4a"), "exception")],
     resolveDefinition(node) {
       const signature = visualMethodSignature(node);
+      const methodName = String(node?.parameters?.methodName || window.RMLI18n.t("ui.auto.138927ca2c78")).trim() || window.RMLI18n.t("ui.auto.138927ca2c78");
       return {
-        title: `Call · ${String(node?.parameters?.methodName || "Method").trim() || "Method"}`,
+        title: `${window.RMLI18n.t("ui.auto.305e019445e3")} · ${methodName}`,
         inputs: [port("call", window.RMLI18n.t("ui.auto.305e019445e3"), "impulse"), ...signature.parameters.map(parameter => port(parameter.id, parameter.name, parameter.graphType))],
         outputs: [port("done", window.RMLI18n.t("index.text.ae785de0d909"), "impulse"), port("faulted", window.RMLI18n.t("ui.auto.d48b9bb3f79e"), "impulse"), ...(signature.isVoid ? [] : [port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), signature.returnGraphType)]), port("success", window.RMLI18n.t("ui.auto.c053e4f819dd"), "bool"), port("exception", window.RMLI18n.t("ui.auto.c2fc0d913a4a"), "exception")]
       };
@@ -5904,7 +5867,10 @@ faulted ? `\n        ${faulted}();` : ""])
     return {
       value: type,
       label: existing
-        ? `${detail} (existing selection)`
+        ? window.RMLI18n.format(
+            "ui.normalCollections.existingSelection",
+            { detail }
+          )
         : detail
     };
   }
@@ -6176,7 +6142,7 @@ faulted ? `\n        ${faulted}();` : ""])
     const itemCsType =
       information.csType || type;
     registerType(id, {
-      label: `List<${information.label || type}>`,
+      label: `${window.RMLI18n.t("ui.auto.171d403bb4b3")}<${information.label || type}>`,
       short: `${information.short || "T"}[]`,
       color: information.color || "#9da8b4",
       csType:
@@ -6377,7 +6343,7 @@ faulted ? `\n        ${faulted}();` : ""])
       );
     registerType(id, {
       label:
-        `Dictionary<${keyInformation.label || keyType}, ${valueInformation.label || valueType}>`,
+        `${window.RMLI18n.t("ui.auto.b8f34f6f5325")}<${keyInformation.label || keyType}, ${valueInformation.label || valueType}>`,
       short: window.RMLI18n.t("ui.literal.c2aa3e47600d"),
       color: "#7fd6b2",
       csType:
@@ -6471,19 +6437,85 @@ faulted ? `\n        ${faulted}();` : ""])
 
   refreshNormalGraphTypeIndex();
 
+  function adoptNormalExactGraphType(
+    graphType,
+    normalizedCsType
+  ) {
+    const information =
+      registry.getTypeDefinitions()?.[graphType] || null;
+    if (!information) return "";
+    const installedCsType = registry.canonicalCsType(
+      information.csType || ""
+    ).replace(/&$/, "");
+    const catalogProvisional =
+      information.unavailableApiType === true ||
+      information.portableApiType === true;
+    if (
+      installedCsType &&
+      installedCsType !== normalizedCsType &&
+      !(
+        catalogProvisional &&
+        installedCsType === "System.Object"
+      )
+    ) {
+      throw new Error(
+        `C# type '${normalizedCsType}' conflicts with the installed graph type '${graphType}' for '${installedCsType}'.`
+      );
+    }
+    const shouldAdopt = Boolean(
+      information.languageExactType === true ||
+      information.normalExactType === true ||
+      information.csharpExactType === true ||
+      String(graphType).startsWith("normalExact:") ||
+      String(graphType).startsWith("csharpExact:")
+    );
+    if (!shouldAdopt) return graphType;
+
+    const adopted = {
+      ...information,
+      csType: normalizedCsType,
+      languageExactType: true
+    };
+    delete adopted.catalogGenerated;
+    delete adopted.apiCatalogType;
+    delete adopted.unavailableApiType;
+    delete adopted.portableApiType;
+    if (
+      JSON.stringify(adopted) ===
+      JSON.stringify(information)
+    ) {
+      return graphType;
+    }
+    registerType(graphType, adopted);
+    normalGraphTypeByCs.set(
+      normalizedCsType,
+      graphType
+    );
+    return graphType;
+  }
+
   function ensureNormalExactGraphType(csType) {
     const canonical = registry.canonicalType(csType);
     if (
       canonical &&
       registry.getTypeDefinitions()?.[canonical]
     ) {
-      return canonical;
+      const normalizedCanonicalCsType =
+        registry.canonicalCsType(csType)
+          .replace(/&$/, "");
+      return adoptNormalExactGraphType(
+        canonical,
+        normalizedCanonicalCsType
+      );
     }
     const normalized = registry.canonicalCsType(csType)
       .replace(/&$/, "");
     refreshNormalGraphTypeIndex();
     if (normalGraphTypeByCs.has(normalized)) {
-      return normalGraphTypeByCs.get(normalized);
+      return adoptNormalExactGraphType(
+        normalGraphTypeByCs.get(normalized),
+        normalized
+      );
     }
 
     const broadType = catalogGraphType(normalized);
@@ -6497,7 +6529,10 @@ faulted ? `\n        ${faulted}();` : ""])
         ) === normalized
       ) {
         normalGraphTypeByCs.set(normalized, broadType);
-        return broadType;
+        return adoptNormalExactGraphType(
+          broadType,
+          normalized
+        );
       }
     }
 
@@ -6524,6 +6559,8 @@ faulted ? `\n        ${faulted}();` : ""])
       referenceType: !valueType,
       valueType: true,
       globalGenericCandidate: false,
+      languageExactType: true,
+      normalExactType: true,
       assignableTo: [...new Set([
         ...(Array.isArray(
           broadInformation?.assignableTo
@@ -6744,16 +6781,6 @@ faulted ? `\n        ${faulted}();` : ""])
     return id;
   }
 
-  for (const signature of NORMAL_CATALOG_DELEGATES) {
-    for (const argument of signature.argumentCsTypes) {
-      ensureNormalExactGraphType(argument);
-    }
-    if (signature.returnCsType) {
-      ensureNormalExactGraphType(signature.returnCsType);
-    }
-    ensureNormalDelegateGraphType(signature);
-  }
-
   const defaultDelegate =
     NORMAL_DISCOVERED_DELEGATES.find(
       signature =>
@@ -6784,15 +6811,15 @@ faulted ? `\n        ${faulted}();` : ""])
         ),
         pText(
           "customDelegateType",
-          "Exact delegate type (optional)",
+          window.RMLI18n.t("ui.typedCallback.exactDelegateType"),
           "",
-          "A closed System.Action, System.Func, System.Predicate or System.Comparison type. When set, it overrides the catalog selection."
+          window.RMLI18n.t("ui.typedCallback.exactDelegateTypeHelp")
         ),
         pBool(
           "openGraphEntry",
-          "Track graph execution scope",
+          window.RMLI18n.t("universal.performance.parameter.track_graph_scope"),
           true,
-          "Disable only when the delegate is invoked synchronously from an already active graph entry."
+          window.RMLI18n.t("ui.typedCallback.trackGraphScopeHelp")
         )
       ],
       inputs: [],
@@ -6830,7 +6857,7 @@ faulted ? `\n        ${faulted}();` : ""])
               (argument, index) =>
                 port(
                   `argument${index}`,
-                  `Argument ${index + 1}`,
+                  `${window.RMLI18n.t("ui.literal.ce5e5792e97f")} ${index + 1}`,
                   ensureNormalExactGraphType(argument)
                 )
             ),
@@ -7986,7 +8013,7 @@ private static string GetNormalTryParseError${token}(string? text)
     symbol: "±×",
     description: window.RMLI18n.t("ui.auto.f020b2fb933b"),
     parameters: [
-      pSelect("operation", "Operation", [["add", window.RMLI18n.t("ui.auto.0889f8cb2970")], ["subtract", window.RMLI18n.t("ui.auto.dadd70539398")], ["multiply", window.RMLI18n.t("ui.auto.c7edc88b8ac6")], ["divide", window.RMLI18n.t("ui.auto.8a3e0ae3d320")], ["modulo", window.RMLI18n.t("ui.auto.2d36fe43e175")], ["power", window.RMLI18n.t("ui.literal.7548ab52c3d1")], ["minimum", window.RMLI18n.t("ui.auto.0662023736a9")], ["maximum", window.RMLI18n.t("ui.auto.5942fa7b274b")]], "add", "", { affectsPorts: true, affectsNode: true, commitImmediately: true })
+      pSelect("operation", window.RMLI18n.t("ui.literal.430d32076eb2"), [["add", window.RMLI18n.t("ui.auto.0889f8cb2970")], ["subtract", window.RMLI18n.t("ui.auto.dadd70539398")], ["multiply", window.RMLI18n.t("ui.auto.c7edc88b8ac6")], ["divide", window.RMLI18n.t("ui.auto.8a3e0ae3d320")], ["modulo", window.RMLI18n.t("ui.auto.2d36fe43e175")], ["power", window.RMLI18n.t("ui.literal.7548ab52c3d1")], ["minimum", window.RMLI18n.t("ui.auto.0662023736a9")], ["maximum", window.RMLI18n.t("ui.auto.5942fa7b274b")]], "add", "", { affectsPorts: true, affectsNode: true, commitImmediately: true })
     ],
     inputs: [
       genericPort("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), "T", "arithmetic"),
@@ -8020,7 +8047,7 @@ private static string GetNormalTryParseError${token}(string? text)
         ? [port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "double")]
         : [genericPort("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "T", constraint)];
       return {
-        title: `Math · ${information[0]}`,
+        title: `${window.RMLI18n.t("ui.literal.3edf0df49942")} · ${information[0]}`,
         symbol: information[1],
         inputs,
         outputs,
@@ -8070,8 +8097,8 @@ private static string GetNormalTryParseError${token}(string? text)
         floor: [window.RMLI18n.t("ui.literal.7db82f74092f"), "⌊x⌋", "double"], ceiling: [window.RMLI18n.t("ui.literal.e29db923e25b"), "⌈x⌉", "double"]
       }[operation] || [window.RMLI18n.t("ui.auto.f5150d45f664"), "±", "arithmetic"];
       return information[2] === "double"
-        ? { title: `Unary Math · ${information[0]}`, symbol: information[1], inputs: [port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "double")], outputs: [port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "double")] }
-        : { title: `Unary Math · ${information[0]}`, symbol: information[1], inputs: [genericPort("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "T", information[2])], outputs: [genericPort("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "T", information[2])] };
+        ? { title: `${window.RMLI18n.t("ui.auto.3ed00d977115")} · ${information[0]}`, symbol: information[1], inputs: [port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "double")], outputs: [port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "double")] }
+        : { title: `${window.RMLI18n.t("ui.auto.3ed00d977115")} · ${information[0]}`, symbol: information[1], inputs: [genericPort("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "T", information[2])], outputs: [genericPort("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "T", information[2])] };
     },
     codegenExpression(api) {
       const operation = String(api.node.parameters?.operation || "negate");
@@ -8104,8 +8131,8 @@ private static string GetNormalTryParseError${token}(string? text)
     resolveDefinition(node) {
       const operation = String(node.parameters?.operation || "equal");
       const ordered = !["equal", "notEqual"].includes(operation);
-      const info = { equal: [window.RMLI18n.t("ui.auto.ec574012f30c"), "="], notEqual: ["Not Equal", "≠"], greater: ["Greater", ">"], greaterOrEqual: ["Greater or Equal", "≥"], less: ["Less", "<"], lessOrEqual: ["Less or Equal", "≤"] }[operation] || ["Equal", "="];
-      return { title: `Compare · ${info[0]}`, symbol: info[1], inputs: [genericPort("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), "T", ordered ? "ordered" : "value"), genericPort("b", window.RMLI18n.t("ui.auto.47a451f273f8"), "T", ordered ? "ordered" : "value")] };
+      const info = { equal: [window.RMLI18n.t("ui.auto.ec574012f30c"), "="], notEqual: [window.RMLI18n.t("ui.literal.7531cdd8037e"), "≠"], greater: [window.RMLI18n.t("ui.literal.c0c7d8111372"), ">"], greaterOrEqual: [window.RMLI18n.t("ui.literal.233c5f00740e"), "≥"], less: [window.RMLI18n.t("ui.literal.526cb7425ab8"), "<"], lessOrEqual: [window.RMLI18n.t("ui.literal.ab5e1b057dbc"), "≤"] }[operation] || [window.RMLI18n.t("ui.auto.ec574012f30c"), "="];
+      return { title: `${window.RMLI18n.t("ui.auto.a5a20db782e6")} · ${info[0]}`, symbol: info[1], inputs: [genericPort("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), "T", ordered ? "ordered" : "value"), genericPort("b", window.RMLI18n.t("ui.auto.47a451f273f8"), "T", ordered ? "ordered" : "value")] };
     },
     codegenCollect(api) { api.addUsing("System.Collections.Generic"); },
     codegenExpression(api) {
@@ -8131,16 +8158,16 @@ private static string GetNormalTryParseError${token}(string? text)
     title: window.RMLI18n.t("ui.auto.f789ce8543f8"),
     group: window.RMLI18n.t("ui.literal.3d52a6d8fedc"),
     symbol: "⊕",
-    parameters: [pSelect("operation", window.RMLI18n.t("ui.literal.430d32076eb2"), [["and", window.RMLI18n.t("ui.auto.ac4af5684ec1")], ["or", "OR"], ["xor", window.RMLI18n.t("ui.literal.04e41391d608")], ["not", window.RMLI18n.t("ui.auto.8ab204a0ee16")]], "and", "", { affectsPorts: true, affectsNode: true, commitImmediately: true })],
+    parameters: [pSelect("operation", window.RMLI18n.t("ui.literal.430d32076eb2"), [["and", window.RMLI18n.t("ui.auto.ac4af5684ec1")], ["or", window.RMLI18n.t("ui.auto.2214832058fe")], ["xor", window.RMLI18n.t("ui.literal.04e41391d608")], ["not", window.RMLI18n.t("ui.auto.8ab204a0ee16")]], "and", "", { affectsPorts: true, affectsNode: true, commitImmediately: true })],
     inputs: [port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), "bool"), port("b", window.RMLI18n.t("ui.auto.47a451f273f8"), "bool")],
     outputs: [port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "bool")],
     variadicInputs: { minimum: 2, defaultCount: 2, maximum: 64, preserveAB: true, template: port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), "bool") },
     resolveDefinition(node) {
       const operation = String(node.parameters?.operation || "and");
-      const info = { and: [window.RMLI18n.t("ui.auto.ac4af5684ec1"), "∧"], or: ["OR", "∨"], xor: ["XOR", "⊕"], not: ["NOT", "¬"] }[operation] || ["AND", "∧"];
+      const info = { and: [window.RMLI18n.t("ui.auto.ac4af5684ec1"), "∧"], or: [window.RMLI18n.t("ui.auto.2214832058fe"), "∨"], xor: [window.RMLI18n.t("ui.literal.04e41391d608"), "⊕"], not: [window.RMLI18n.t("ui.auto.8ab204a0ee16"), "¬"] }[operation] || [window.RMLI18n.t("ui.auto.ac4af5684ec1"), "∧"];
       return operation === "not"
-        ? { title: `Boolean · ${info[0]}`, symbol: info[1], inputs: [port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "bool")], variadicInputs: null }
-        : { title: `Boolean · ${info[0]}`, symbol: info[1], inputs: [port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), "bool"), port("b", window.RMLI18n.t("ui.auto.47a451f273f8"), "bool")], variadicInputs: { minimum: 2, defaultCount: 2, maximum: 64, preserveAB: true, template: port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), "bool") } };
+        ? { title: `${window.RMLI18n.t("ui.auto.2aadc0d7ea8d")} · ${info[0]}`, symbol: info[1], inputs: [port("value", window.RMLI18n.t("ui.auto.3b53ce63a0cc"), "bool")], variadicInputs: null }
+        : { title: `${window.RMLI18n.t("ui.auto.2aadc0d7ea8d")} · ${info[0]}`, symbol: info[1], inputs: [port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), "bool"), port("b", window.RMLI18n.t("ui.auto.47a451f273f8"), "bool")], variadicInputs: { minimum: 2, defaultCount: 2, maximum: 64, preserveAB: true, template: port("a", window.RMLI18n.t("ui.auto.33a84c726bd4"), "bool") } };
     },
     codegenExpression(api) {
       const operation = String(api.node.parameters?.operation || "and");
@@ -8256,8 +8283,8 @@ private static string GetNormalTryParseError${token}(string? text)
     outputs: [port("result", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "bool")],
     resolveDefinition(node) {
       const operation = String(node.parameters?.operation || "contains");
-      const info = { contains: [window.RMLI18n.t("ui.auto.cd3e9820f872"), "⊃"], startsWith: ["Starts With", "A…"], endsWith: ["Ends With", "…Z"] }[operation] || ["Contains", "⊃"];
-      return { title: `Text Match · ${info[0]}`, symbol: info[1] };
+      const info = { contains: [window.RMLI18n.t("ui.auto.cd3e9820f872"), "⊃"], startsWith: [window.RMLI18n.t("ui.literal.88f9201d41bb"), "A…"], endsWith: [window.RMLI18n.t("ui.literal.a30da6d526aa"), "…Z"] }[operation] || [window.RMLI18n.t("ui.auto.cd3e9820f872"), "⊃"];
+      return { title: `${window.RMLI18n.t("ui.auto.75d180d51272")} · ${info[0]}`, symbol: info[1] };
     },
     codegenExpression(api) {
       const method = { contains: window.RMLI18n.t("ui.auto.cd3e9820f872"), startsWith: window.RMLI18n.t("ui.literal.68a6abdcd006"), endsWith: window.RMLI18n.t("ui.literal.eb2ea672f91d") }[api.node.parameters?.operation] || window.RMLI18n.t("ui.auto.cd3e9820f872");
@@ -8276,9 +8303,9 @@ private static string GetNormalTryParseError${token}(string? text)
     outputs: [port("text", window.RMLI18n.t("ui.auto.ca8a16007fd8"), "string")],
     resolveDefinition(node) {
       const operation = String(node.parameters?.operation || "replace");
-      const info = { replace: [window.RMLI18n.t("js.presentation.a7cf7b25a703"), "A→B"], trim: [window.RMLI18n.t("ui.literal.0266abd25371"), window.RMLI18n.t("ui.literal.ba3e011804ea")], trimStart: [window.RMLI18n.t("ui.literal.ca1a78565a88"), "▷"], trimEnd: ["Trim End", "◁"], upper: ["Upper Case", "AA"], lower: ["Lower Case", "aa"] }[operation] || ["Replace", "A→B"];
+      const info = { replace: [window.RMLI18n.t("js.presentation.a7cf7b25a703"), "A→B"], trim: [window.RMLI18n.t("ui.literal.0266abd25371"), window.RMLI18n.t("ui.literal.ba3e011804ea")], trimStart: [window.RMLI18n.t("ui.literal.ca1a78565a88"), "▷"], trimEnd: [window.RMLI18n.t("ui.literal.a75568bb33c9"), "◁"], upper: [window.RMLI18n.t("ui.literal.2039134eb09b"), "AA"], lower: [window.RMLI18n.t("ui.literal.7dc5d27e866e"), "aa"] }[operation] || [window.RMLI18n.t("js.presentation.a7cf7b25a703"), "A→B"];
       return {
-        title: `Text Transform · ${info[0]}`,
+        title: `${window.RMLI18n.t("ui.auto.c80f4fb41f6f")} · ${info[0]}`,
         symbol: info[1],
         inputs: operation === "replace"
           ? [port("text", window.RMLI18n.t("ui.auto.e50d5c54736a"), "string"), port("old", window.RMLI18n.t("js.presentation.df251b06eefd"), "string"), port("replacement", window.RMLI18n.t("ui.auto.7f746634850a"), "string")]
@@ -8491,7 +8518,10 @@ private static bool _textSplitHasValue${token};`);
             (_, index) =>
               genericPort(
                 `case${index + 1}`,
-                `Case ${index + 1}`,
+                window.RMLI18n.format(
+                  "ui.flowSwitch.caseNumber",
+                  { number: index + 1 }
+                ),
                 "T",
                 "value"
               )
@@ -8503,7 +8533,10 @@ private static bool _textSplitHasValue${token};`);
             (_, index) =>
               port(
                 `case${index + 1}`,
-                `Case ${index + 1}`,
+                window.RMLI18n.format(
+                  "ui.flowSwitch.caseNumber",
+                  { number: index + 1 }
+                ),
                 "impulse"
               )
           ),
@@ -9583,7 +9616,10 @@ private static bool _textSplitHasValue${token};`);
       group: window.RMLI18n.t("ui.literal.a513560b7e42"),
       symbol,
       description:
-        `${title} with optional overwrite and explicit success/exception outputs.`,
+        window.RMLI18n.format(
+          "ui.normalFileTransfer.description",
+          { title }
+        ),
       parameters: [
         pBool("overwrite", window.RMLI18n.t("ui.literal.5740416c66c5"), false)
       ],
@@ -10103,7 +10139,10 @@ attempt ? `\n    ${attempt}();` : ""])
       group: window.RMLI18n.t("ui.literal.6aa5e4a6e67c"),
       symbol,
       description:
-        `${title}. Select the node and use + / − to change the Task count.`,
+        window.RMLI18n.format(
+          "ui.normalTaskAggregate.description",
+          { title }
+        ),
       inputs: [
         port("a", window.RMLI18n.t("ui.auto.3da047312685"), "task"),
         port("b", window.RMLI18n.t("ui.auto.5be8f675c8ef"), "task")
@@ -10570,7 +10609,10 @@ attempt ? `\n    ${attempt}();` : ""])
       title,
       group: defaultDefinition.group,
       symbol,
-      description: `Selects one compatible ${title.toLowerCase()} behavior without requiring separate palette nodes.`,
+      description: window.RMLI18n.format(
+        "ui.compatibleRuntimeFamily.description",
+        { title }
+      ),
       configurableTypeVar: defaultDefinition.configurableTypeVar,
       configurableTypes: defaultDefinition.configurableTypes,
       defaultType: defaultDefinition.defaultType,

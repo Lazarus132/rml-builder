@@ -2,7 +2,7 @@
   "use strict";
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.24.90-reliable-folder-direct-dll-build";
+    "1.25.00-canonical-type-reconciliation-startup-recovery";
 
   if (
     window.RMLScriptLoader?.version >= 48 &&
@@ -21,6 +21,8 @@
   const prefetchedFiles = new Set();
   let runtimeViewPreparationPromise = null;
   let runtimeViewOpenAfterLoadPromise = null;
+  let restoredRuntimeGraphPreparationKey = "";
+  let restoredRuntimeGraphPreparationPromise = null;
   const GRAPH_SEARCH_SHORTCUT_CAPTURE_VERSION = 18;
   const provisionalGraphShortcutKeys = new Set();
   let scannerStatusControlInstalled = false;
@@ -127,13 +129,13 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../ui/builder_replacement_dialog.js?v=1.24.90-reliable-folder-direct-dll-build",
+          url: "../ui/builder_replacement_dialog.js?v=1.25.00-canonical-type-reconciliation-startup-recovery",
           ready: () =>
             window.RMLBuilderReplacementDialog
               ?.moduleId === SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../ui/builder_work_controller.js?v=1.24.90-reliable-folder-direct-dll-build",
+          url: "../ui/builder_work_controller.js?v=1.25.00-canonical-type-reconciliation-startup-recovery",
           ready: () =>
             window.RMLBuilderWorkController
               ?.moduleId === SCRIPT_LOADER_MODULE_ID
@@ -143,7 +145,7 @@
     "scanner-connection": Object.freeze({
       dependencies: Object.freeze([]),
       files: Object.freeze([Object.freeze({
-        url: "../graph/runtime_bridge.js?v=1.24.90-reliable-folder-direct-dll-build&status-runtime=4",
+        url: "../graph/runtime_bridge.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&status-runtime=4",
         ready: () => window.RMLRuntimeBridge?.version >= 14 &&
           typeof window.RMLRuntimeBridge?.connect === "function"
       })])
@@ -187,7 +189,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.24.90-reliable-folder-direct-dll-build&status-catalog=7&portable-types=1&specializations=2&inherited-demand=1",
+          url: "../catalog/catalog_loader.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&status-catalog=7&portable-types=1&specializations=2&inherited-demand=1&readiness-rev=2&i18n-rev=2",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -199,13 +201,10 @@
               window.RMLCatalogImportGate
                 ?.requiredApiFactoryVersion
             ) === 41 &&
-            (
-              typeof window.RMLBaseModNodesReady?.then === "function" ||
-              typeof window.RMLModNodesReady?.then === "function"
-            )
+            typeof window.RMLModNodesReady?.then === "function"
         }),
         Object.freeze({
-          url: "../graph/node_graph_registry.js?v=1.24.90-reliable-folder-direct-dll-build&portable-types=1",
+          url: "../graph/node_graph_registry.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&portable-types=1&i18n-rev=1",
           ready: () =>
             typeof window.RMLModNodeRegistry?.getNodeDefinitions ===
               "function"
@@ -213,7 +212,6 @@
       ]),
       settle: async () => {
         await Promise.resolve(
-          window.RMLBaseModNodesReady ||
           window.RMLModNodesReady
         );
         if (
@@ -239,13 +237,13 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_type_migration.js?v=1.24.40-all-ports-fix2&type-migration=2&portable-types=1",
+          url: "../graph/node_graph_type_migration.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&type-migration=3&portable-types=2",
           ready: () =>
             window.RMLGraphTypeImportMigrations
               ?.version === 1
         }),
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.24.90-reliable-folder-direct-dll-build&portable-types=1&specializations=1",
+          url: "../graph/node_graph_codegen.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&portable-types=1&specializations=1",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -262,7 +260,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.24.90-reliable-folder-direct-dll-build",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.25.00-canonical-type-reconciliation-startup-recovery",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -271,13 +269,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.24.90-reliable-folder-direct-dll-build",
+          url: "../graph/node_graph_composites.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&i18n-rev=2",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.24.90-reliable-folder-direct-dll-build&worker-null-fallback=3&portable-types=1&specializations=1",
+          url: "../graph/node_graph_custom_csharp.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&worker-null-fallback=3&portable-types=1&specializations=1&i18n-rev=2",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -286,13 +284,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.24.90-reliable-folder-direct-dll-build&status-readiness=5&schema=4&type-migration=1&portable-types=1&specializations=1",
+          url: "../graph/node_graph_view.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&status-readiness=5&schema=4&type-migration=1&portable-types=1&specializations=1&readiness-rev=4&i18n-rev=2",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.24.90-reliable-folder-direct-dll-build&type-migration=1&portable-types=1&specializations=1",
+          url: "../graph/node_graph_bootstrap.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&type-migration=1&portable-types=1&specializations=1&readiness-rev=2",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -301,12 +299,31 @@
         })
       ]),
       settle: async () => {
-
         if (
           window.RMLDynamicGraphHost?.moduleId !== SCRIPT_LOADER_MODULE_ID ||
           typeof window.RMLDynamicGraphHost?.isReady !== "function"
         ) {
           throw new Error(window.RMLI18n.t("ui.literal.0d5beb2090e5"));
+        }
+        const hostReady =
+          window.RMLDynamicGraphHost
+            .whenHostReady?.();
+        if (
+          !hostReady ||
+          typeof hostReady.then !== "function"
+        ) {
+          throw new Error(
+            "The Runtime Graph host did not expose an awaitable readiness contract."
+          );
+        }
+        await hostReady;
+        if (
+          window.RMLDynamicGraphHost.isReady() !==
+          true
+        ) {
+          throw new Error(
+            "The Runtime Graph host completed initialization without a usable project model."
+          );
         }
       }
     }),
@@ -316,7 +333,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=1.24.90-reliable-folder-direct-dll-build",
+          url: "../graph/graph_gpu_renderer.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&readiness-rev=2",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })
@@ -538,55 +555,66 @@
 
     state.status = "loading";
     state.error = null;
-    state.promise = new Promise((resolve, reject) => {
+    const loadRequest = new Promise((resolve, reject) => {
       const script = document.createElement("script");
+      let settled = false;
       state.element = script;
       script.src = state.url;
       script.async = false;
       script.dataset.rmlLazyScript = file.url;
-      script.addEventListener(
-        "load",
-        () => {
-          if (file.ready && file.ready() !== true) {
-            const contract = publicContractDiagnostic(file);
-            const failure = new Error(
-              `${file.url} loaded without exposing its public contract. ` +
-              `Expected ${JSON.stringify(contract.expected)}, ` +
-              `received ${JSON.stringify(contract.actual)}.`
-            );
-            Object.defineProperty(failure, "details", {
-              value: Object.freeze({
-                code: "RML_LAZY_PUBLIC_CONTRACT_MISMATCH",
-                url: state.url,
-                loaderModuleId: SCRIPT_LOADER_MODULE_ID,
-                exportName: contract.exportName,
-                expected: contract.expected,
-                actual: contract.actual
-              }),
-              enumerable: true,
-              configurable: false,
-              writable: false
-            });
-            console.error(
-              "[RML BUILDER INTERNAL FAILURE] A lazy module loaded but its public contract is incompatible.",
-              failure.details
-            );
-            reject(failure);
-            return;
-          }
+      const cleanup = () => {
+        script.removeEventListener("load", onLoad);
+        script.removeEventListener("error", onError);
+      };
+      const settle = (error = null) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (error) {
+          script.remove();
+          reject(error);
+        } else {
           resolve(true);
-        },
-        { once: true }
+        }
+      };
+      const onLoad = () => {
+        if (file.ready && file.ready() !== true) {
+          const contract = publicContractDiagnostic(file);
+          const failure = new Error(
+            `${file.url} loaded without exposing its public contract. ` +
+            `Expected ${JSON.stringify(contract.expected)}, ` +
+            `received ${JSON.stringify(contract.actual)}.`
+          );
+          Object.defineProperty(failure, "details", {
+            value: Object.freeze({
+              code: "RML_LAZY_PUBLIC_CONTRACT_MISMATCH",
+              url: state.url,
+              loaderModuleId: SCRIPT_LOADER_MODULE_ID,
+              exportName: contract.exportName,
+              expected: contract.expected,
+              actual: contract.actual
+            }),
+            enumerable: true,
+            configurable: false,
+            writable: false
+          });
+          console.error(
+            "[RML BUILDER INTERNAL FAILURE] A lazy module loaded but its public contract is incompatible.",
+            failure.details
+          );
+          settle(failure);
+          return;
+        }
+        settle();
+      };
+      const onError = () => settle(
+        new Error(`Could not load ${file.url}.`)
       );
-      script.addEventListener(
-        "error",
-        () => reject(
-          new Error(`Could not load ${file.url}.`)
-        ),
-        { once: true }
-      );
+      script.addEventListener("load", onLoad, { once: true });
+      script.addEventListener("error", onError, { once: true });
       (document.body || document.head).appendChild(script);
-    })
+    });
+    state.promise = loadRequest
       .then(value => {
         state.status = "loaded";
         state.error = null;
@@ -994,19 +1022,57 @@
   }
 
   function prepareRestoredRuntimeGraph() {
+    const bridge = window.RMLBuilderBridge;
+    if (!bridge) {
+      updateRuntimeButton();
+      return Promise.resolve(false);
+    }
     const graph = runtimeGraphState();
     if (graph?.active !== true) {
       updateRuntimeButton();
-      return;
+      return Promise.resolve(true);
     }
     const page =
-      window.RMLBuilderBridge?.getActivePage?.() ||
+      bridge.getActivePage?.() ||
       graph.lastOpenPage ||
       "configuration-outline";
-    const preparation = page === "runtime-graph"
-      ? prepareRuntimeView()
-      : ensure("graph-codegen");
-    void preparation
+    const preparationKey = JSON.stringify([
+      Number(bridge.getProjectEpoch?.()) || 0,
+      page,
+      graph.active === true
+    ]);
+    if (
+      restoredRuntimeGraphPreparationPromise &&
+      restoredRuntimeGraphPreparationKey ===
+        preparationKey
+    ) {
+      return restoredRuntimeGraphPreparationPromise;
+    }
+
+    const preparation = Promise.resolve(
+      page === "runtime-graph"
+        ? startRuntimeViewPreparation()
+        : ensure("graph-codegen")
+    ).then(() => true);
+    restoredRuntimeGraphPreparationKey =
+      preparationKey;
+    const guardedPreparation =
+      preparation.catch(error => {
+        if (
+          restoredRuntimeGraphPreparationPromise ===
+            guardedPreparation &&
+          restoredRuntimeGraphPreparationKey ===
+            preparationKey
+        ) {
+          restoredRuntimeGraphPreparationPromise =
+            null;
+          restoredRuntimeGraphPreparationKey = "";
+        }
+        throw error;
+      });
+    restoredRuntimeGraphPreparationPromise =
+      guardedPreparation;
+    void guardedPreparation
       .catch(error => {
         console.error(
           window.RMLI18n.t("ui.literal.afef0dfe87f0"),
@@ -1015,6 +1081,7 @@
       })
       .finally(updateRuntimeButton);
     updateRuntimeButton();
+    return guardedPreparation;
   }
 
   Object.defineProperty(window, "RMLScriptLoader", {
@@ -1022,6 +1089,7 @@
       version: 48,
       moduleId: SCRIPT_LOADER_MODULE_ID,
       ensure,
+      prepareRestoredRuntimeGraph,
       isLoaded(name) {
         return bundleState(name).status === "loaded";
       },
@@ -1035,6 +1103,10 @@
 
   document.addEventListener(
     "rml-builder:bridge-ready",
+    prepareRestoredRuntimeGraph
+  );
+  document.addEventListener(
+    "rml-builder:ready",
     prepareRestoredRuntimeGraph
   );
   document.addEventListener(
@@ -1091,17 +1163,47 @@
 
     let loadIntent = 0;
     let loading = false;
+    const statusRepresentsVerifiedLive = status => {
+      const connection =
+        window.RMLRuntimeBridge
+          ?.getConnectionState?.();
+      return Boolean(
+        status?.dataset?.source === "scanner" &&
+        status.getAttribute("aria-pressed") === "true" &&
+        window.RMLApiNodeFactoryReport
+          ?.liveCatalogVerified === true &&
+        connection?.mode === "live"
+      );
+    };
     const run = async status => {
       if (loading) {
         return;
       }
       const intent = ++loadIntent;
+      const liveRecheck =
+        statusRepresentsVerifiedLive(status);
       loading = true;
       status.dataset.source = "updating";
       status.textContent = window.RMLI18n.t("{{i18n:js.presentation.be775996d3f7}}");
       status.setAttribute("aria-busy", "true");
       status.title = window.RMLI18n.t("ui.auto.ef5bac1920fc");
       status.setAttribute("aria-label", `${status.textContent}. ${status.title}`);
+      const builderWork =
+        window.RMLBuilderWork;
+      const workSession =
+        liveRecheck
+          ? 0
+          : builderWork?.begin?.({
+              kicker:
+                window.RMLI18n.t("ui.literal.924e20a624e5"),
+              title:
+                window.RMLI18n.t("ui.auto.4fbd685b87a4"),
+              message:
+                window.RMLI18n.t("ui.auto.ef5bac1920fc"),
+              detail:
+                window.RMLI18n.t("ui.auto.112240abb0c0"),
+              progress: 1
+            }) || 0;
       try {
         await Promise.all([
           window.RMLScriptLoader.ensure(
@@ -1112,9 +1214,21 @@
           )
         ]);
         if (!loading || intent !== loadIntent) return;
+        builderWork?.update?.(
+          workSession,
+          {
+            progress: 8,
+            detail:
+              window.RMLI18n.t("ui.auto.112240abb0c0")
+          }
+        );
         await window.RMLCatalogImportGate
           ?.synchronizeLive?.({
-            showWork: true,
+            showWork:
+              !liveRecheck &&
+              workSession === 0,
+            showWorkOnCatalogChange:
+              liveRecheck,
             forceRetry: true,
             trigger: "button"
           });
@@ -1139,6 +1253,11 @@
           )?.setAttribute("aria-busy", "false");
           window.RMLCatalogImportGate
             ?.refreshStatus?.();
+          if (workSession) {
+            builderWork?.finish?.(
+              workSession
+            );
+          }
         }
       }
     };
@@ -1147,6 +1266,7 @@
       const status = statusFromEvent(event);
       if (!status) return;
       event.preventDefault();
+      event.stopImmediatePropagation();
       void run(status);
     }, true);
     document.addEventListener("keydown", event => {
@@ -1154,6 +1274,7 @@
       if (!status) return;
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
+        event.stopImmediatePropagation();
         if (!event.repeat) void run(status);
       }
     }, true);

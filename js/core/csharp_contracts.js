@@ -552,24 +552,38 @@
     return freezeDeep(result);
   }
 
-  function semanticTypeValue(value) {
-    const type = normalizeTypeRef(value);
+  function semanticNormalizedTypeValue(type) {
     if (type.kind === "named") {
       return {
         kind: "named",
         segments: type.segments.map(segment => ({
           name: segment.name,
-          genericArguments: segment.genericArguments.map(semanticTypeValue)
+          genericArguments: segment.genericArguments.map(
+            semanticNormalizedTypeValue
+          )
         })),
         assemblyName: type.assemblyName,
         publicKeyToken: type.publicKeyToken
       };
     }
     if (type.kind === "array") {
-      return { kind: "array", elementType: semanticTypeValue(type.elementType), rank: type.rank };
+      return {
+        kind: "array",
+        elementType:
+          semanticNormalizedTypeValue(
+            type.elementType
+          ),
+        rank: type.rank
+      };
     }
     if (type.kind === "pointer" || type.kind === "nullable") {
-      return { kind: type.kind, elementType: semanticTypeValue(type.elementType) };
+      return {
+        kind: type.kind,
+        elementType:
+          semanticNormalizedTypeValue(
+            type.elementType
+          )
+      };
     }
     return {
       kind: "genericParameter",
@@ -579,8 +593,18 @@
     };
   }
 
-  function typeRefSemanticKey(value) {
-    return canonicalJson(semanticTypeValue(value));
+  function semanticTypeValue(value, options = {}) {
+    return semanticNormalizedTypeValue(
+      normalizeTypeRef(value, {
+        allowOpen: options.allowOpen === true
+      })
+    );
+  }
+
+  function typeRefSemanticKey(value, options = {}) {
+    return canonicalJson(
+      semanticTypeValue(value, options)
+    );
   }
 
   function emitTypeSyntax(value, options = {}) {
@@ -605,6 +629,31 @@
         .join(", ") + ">";
     }).join(".");
     return options.global === false ? body : "global::" + body;
+  }
+
+  function canonicalTypeIdentity(value, options = {}) {
+    const allowOpen =
+      options.allowOpen === true;
+    const normalized = normalizeTypeRef(
+      value,
+      { allowOpen }
+    );
+    const canonicalSyntax = emitTypeSyntax(
+      normalized,
+      {
+        global: false,
+        allowOpen
+      }
+    );
+    const canonical = normalizeTypeRef(
+      canonicalSyntax,
+      { allowOpen }
+    );
+    return canonicalJson(
+      semanticNormalizedTypeValue(
+        canonical
+      )
+    );
   }
 
   function serializeTypeRef(value) {
@@ -1598,6 +1647,7 @@
     serializeTypeRef,
     typeRefFromPortableContract,
     typeRefSemanticKey,
+    canonicalTypeIdentity,
     normalizeMemberRef,
     serializeMemberRef,
     memberRefFromPortableContract,

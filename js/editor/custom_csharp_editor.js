@@ -11,6 +11,15 @@
   const CUSTOM_CSHARP_SHORTCUT_BOOTSTRAP_VERSION = 18;
   const mountedEditors = new Set();
 
+  const editorUiText = (key, fallback = "") => {
+    const translated = String(window.RMLI18n?.t?.(key) ?? "");
+    return translated && translated !== key ? translated : fallback;
+  };
+  const editorUiFormat = (key, values, fallback = "") => {
+    const translated = String(window.RMLI18n?.format?.(key, values) ?? "");
+    return translated && translated !== key ? translated : fallback;
+  };
+
   function customCSharpSearchNavigationDirection(event) {
     const key = String(event?.key || "").toLowerCase();
     const code = String(event?.code || "").toLowerCase();
@@ -459,7 +468,7 @@
     heading.textContent = String(options.tabTitle || window.RMLI18n.t("ui.text.ba090b5e07cf"));
     const headerActions = popupDocument.createElement("div");
     headerActions.className = "editor-header-actions";
-    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build", window.location.href).href;
+    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery", window.location.href).href;
     const createHeaderButton = (label, iconName) => {
       const button = popupDocument.createElement("button");
       button.type = "button";
@@ -1053,7 +1062,11 @@
       button.textContent = source;
       button.setAttribute(
         "aria-label",
-        `${source} debug and problems output`
+        editorUiFormat(
+          "custom_csharp.editor.diagnostic_output",
+          { source },
+          `${source} debug and problems output`
+        )
       );
       button.addEventListener("click", () => {
         commitDiagnosticSource(source);
@@ -1083,7 +1096,7 @@
       ["uiText", window.RMLI18n.t("ui.literal.8c058e4faec6")],
       ["gutterText", window.RMLI18n.t("ui.literal.361b9d89d650")],
       ["statusText", window.RMLI18n.t("ui.literal.9df5b884aaf8")],
-      ["accent", "Accent"],
+      ["accent", editorUiText("custom_csharp.editor.accent", "Accent")],
       ["caret", window.RMLI18n.t("ui.literal.2239943c8d0a")]
     ];
     const synchronizeAppearanceControls = () => {
@@ -1130,7 +1143,7 @@
       const editor =
         typeof factory === "function"
           ? factory({
-              label: `${labelText} color`,
+              label: editorUiFormat("custom_csharp.editor.color_label", { label: labelText }, `${labelText} color`),
               value: appearanceState[key],
               onChange(value) {
                 commitAppearance(key, value);
@@ -1159,12 +1172,18 @@
       const trigger = popupDocument.createElement("button");
       trigger.type = "button";
       trigger.className = "settings-color-trigger";
-      trigger.setAttribute("aria-label", `Open ${labelText} color picker`);
+      trigger.setAttribute(
+        "aria-label",
+        editorUiFormat("custom_csharp.editor.open_color_picker", { label: labelText }, `Open ${labelText} color picker`)
+      );
       trigger.setAttribute("aria-haspopup", "dialog");
       trigger.setAttribute("aria-expanded", "false");
       const input = popupDocument.createElement("input");
       input.type = "color";
-      input.setAttribute("aria-label", `${labelText} color`);
+      input.setAttribute(
+        "aria-label",
+        editorUiFormat("custom_csharp.editor.color_label", { label: labelText }, `${labelText} color`)
+      );
       input.addEventListener("input", () => {
         commitAppearance(key, input.value);
       });
@@ -1320,7 +1339,11 @@
           key:
             `${embeddedLayerKey}:${id}`,
           label:
-            `Custom C# ${label.toLowerCase()}`
+            editorUiFormat(
+              "custom_csharp.editor.scroll_region",
+              { label: label.toLowerCase() },
+              `Custom C# ${label.toLowerCase()}`
+            )
         })
       ),
       {
@@ -1607,7 +1630,11 @@
         const empty = popupDocument.createElement("span");
         empty.className = "debug-empty";
         empty.textContent =
-          `No ${diagnosticSource} problems detected.`;
+          editorUiFormat(
+            "custom_csharp.editor.no_problems",
+            { source: diagnosticSource },
+            `No ${diagnosticSource} problems detected.`
+          );
         fragment.appendChild(empty);
       } else {
         for (const diagnostic of visibleDiagnostics) {
@@ -1625,7 +1652,16 @@
         count.textContent = String(visibleDiagnostics.length);
         count.setAttribute(
           "aria-label",
-          `${visibleDiagnostics.length} ${diagnosticSource} problem${visibleDiagnostics.length === 1 ? "" : "s"}`
+          editorUiFormat(
+            visibleDiagnostics.length === 1
+              ? "custom_csharp.editor.problem_count.one"
+              : "custom_csharp.editor.problem_count.other",
+            {
+              count: visibleDiagnostics.length.toLocaleString(window.RMLI18n?.language || undefined),
+              source: diagnosticSource
+            },
+            `${visibleDiagnostics.length} ${diagnosticSource} problem${visibleDiagnostics.length === 1 ? "" : "s"}`
+          )
         );
       }
     };
@@ -1700,7 +1736,14 @@
         if (lineStarts[middle] <= offset) lower = middle;
         else upper = middle;
       }
-      const label = `Ln ${lower + 1}, Col ${offset - lineStarts[lower] + 1}`;
+      const label = editorUiFormat(
+        "custom_csharp.editor.cursor_position",
+        {
+          line: (lower + 1).toLocaleString(window.RMLI18n?.language || undefined),
+          column: (offset - lineStarts[lower] + 1).toLocaleString(window.RMLI18n?.language || undefined)
+        },
+        `Ln ${lower + 1}, Col ${offset - lineStarts[lower] + 1}`
+      );
       if (cursorPosition.textContent !== label) cursorPosition.textContent = label;
     };
     const synchronizeGutterScroll = () => {
@@ -2088,7 +2131,13 @@
       appendOutput({
         source: window.RMLI18n.t("ui.literal.c7e9fb2ea6c3"),
         tone: "success",
-        message: `Replaced ${count.toLocaleString()} match${count === 1 ? "" : "es"}.`
+        message: editorUiFormat(
+          count === 1
+            ? "custom_csharp.editor.replaced.one"
+            : "custom_csharp.editor.replaced.other",
+          { count: count.toLocaleString(window.RMLI18n?.language || undefined) },
+          `Replaced ${count.toLocaleString()} match${count === 1 ? "" : "es"}.`
+        )
       });
     };
     findInput.addEventListener("input", () => {

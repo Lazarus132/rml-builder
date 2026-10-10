@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.24.90-reliable-folder-direct-dll-build";
+    "1.25.00-canonical-type-reconciliation-startup-recovery";
   let installedController = null;
 
   if (
@@ -597,6 +597,47 @@
       ).released;
     }
 
+    function forceReleaseAllBuilderWork() {
+      const hadVisibleWork = Boolean(
+        builderWorkSessions.size > 0 ||
+        activeBuilderWorkEpisode ||
+        elements.builderWorkOverlay?.hidden === false ||
+        document.body.classList.contains(
+          "rml-builder-work-active"
+        )
+      );
+
+      for (const state of builderWorkStates.values()) {
+        state.resolveActivation?.(false);
+        state.resolveActivation = null;
+      }
+      builderWorkSessions.clear();
+      builderWorkStates.clear();
+      builderWorkQueuedSessions.clear();
+      activeBuilderWorkEpisode = null;
+      activeBuilderWorkSession = 0;
+      builderWorkEpisodeClosing = false;
+      builderWorkEpisodeClosePromise = null;
+      builderWorkVisibleProgress = 0;
+      resetBuilderReplacementUi();
+
+      if (elements.builderWorkProgress) {
+        elements.builderWorkProgress.dataset
+          .rmlLoadProgress = "0%";
+        elements.builderWorkProgress.setAttribute(
+          "aria-valuenow",
+          "0"
+        );
+      }
+      if (elements.builderWorkOverlay) {
+        elements.builderWorkOverlay.hidden = true;
+      }
+      document.body.classList.remove(
+        "rml-builder-work-active"
+      );
+      return hadVisibleWork;
+    }
+
     async function completeBuilderWork(
       session,
       options = {}
@@ -718,6 +759,8 @@
       paint: paintBuilderUi,
       complete: completeBuilderWork,
       finish: finishBuilderWork,
+      forceReleaseAll:
+        forceReleaseAllBuilderWork,
       active() {
         return builderWorkSessions.size > 0;
       }

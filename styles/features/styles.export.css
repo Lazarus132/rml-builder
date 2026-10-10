@@ -646,6 +646,9 @@ dialog#export-dialog {
 
 #export-compiler-reference-status[data-state="missing"] {
   border-style: dashed;
+  border-color: rgba(255, 120, 120, .68);
+  background: rgba(112, 26, 38, .18);
+  box-shadow: 0 0 0 1px rgba(255, 120, 120, .08);
   text-align: center;
   font-weight: 650;
 }

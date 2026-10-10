@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.24.90-reliable-folder-direct-dll-build";
+  "1.25.00-canonical-type-reconciliation-startup-recovery";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -112,7 +112,8 @@ function setAlwaysClickableButtonAvailability(
 
 function setExportControlAvailability(
   button,
-  available
+  available,
+  unavailableReason = ""
 ) {
   if (
     !button ||
@@ -131,7 +132,14 @@ function setExportControlAvailability(
     "rml-action-unavailable",
     !enabled
   );
-  delete button.dataset.unavailableReason;
+  const reason = String(
+    unavailableReason || ""
+  ).trim();
+  if (!enabled && reason) {
+    button.dataset.unavailableReason = reason;
+  } else {
+    delete button.dataset.unavailableReason;
+  }
 }
 
 function exportControlAvailable(button) {
@@ -936,6 +944,7 @@ let rootCanvasInteractionController = null;
 let typedNodeGraphModulesState = "pending";
 let typedNodeGraphModulesError = null;
 let typedNodeGraphModulesTrackingStarted = false;
+let typedNodeGraphModulesReadyPromise = null;
 
 let generatedOutlineArtifactKey = "";
 let generatedGraphArtifactKey = "";
@@ -977,6 +986,73 @@ let exportPreflightRequest = null;
 let exportPreflightPromise = null;
 let exportPreflightStage = "";
 
+function deriveExportUiState({
+  readinessPhase = "idle",
+  explicitStage = "",
+  preflightActive = false,
+  deliveryActive = false,
+  referenceActive = false,
+  compilerActive = false,
+  generationPending = false,
+  hasPublication = false,
+  hasSelection = true
+} = {}) {
+  const normalizedReadinessPhase = String(
+    readinessPhase || "idle"
+  );
+  const sourceGenerationActive = Boolean(
+    !hasPublication &&
+    (
+      generationPending ||
+      normalizedReadinessPhase === "checking"
+    )
+  );
+  const running = Boolean(
+    preflightActive ||
+    deliveryActive ||
+    referenceActive ||
+    compilerActive ||
+    sourceGenerationActive
+  );
+  const phase = referenceActive
+    ? "references"
+    : compilerActive
+      ? "compile"
+      : preflightActive && explicitStage
+        ? String(explicitStage)
+        : sourceGenerationActive
+          ? "codegen"
+          : deliveryActive
+            ? "artifacts"
+            : normalizedReadinessPhase === "ready"
+              ? "ready"
+              : normalizedReadinessPhase === "error" ||
+                  normalizedReadinessPhase === "blocked"
+                ? "error"
+                : "idle";
+  const blockedReason = !hasPublication
+    ? sourceGenerationActive
+      ? "generation"
+      : "publication"
+    : !hasSelection
+      ? "selection"
+      : running
+        ? "running"
+        : "";
+
+  return Object.freeze({
+    running,
+    phase,
+    sourceGenerationActive,
+    canInvoke: Boolean(
+      hasPublication &&
+      hasSelection &&
+      !running
+    ),
+    blockedReason
+  });
+}
+
 function exportDiagnosticOwnedByCompilerReferences(diagnostic) {
   const text = String(diagnostic || "").trim().toLowerCase();
   if (!text) return false;
@@ -996,13 +1072,26 @@ function refreshUnifiedExportStatus() {
   if (!elements?.exportPreflightStatus) return;
 
   const dialogOpen = Boolean(elements.exportDialog?.open);
-
-  const referenceWorkActive = Boolean(browserCompilerReferenceSearchRunning);
-  const active = Boolean(exportPreflightRequest) || referenceWorkActive;
-  const phase = referenceWorkActive
-    ? "references"
-    : exportPreflightStage ||
-      (exportReadiness.phase === "ready" ? "ready" : "idle");
+  const sourcePublicationAvailable = Boolean(
+    currentValidatedGeneratedPublication()
+  );
+  const uiState = deriveExportUiState({
+    readinessPhase: exportReadiness.phase,
+    explicitStage: exportPreflightStage,
+    preflightActive: Boolean(exportPreflightRequest),
+    deliveryActive: exportDeliveryBusy,
+    referenceActive: Boolean(
+      browserCompilerReferenceSearchRunning
+    ),
+    compilerActive: Boolean(browserCompilerBuilding),
+    generationPending: Boolean(
+      generatedOutputRefreshPendingBeforeDom ||
+      generatedOutputRefreshPendingForEditorEdits
+    ),
+    hasPublication: sourcePublicationAvailable
+  });
+  const active = uiState.running;
+  const phase = uiState.phase;
   const allDiagnostics = ["blocked", "error"].includes(exportReadiness.phase)
     ? exportReadinessDiagnostics()
         .map(diagnostic => String(diagnostic || "").trim())
@@ -1028,6 +1117,7 @@ function refreshUnifiedExportStatus() {
 
   const compilerSelectionPending = Boolean(
     elements.exportIncludeCompiled?.checked &&
+    sourcePublicationAvailable &&
     !active &&
     !compilerBuildFailed &&
     (
@@ -1036,8 +1126,7 @@ function refreshUnifiedExportStatus() {
     )
   );
 
-  elements.exportPreflightStatus.hidden =
-    !dialogOpen || (!active && compilerReferencesOwnFailure && !compilerSelectionPending);
+  elements.exportPreflightStatus.hidden = !dialogOpen;
   document.body.classList.toggle(
     "rml-export-status-owned",
     dialogOpen && active
@@ -1054,8 +1143,10 @@ function refreshUnifiedExportStatus() {
       ? "export.preflight.dll_pending"
       : exportReadiness.phase === "ready"
         ? "export.preflight.ready"
-        : exportReadiness.phase === "error"
-          ? "export.preflight.error"
+    : exportReadiness.phase === "error" ||
+        exportReadiness.phase === "blocked" ||
+        !sourcePublicationAvailable
+           ? "export.preflight.error"
           : "export.preflight.idle";
 
   if (elements.exportPreflightStatusText) {
@@ -1088,6 +1179,16 @@ function refreshUnifiedExportStatus() {
       );
     }
     details.push(...centralDiagnostics);
+    if (
+      !active &&
+      !sourcePublicationAvailable
+    ) {
+      details.push(
+        window.RMLI18n.t(
+          "generated.validation.publication_required"
+        )
+      );
+    }
     elements.exportPreflightStatusDetail.textContent =
       [...new Set(details)].join(" · ");
   }
@@ -1098,7 +1199,13 @@ function refreshUnifiedExportStatus() {
       ? "error"
     : compilerSelectionPending
       ? "pending"
-      : exportReadiness.phase;
+      : !sourcePublicationAvailable
+        ? "error"
+        : ["blocked", "error"].includes(
+              exportReadiness.phase
+            )
+          ? "error"
+          : exportReadiness.phase;
   elements.exportPreflightStatus.dataset.state = stateName;
   elements.exportPreflightStatus.dataset.phase = phase;
   elements.exportPreflightStatus.setAttribute(
@@ -1737,9 +1844,15 @@ function generatedSourceOriginForDiagnostic(
 function uiLooksLikeInternalIdentifier(value) {
   const text = String(value || "").trim();
   if (!text) return false;
+  if (
+    window.RMLModNodeRegistry
+      ?.isInternalTypeIdentifier?.(text) === true
+  ) {
+    return true;
+  }
   return (
     /^(?:api(?:\.[a-z0-9_-]+)+\.[a-f0-9]{8,}|contract\.[a-f0-9]{8,}|unavailable\.preserved\.[a-f0-9]{8,})$/i.test(text) ||
-    /^normalExact:/i.test(text)
+    /^(?:apiEnum[.:]|normal(?:Exact|Array|Delegate|Dictionary):|csharpExact:|collectList:)/i.test(text)
   );
 }
 
@@ -1867,8 +1980,11 @@ function uiSanitizeMachineText(
       )
     )
     .replace(
-      /\bnormalExact:[^\s|;,)\]]+/gi,
-      window.RMLI18n.t("graph.type.unavailable")
+      /\b(?:apiEnum[.:]|normal(?:Exact|Array|Delegate|Dictionary):|csharpExact:|collectList:)[^\s|;,)\]]+/gi,
+      candidate =>
+        uiLooksLikeInternalIdentifier(candidate)
+          ? window.RMLI18n.t("graph.type.unavailable")
+          : candidate
     )
     .replace(
       /(\b(?:input|output)\s+port)\s+['"][^'"]+['"]/gi,
@@ -2043,22 +2159,6 @@ function setExportReadiness(
 }
 
 function updateExportPreviewStatus(_artifacts, synchronousDiagnostics = []) {
-  if (!exportPreflightRequest) {
-    exportReadiness = Object.freeze({
-      phase: "idle",
-      fingerprint: "",
-      diagnostics: Object.freeze([
-        ...(Array.isArray(
-          synchronousDiagnostics
-        )
-          ? synchronousDiagnostics
-          : [])
-      ].map(value =>
-        uiSanitizeMachineText(value)
-      )),
-      fileCount: 0
-    });
-  }
   applyPrimaryExportAvailability(synchronousDiagnostics);
 }
 
@@ -2255,8 +2355,7 @@ function waitForExportGraphSettlement(
         return false;
       }
       return !expectedKey ||
-        !detail?.key ||
-        detail.key === expectedKey;
+        detail?.key === expectedKey;
     };
     const complete = detail => {
       cleanup();
@@ -2299,7 +2398,23 @@ async function compileGeneratedPublicationForPreflight(
   );
   assertExportRequestCurrent(request, true);
 
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  const preparedReferenceStates = new Set();
+  let referenceFailure = null;
+  while (!compiled) {
+    const preparationState = JSON.stringify({
+      references:
+        browserCompilerReferenceFingerprint(),
+      missing:
+        missingBrowserCompilerReferences(catalog)
+    });
+    if (preparedReferenceStates.has(preparationState)) {
+      throw referenceFailure ||
+        browserCompilerReferenceSelectionError(
+          "Compiler reference discovery made no further progress."
+        );
+    }
+    preparedReferenceStates.add(preparationState);
+
     setExportPreflightStage("references");
     await awaitExportStep(
       request,
@@ -2325,11 +2440,11 @@ async function compileGeneratedPublicationForPreflight(
     } catch (error) {
       if (
         error?.code !==
-          "RML_COMPILER_REFERENCES_REQUIRED" ||
-        attempt === 7
+          "RML_COMPILER_REFERENCES_REQUIRED"
       ) {
         throw error;
       }
+      referenceFailure = error;
     }
   }
 
@@ -2498,6 +2613,7 @@ function requestExportPreflight({
   void prepareStyles;
   const syntaxRequired =
     requireSyntax !== false;
+  const ownsSourceReadiness = syntaxRequired;
   const publication =
     currentValidatedGeneratedPublication();
   if (!publication) {
@@ -2530,16 +2646,18 @@ function requestExportPreflight({
         requireSemantic:
           requireSemantic === true
       });
-    setExportReadiness(
-      "ready",
-      {
-        fingerprint:
-          publication.fingerprint,
-        fileCount:
-          publication.files.length
-      },
-      []
-    );
+    if (ownsSourceReadiness) {
+      setExportReadiness(
+        "ready",
+        {
+          fingerprint:
+            publication.fingerprint,
+          fileCount:
+            publication.files.length
+        },
+        []
+      );
+    }
     return Promise.resolve(published);
   }
   if (
@@ -2601,16 +2719,18 @@ function requestExportPreflight({
     controller: new AbortController()
   };
   exportPreflightRequest = request;
-  setExportReadiness(
-    "checking",
-    {
-      fingerprint:
-        publication.fingerprint,
-      fileCount:
-        publication.files.length
-    },
-    getDiagnostics()
-  );
+  if (ownsSourceReadiness) {
+    setExportReadiness(
+      "checking",
+      {
+        fingerprint:
+          publication.fingerprint,
+        fileCount:
+          publication.files.length
+      },
+      getDiagnostics()
+    );
+  }
 
   const promise = (async () => {
     if (request.requireSyntax === true) {
@@ -2660,16 +2780,18 @@ function requestExportPreflight({
     if (request.requireSemantic === true) {
       backgroundSemanticExportFailure = "";
     }
-    setExportReadiness(
-      "ready",
-      {
-        fingerprint:
-          publication.fingerprint,
-        fileCount:
-          publication.files.length
-      },
-      []
-    );
+    if (ownsSourceReadiness) {
+      setExportReadiness(
+        "ready",
+        {
+          fingerprint:
+            publication.fingerprint,
+          fileCount:
+            publication.files.length
+        },
+        []
+      );
+    }
     return published;
   })().catch(error => {
     if (!expectedExportCancellation(error)) {
@@ -2692,19 +2814,21 @@ function requestExportPreflight({
         currentValidatedExportSyntaxPublication(
           publication
         )?.phase === "error";
-      setExportReadiness(
-        syntaxFailed || semanticCodeFailure
-          ? "error"
-          : "ready",
-        {
-          fingerprint:
-            publication.fingerprint,
-          diagnostics,
-          fileCount:
-            publication.files.length
-        },
-        getDiagnostics()
-      );
+      if (ownsSourceReadiness) {
+        setExportReadiness(
+          syntaxFailed || semanticCodeFailure
+            ? "error"
+            : "ready",
+          {
+            fingerprint:
+              publication.fingerprint,
+            diagnostics,
+            fileCount:
+              publication.files.length
+          },
+          getDiagnostics()
+        );
+      }
     }
     throw error;
   }).finally(() => {
@@ -2875,6 +2999,7 @@ function certifyRuntimeGraphArtifactSource(
 }
 
 let generatedOutputRefreshPendingBeforeDom = false;
+let generatedOutputRefreshPendingForEditorEdits = false;
 
 function generatedOutputDomReady() {
   return Boolean(
@@ -2903,9 +3028,14 @@ function flushGeneratedOutputRefreshAfterDomReady() {
 }
 
 function requestGeneratedOutputUpdate() {
+  generatedOutputRefreshPendingForEditorEdits = true;
   if (deferGeneratedOutputUntilDomReady()) return;
   generatedOutputRefreshPendingBeforeDom = false;
-  if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
+  if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) {
+    generatedOutputRefreshPendingForEditorEdits = true;
+    return;
+  }
+  generatedOutputRefreshPendingForEditorEdits = false;
   if (
     largeGraphUsesBackgroundCodegen(
       state?.extensions?.typedNodeGraph
@@ -2933,8 +3063,8 @@ function scheduleTypedNodeGraphOutputRefresh() {
 }
 
 function beginTypedNodeGraphModulesTracking() {
-  if (typedNodeGraphModulesTrackingStarted) {
-    return;
+  if (typedNodeGraphModulesReadyPromise) {
+    return typedNodeGraphModulesReadyPromise;
   }
 
   typedNodeGraphModulesTrackingStarted = true;
@@ -2944,56 +3074,47 @@ function beginTypedNodeGraphModulesTracking() {
   const needsRuntimeModules =
     graphState?.active === true ||
     Boolean(graphState?.configSnapshot);
-  const baseReady = needsRuntimeModules
-    ? window.RMLScriptLoader
-      ?.ensure?.("graph-codegen")
-    : (
-        window.RMLBaseModNodesReady ||
-        window.RMLModNodesReady ||
-        null
-      );
+  const requiredBundle =
+    needsRuntimeModules
+      ? "graph-codegen"
+      : "node-registry";
+  const bundleReady =
+    window.RMLScriptLoader
+      ?.ensure?.(requiredBundle);
 
-  if (
-    !baseReady ||
-    typeof baseReady.then !== "function"
-  ) {
-    typedNodeGraphModulesState =
-      !needsRuntimeModules ||
-      (
-        window.RMLTypedNodeGraphGenerator &&
-        typeof window.RMLTypedNodeGraphGenerator.build === "function"
-      )
-        ? "ready"
-        : "failed";
-
-    if (typedNodeGraphModulesState === "failed") {
-      typedNodeGraphModulesError =
-        new Error(
+  typedNodeGraphModulesReadyPromise =
+    Promise.resolve(bundleReady)
+      .then(() => {
+        const fullRegistryReady =
+          window.RMLModNodesReady;
+        if (
+          !fullRegistryReady ||
+          typeof fullRegistryReady.then !==
+            "function"
+        ) {
+          throw new Error(
+            "The complete node registry readiness contract is unavailable."
+          );
+        }
+        return fullRegistryReady;
+      })
+    .then(() => {
+      if (
+        needsRuntimeModules &&
+        (
+          !window.RMLTypedNodeGraphGenerator ||
+          typeof window.RMLTypedNodeGraphGenerator
+            .build !== "function"
+        )
+      ) {
+        throw new Error(
           window.RMLI18n.t("ui.literal.052d55bc041c")
         );
-    }
-
-    scheduleTypedNodeGraphOutputRefresh();
-    return;
-  }
-
-  const ready = Promise.resolve(
-    baseReady
-  ).then(() => {
-    const requiresCatalogFactory =
-      projectRequiredCatalogNodes({
-        extensions: state.extensions
-      }).length > 0;
-    return requiresCatalogFactory
-      ? window.RMLModNodesReady
-      : true;
-  });
-
-  Promise.resolve(ready)
-    .then(() => {
+      }
       typedNodeGraphModulesState = "ready";
       typedNodeGraphModulesError = null;
       scheduleTypedNodeGraphOutputRefresh();
+      return true;
     })
     .catch(error => {
       typedNodeGraphModulesState = "failed";
@@ -3002,7 +3123,10 @@ function beginTypedNodeGraphModulesTracking() {
           ? error
           : new Error(String(error));
       scheduleTypedNodeGraphOutputRefresh();
+      throw typedNodeGraphModulesError;
     });
+
+  return typedNodeGraphModulesReadyPromise;
 }
 
 function scheduleOptionPointerTargetUpdate(
@@ -3193,16 +3317,9 @@ let graphCodegenWorkerCachedKey = "";
 let graphCodegenWorkerCachedResult = null;
 let graphCodegenWorkerLastError = null;
 let graphCodegenWorkerFailedKey = "";
-const graphCodegenWorkerFailureAttempts =
-  new Map();
 let graphCodegenProjectionCacheKey = "";
 let graphCodegenProjectionCacheValue = null;
 let graphCodegenProjectionCachePromise = null;
-const GRAPH_CODEGEN_MAX_TRANSIENT_RETRIES =
-  2;
-const GRAPH_CODEGEN_WORKER_IDLE_TIMEOUT_MS =
-  2 * 60 * 1000;
-let graphCodegenWorkerIdleWatchdog = 0;
 let graphCodegenSettlementRevision = 0;
 let graphCodegenLastSettlement = null;
 let pendingImportedGraphAnalysisCertificate = null;
@@ -4811,12 +4928,6 @@ function graphCodegenScannerRequirementContract(
   ) {
     return null;
   }
-  // Stable contract ids are scanner-derived identities and may legitimately
-  // change when the scanner's identity algorithm is corrected.  Once the
-  // current scanner reproduces the complete semantic/member/port admission
-  // key above, its contract is authoritative; retaining the older id would
-  // make a valid project permanently unavailable even though its C# contract
-  // is unchanged.
   return scannerContract;
 }
 
@@ -6705,29 +6816,6 @@ Object.defineProperty(
   }
 );
 
-function clearGraphCodegenWorkerIdleWatchdog() {
-  if (!graphCodegenWorkerIdleWatchdog) {
-    return;
-  }
-  window.clearTimeout(
-    graphCodegenWorkerIdleWatchdog
-  );
-  graphCodegenWorkerIdleWatchdog = 0;
-}
-
-function graphCodegenTransientError(
-  message,
-  code = "RML_GRAPH_CODEGEN_TRANSIENT"
-) {
-  const error = new Error(String(
-    message ||
-    "Background graph code generation stopped responding."
-  ));
-  error.code = code;
-  error.transient = true;
-  return error;
-}
-
 function queueGraphCodegenOutputRefresh() {
   queueMicrotask(() => {
     try {
@@ -6741,73 +6829,7 @@ function queueGraphCodegenOutputRefresh() {
   });
 }
 
-function armGraphCodegenWorkerIdleWatchdog(
-  worker,
-  build
-) {
-  clearGraphCodegenWorkerIdleWatchdog();
-  if (!worker || !build) return;
-
-  graphCodegenWorkerIdleWatchdog =
-    window.setTimeout(() => {
-      graphCodegenWorkerIdleWatchdog = 0;
-      if (
-        worker !== graphCodegenWorker ||
-        build !== graphCodegenWorkerActiveBuild ||
-        build.projectEpoch !==
-          graphCodegenProjectEpoch ||
-        build.applicationProjectEpoch !==
-          projectApplicationEpoch
-      ) {
-        return;
-      }
-
-      const error = graphCodegenTransientError(
-        "Background graph code generation produced no progress before its idle deadline.",
-        "RML_GRAPH_CODEGEN_IDLE_TIMEOUT"
-      );
-      const failedKey = build.key;
-      graphCodegenWorkerLastError = error;
-      graphCodegenWorkerFailedKey = failedKey;
-      graphCodegenWorkerFailureAttempts.set(
-        failedKey,
-        (
-          graphCodegenWorkerFailureAttempts
-            .get(failedKey) || 0
-        ) + 1
-      );
-      graphCodegenWorkerActiveBuild = null;
-      graphCodegenWorkerRunning = false;
-      terminateGraphCodegenWorker();
-      announceGraphCodegenSettlement({
-        projectEpoch:
-          build.applicationProjectEpoch,
-        codegenProjectEpoch:
-          build.projectEpoch,
-        key: failedKey,
-        ok: false,
-        transient: true,
-        errorCode: error.code,
-        error: error.message
-      });
-      queueGraphCodegenOutputRefresh();
-
-      const extensionState =
-        state.extensions?.typedNodeGraph;
-      if (extensionState) {
-        requestLargeGraphCodegen(
-          extensionState,
-          largeGraphCodegenKey(
-            extensionState
-          )
-        );
-      }
-      void pumpGraphCodegenWorkerQueue();
-    }, GRAPH_CODEGEN_WORKER_IDLE_TIMEOUT_MS);
-}
-
 function terminateGraphCodegenWorker() {
-  clearGraphCodegenWorkerIdleWatchdog();
   graphCodegenWorker?.terminate?.();
   graphCodegenWorker = null;
   graphCodegenWorkerCatalogKey = "";
@@ -6891,7 +6913,6 @@ function resetGraphCodegenForProjectReplacement() {
   graphCodegenWorkerCachedResult = null;
   graphCodegenWorkerLastError = null;
   graphCodegenWorkerFailedKey = "";
-  graphCodegenWorkerFailureAttempts.clear();
   pendingImportedGraphAnalysisCertificate = null;
 }
 
@@ -6915,7 +6936,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.24.90-reliable-folder-direct-dll-build&null-fallback=3&portable-types=1&specializations=1&open-generic-identity=3",
+      "../workers/graph_codegen_worker.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&null-fallback=3&portable-types=1&specializations=1&open-generic-identity=3",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -6946,13 +6967,6 @@ function ensureGraphCodegenWorker() {
       );
     graphCodegenWorkerFailedKey =
       failedKey;
-    graphCodegenWorkerFailureAttempts.set(
-      failedKey,
-      (
-        graphCodegenWorkerFailureAttempts
-          .get(failedKey) || 0
-      ) + 1
-    );
     graphCodegenWorkerActiveBuild = null;
     graphCodegenWorkerRunning = false;
     terminateGraphCodegenWorker();
@@ -6985,10 +6999,6 @@ function ensureGraphCodegenWorker() {
         return;
       }
 
-      armGraphCodegenWorkerIdleWatchdog(
-        worker,
-        active
-      );
       if (response.progress === true) {
         return;
       }
@@ -7041,7 +7051,6 @@ function ensureGraphCodegenWorker() {
           };
         }
       }
-      clearGraphCodegenWorkerIdleWatchdog();
       graphCodegenWorkerActiveBuild = null;
 
       if (completedResponse.ok === true) {
@@ -7051,8 +7060,6 @@ function ensureGraphCodegenWorker() {
           completedResponse.result;
         graphCodegenWorkerLastError = null;
         graphCodegenWorkerFailedKey = "";
-        graphCodegenWorkerFailureAttempts
-          .delete(active.key);
         graphCodegenWorkerCatalogKey =
           active.catalogKey;
       } else {
@@ -7063,13 +7070,6 @@ function ensureGraphCodegenWorker() {
           );
         graphCodegenWorkerFailedKey =
           active.key;
-        graphCodegenWorkerFailureAttempts.set(
-          active.key,
-          (
-            graphCodegenWorkerFailureAttempts
-              .get(active.key) || 0
-          ) + 1
-        );
       }
 
       graphCodegenWorkerRunning = false;
@@ -7129,20 +7129,10 @@ async function pumpGraphCodegenWorkerQueue() {
   graphCodegenWorkerActiveBuild =
     build;
 
-  let activeWorker = null;
-  const touchWorker = () => {
-    if (activeWorker) {
-      armGraphCodegenWorkerIdleWatchdog(
-        activeWorker,
-        build
-      );
-    }
-  };
   const setPhase = phase => {
     build.phase = phase;
     document.documentElement.dataset
       .rmlGraphCodegenPhase = phase;
-    touchWorker();
   };
 
   try {
@@ -7155,8 +7145,6 @@ async function pumpGraphCodegenWorkerQueue() {
       terminateGraphCodegenWorker();
     }
     const worker = ensureGraphCodegenWorker();
-    activeWorker = worker;
-    touchWorker();
     const current = () => Boolean(
       graphCodegenWorker === worker &&
       graphCodegenWorkerActiveBuild === build &&
@@ -7203,8 +7191,7 @@ async function pumpGraphCodegenWorkerQueue() {
             graphCodegenCollectRequirement(
               requirements,
               value
-            ),
-          onProgress: touchWorker
+            )
         }
       );
     let requirementList =
@@ -7222,10 +7209,12 @@ async function pumpGraphCodegenWorkerQueue() {
     const portableTypeContracts =
       structuredClone(
         Array.isArray(
-          build.extensionState
+          build.state?.extensions
+            ?.typedNodeGraph
             ?.portableTypeContracts
         )
-          ? build.extensionState
+          ? build.state.extensions
+              .typedNodeGraph
               .portableTypeContracts
           : []
       );
@@ -7282,10 +7271,7 @@ async function pumpGraphCodegenWorkerQueue() {
           requirements: requirementList,
           portableTypeContracts
         },
-        {
-          isCurrent: current,
-          onProgress: touchWorker
-        }
+        { isCurrent: current }
       );
     if (!current()) {
       throw graphCodegenStaleError(
@@ -7324,15 +7310,6 @@ async function pumpGraphCodegenWorkerQueue() {
         : new Error(String(error));
     graphCodegenWorkerFailedKey =
       stale ? "" : build.key;
-    if (!stale) {
-      graphCodegenWorkerFailureAttempts.set(
-        build.key,
-        (
-          graphCodegenWorkerFailureAttempts
-            .get(build.key) || 0
-        ) + 1
-      );
-    }
     graphCodegenWorkerActiveBuild = null;
     graphCodegenWorkerRunning = false;
     terminateGraphCodegenWorker();
@@ -7387,17 +7364,7 @@ function requestLargeGraphCodegen(
     graphCodegenWorkerLastError &&
     graphCodegenWorkerFailedKey === key
   ) {
-    const attempts =
-      graphCodegenWorkerFailureAttempts
-        .get(key) || 0;
-    if (
-      attempts >=
-        GRAPH_CODEGEN_MAX_TRANSIENT_RETRIES
-    ) {
-      return;
-    }
-    graphCodegenWorkerLastError = null;
-    graphCodegenWorkerFailedKey = "";
+    return;
   }
   if (
     graphCodegenWorkerFailedKey &&
@@ -7412,10 +7379,6 @@ function requestLargeGraphCodegen(
       window.RMLI18n.t("ui.literal.242e74b6ab3d")
     );
     graphCodegenWorkerFailedKey = key;
-    graphCodegenWorkerFailureAttempts.set(
-      key,
-      GRAPH_CODEGEN_MAX_TRANSIENT_RETRIES
-    );
     queueMicrotask(() =>
       announceGraphCodegenSettlement({
         projectEpoch:
@@ -7441,6 +7404,8 @@ function requestLargeGraphCodegen(
       graphCodegenCatalogIndex(catalog);
   } catch {}
 
+  const codegenState =
+    builderCodegenStateSnapshot();
   graphCodegenWorkerQueuedBuild = {
     id: graphCodegenWorkerSequence++,
     key,
@@ -7448,7 +7413,6 @@ function requestLargeGraphCodegen(
       graphCodegenProjectEpoch,
     applicationProjectEpoch:
       projectApplicationEpoch,
-    extensionState,
     sourceKey:
       largeGraphCodegenSourceKey(
         extensionState
@@ -7457,10 +7421,11 @@ function requestLargeGraphCodegen(
       graphCodegenCatalogKey(catalog),
     catalog,
     catalogIndex,
-    state:
-      builderCodegenStateSnapshot(),
+    state: codegenState,
     entries:
-      currentFlattenedNodes(),
+      structuredClone(
+        currentFlattenedNodes()
+      ),
     analysisCertificate:
       takeImportedGraphAnalysisCertificate()
   };
@@ -9155,7 +9120,16 @@ function appendInlineRowInspectorControls(
   const legend =
     document.createElement("legend");
   legend.textContent =
-    `Inline Row · ${context.row.label || window.RMLI18n.t("ui.auto.338dedb9e4fc")}`;
+    window.RMLI18n.format(
+      "configuration.inline_row.inspector_legend",
+      {
+        label:
+          context.row.label ||
+          window.RMLI18n.t(
+            "ui.auto.338dedb9e4fc"
+          )
+      }
+    );
   fieldset.appendChild(legend);
 
   const widthLabel =
@@ -9241,7 +9215,10 @@ function appendInlineRowInspectorControls(
   note.className =
     "inline-row-width-note";
   note.textContent =
-    `Current row total: ${inlineRowWidthText(total)}%. ` +
+    window.RMLI18n.format(
+      "configuration.inline_row.current_total",
+      { total: inlineRowWidthText(total) }
+    ) + " " +
     window.RMLI18n.t("ui.literal.7754e847c79f");
   fieldset.appendChild(note);
 
@@ -9409,16 +9386,47 @@ function runtimeGraphConnectionsForConfigurationOutlineDeletion(removedNode) {
   });
 }
 
-async function confirmExplicitConfigurationOutlineDeletion(removedNode, label = "item") {
+async function confirmExplicitConfigurationOutlineDeletion(removedNode, label = null) {
   const connections = runtimeGraphConnectionsForConfigurationOutlineDeletion(removedNode);
   if (connections.length === 0) return true;
+  const outlineNodeCount =
+    collectConfigurationOutlineNodeIds(
+      removedNode
+    ).size;
 
   return await confirmBuilderAction({
     tone: "danger",
     kicker: window.RMLI18n.t("ui.text.449bdeb9f027"),
     title: window.RMLI18n.t("ui.auto.91818650267a"),
-    message: `This ${label} is still connected in the Runtime Graph.`,
-    details: `${connections.length} connected Runtime Graph ${connections.length === 1 ? "wire" : "wires"} will be removed together with the associated Configuration Outline node${collectConfigurationOutlineNodeIds(removedNode).size === 1 ? "" : "s"}. No other Runtime Graph nodes or wires will be changed.`,
+    message: window.RMLI18n.format(
+      "configuration_outline.delete.connected_message",
+      {
+        item:
+          label ||
+          window.RMLI18n.t(
+            "configuration_outline.delete.item"
+          )
+      }
+    ),
+    details: window.RMLI18n.format(
+      connections.length === 1
+        ? outlineNodeCount === 1
+          ? "configuration_outline.delete.connected_detail.wire_one.node_one"
+          : "configuration_outline.delete.connected_detail.wire_one.nodes_other"
+        : outlineNodeCount === 1
+          ? "configuration_outline.delete.connected_detail.wires_other.node_one"
+          : "configuration_outline.delete.connected_detail.wires_other.nodes_other",
+      {
+        wires:
+          connections.length.toLocaleString(
+            window.RMLI18n?.language || undefined
+          ),
+        nodes:
+          outlineNodeCount.toLocaleString(
+            window.RMLI18n?.language || undefined
+          )
+      }
+    ),
     confirmLabel: window.RMLI18n.t("ui.literal.bfa570e9f756")
   });
 }
@@ -9857,7 +9865,10 @@ function controllerFromDetachedOption(
   return {
     ...controller,
     description:
-      `Selects the visible ${option.name} settings section.`,
+      window.RMLI18n.format(
+        "configuration.controller.detached_description",
+        { name: option.name }
+      ),
     defaultOption: option.name,
     options: [
       option,
@@ -10078,7 +10089,16 @@ function findContainerName(nodes, containerId) {
   for (const node of nodes) {
     if (node.kind === LAYOUT_ROW_KIND) {
       if (node.id === containerId) {
-        return `${node.label || window.RMLI18n.t("index.text.9c26555deea2")} / items`;
+        return window.RMLI18n.format(
+          "configuration.container.items",
+          {
+            label:
+              node.label ||
+              window.RMLI18n.t(
+                "index.text.9c26555deea2"
+              )
+          }
+        );
       }
       const nested = findContainerName(
         node.children || [],
@@ -10118,7 +10138,10 @@ function makeSetting(type) {
     valueType: type,
     fieldName,
     keyName: toSnakeCase(fieldName),
-    description: `${friendlyTypeName(type)} configuration setting.`,
+    description: window.RMLI18n.format(
+      "configuration.setting.default_description",
+      { type: friendlyTypeName(type) }
+    ),
     defaultValue: defaultForType(type),
     buttonLabel: type === "button" ? window.RMLI18n.t("ui.literal.b1b392607dea") : undefined,
     layoutWidthPercent: undefined,
@@ -10164,12 +10187,18 @@ function makeLayoutRow() {
   const count = currentFlattenedNodes().filter(
     entry => entry.node.kind === LAYOUT_ROW_KIND
   ).length;
-  const suffix = count === 0 ? "" : ` ${count + 1}`;
-
   return {
     id: createId("layout-row"),
     kind: LAYOUT_ROW_KIND,
-    label: `Inline Row${suffix}`,
+    label:
+      count === 0
+        ? window.RMLI18n.t(
+            "ui.auto.b56dbc9f6381"
+          )
+        : window.RMLI18n.format(
+            "configuration.inline_row.numbered_label",
+            { number: count + 1 }
+          ),
     description:
       window.RMLI18n.t("ui.auto.3b3db16bb31f"),
     hidden: false,
@@ -15666,7 +15695,18 @@ function invalidProjectJsonSyntaxError(
     cause?.message || ""
   ).trim();
   return irreparableProjectJsonError(
-    `${String(displayName || window.RMLI18n.t("ui.literal.09a587715e2c"))} contains invalid JSON syntax. Operator replacement cannot repair malformed JSON.`,
+    window.RMLI18n.format(
+      "import.error.invalid_json_syntax",
+      {
+        name:
+          String(
+            displayName ||
+            window.RMLI18n.t(
+              "ui.literal.09a587715e2c"
+            )
+          )
+      }
+    ),
     detail
       ? [detail.slice(0, 320)]
       : []
@@ -25285,7 +25325,12 @@ function bindInspectorInteractions() {
           kind: LAYOUT_ROW_KIND,
           children: Array.isArray(optionBeforeRemoval.children) ? optionBeforeRemoval.children : []
         };
-        if (!(await confirmExplicitConfigurationOutlineDeletion(optionDeletionProxy, "controller option"))) return;
+        if (!(await confirmExplicitConfigurationOutlineDeletion(
+          optionDeletionProxy,
+          window.RMLI18n.t(
+            "configuration_outline.delete.controller_option"
+          )
+        ))) return;
         for (const child of optionDeletionProxy.children) {
           detachRuntimeGraphForExplicitConfigurationOutlineDeletion(child);
         }
@@ -26716,9 +26761,14 @@ function populateGeneratedArtifactSelect(
 }
 
 function updateGeneratedOutput() {
+  generatedOutputRefreshPendingForEditorEdits = true;
   if (deferGeneratedOutputUntilDomReady()) return;
   generatedOutputRefreshPendingBeforeDom = false;
-  if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
+  if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) {
+    generatedOutputRefreshPendingForEditorEdits = true;
+    return;
+  }
+  generatedOutputRefreshPendingForEditorEdits = false;
 
   let errors;
   let output;
@@ -26750,6 +26800,16 @@ function updateGeneratedOutput() {
         pendingMessage;
       updateExportPreviewStatus(
         [],
+        [pendingMessage]
+      );
+      setExportReadiness(
+        "checking",
+        {
+          fingerprint:
+            retainedPublication?.fingerprint || "",
+          fileCount:
+            retainedPublication?.files?.length || 0
+        },
         [pendingMessage]
       );
       setExportControlAvailability(
@@ -26831,7 +26891,19 @@ function updateGeneratedOutput() {
     if (!pending) elements.generatedCode.textContent = window.RMLI18n.t("{{i18n:js.presentation.bffd2f9d10de}}");
     elements.generatedCode.setAttribute("aria-busy", String(pending));
     elements.codeSummary.textContent = pending ? visibleMessage : window.RMLI18n.t("ui.auto.e2daf7b469e4");
-    updateExportPreviewStatus([], [pending ? visibleMessage : `Generated project: ${visibleMessage}`]);
+    updateExportPreviewStatus([], [
+      pending
+        ? visibleMessage
+        : window.RMLI18n.format(
+            "generated.summary.error",
+            { message: visibleMessage }
+          )
+    ]);
+    setExportReadiness(
+      pending ? "checking" : "error",
+      { diagnostics: [visibleMessage] },
+      [visibleMessage]
+    );
     setExportControlAvailability(
       elements.exportDownloadSelected,
       false
@@ -26868,7 +26940,28 @@ function updateGeneratedOutput() {
     if (output.graphActive) {
       elements.codeSummary.textContent =
         selected
-          ? `${selected.relativePath} · ${selected.kindLabel} · ${code.split("\n").length} lines · ${output.artifacts.length} generated files`
+          ? window.RMLI18n.format(
+              "ui.auto.6e7a1b296abb",
+              {
+                path: selected.relativePath,
+                kind: selected.kindLabel,
+                lines:
+                  code.split("\n").length,
+                items:
+                  window.RMLI18n.format(
+                    output.artifacts.length === 1
+                      ? "generated.files.count.one"
+                      : "generated.files.count.other",
+                    {
+                      count:
+                        output.artifacts.length
+                          .toLocaleString(
+                            window.RMLI18n?.language || undefined
+                          )
+                    }
+                  )
+              }
+            )
           : window.RMLI18n.t("ui.literal.d8922135df3e");
     } else {
       elements.codeSummary.textContent =
@@ -26884,10 +26977,16 @@ function updateGeneratedOutput() {
 
       elements.copyCodeBottom.setAttribute(
         "aria-label",
-        `Copy ${path}`
+        window.RMLI18n.format(
+          "generated.copy_file.aria",
+          { path }
+        )
       );
       elements.copyCodeBottom.dataset.help =
-        `Copy ${path} to the clipboard.`;
+        window.RMLI18n.format(
+          "generated.copy_file.help",
+          { path }
+        );
     }
 
     updateExportPreviewStatus(
@@ -26939,14 +27038,24 @@ function updateGeneratedOutput() {
       ""
     ).trim();
     const message = runtimeGenerationDetail
-      ? `Runtime graph source generation did not produce a complete source set: ${runtimeGenerationDetail}`
-      : "Runtime graph source generation did not produce a complete source set.";
+      ? window.RMLI18n.format(
+          "generated.runtime_graph.incomplete_with_detail",
+          { detail: runtimeGenerationDetail }
+        )
+      : window.RMLI18n.t(
+          "generated.runtime_graph.incomplete"
+        );
     elements.generatedCode.textContent = "";
     elements.generatedCode.removeAttribute(
       "aria-busy"
     );
     elements.codeSummary.textContent = message;
     updateExportPreviewStatus([], [message]);
+    setExportReadiness(
+      "error",
+      { diagnostics: [message] },
+      [message]
+    );
     setExportControlAvailability(
       elements.exportDownloadSelected,
       false
@@ -26957,10 +27066,11 @@ function updateGeneratedOutput() {
     return;
   }
   setExportReadiness(
-    "idle",
+    errors.length > 0 ? "error" : "ready",
     {
       fingerprint: sourceFingerprint,
-      fileCount: files.length
+      fileCount: files.length,
+      diagnostics: errors
     },
     errors
   );
@@ -27314,7 +27424,12 @@ function previewSettingEditorMarkup(node) {
       <span>${escapeHtml(node.buttonLabel || window.RMLI18n.t("ui.literal.b1b392607dea"))}</span>
       <output data-preview-action-count="${escapeHtml(node.id)}" aria-label="${escapeHtml(window.RMLI18n.t("ui.attr.cdb49354c2c7"))}">${
         pulseCount > 0
-          ? `Preview ${pulseCount}`
+          ? escapeHtml(
+              window.RMLI18n.format(
+                "settings_preview.action_count",
+                { count: pulseCount }
+              )
+            )
           : ""
       }</output>
     </button>`;
@@ -28236,13 +28351,13 @@ function renderSettingsPreviewFooter() {
         class="rml-preview-control rml-preview-footer-button"
         type="button"
         data-preview-color-cancel>
-        Cancel
+        ${escapeHtml(window.RMLI18n.t("index.text.02bc50efcb1e"))}
       </button>
       <button
         class="rml-preview-control rml-preview-footer-button"
         type="button"
         data-preview-color-apply>
-        Apply &amp; Back
+        ${escapeHtml(window.RMLI18n.t("settings_preview.color.apply_and_back"))}
       </button>
     </div>`;
   } else {
@@ -28250,7 +28365,7 @@ function renderSettingsPreviewFooter() {
       id="settings-preview-save"
       class="rml-preview-save"
       type="button">
-      Save Settings
+      ${escapeHtml(window.RMLI18n.t("index.text.b5bc3869bf84"))}
     </button>`;
   }
 }
@@ -30509,10 +30624,13 @@ function handleSettingsPreviewClick(event) {
       );
 
     if (output) {
-      output.value =
-        `Preview ${nextCount}`;
-      output.textContent =
-        `Preview ${nextCount}`;
+      const previewCount =
+        window.RMLI18n.format(
+          "settings_preview.action_count",
+          { count: nextCount }
+        );
+      output.value = previewCount;
+      output.textContent = previewCount;
     }
 
     actionButton.classList.remove(
@@ -30535,25 +30653,50 @@ function handleSettingsPreviewClick(event) {
     const skippedCount = Number(
       execution?.runtimeOnlySkipped || 0
     );
+    const localizedActionCount =
+      actionCount.toLocaleString(
+        window.RMLI18n?.language || undefined
+      );
+    const localizedSkippedCount =
+      skippedCount.toLocaleString(
+        window.RMLI18n?.language || undefined
+      );
     const executionSummary =
       execution?.started
         ? actionCount > 0
-          ? `${actionCount} local menu action${
-              actionCount === 1
-                ? ""
-                : "s"
-            } applied${
+          ? [
+              window.RMLI18n.format(
+                actionCount === 1
+                  ? "settings_preview.pulse.actions.one"
+                  : "settings_preview.pulse.actions.other",
+                { count: localizedActionCount }
+              ),
               skippedCount > 0
-                ? `; ${skippedCount} runtime-only step${skippedCount === 1 ? "" : "s"} skipped`
+                ? window.RMLI18n.format(
+                    skippedCount === 1
+                      ? "settings_preview.pulse.runtime_skipped.one"
+                      : "settings_preview.pulse.runtime_skipped.other",
+                    { count: localizedSkippedCount }
+                  )
                 : ""
-            }`
+            ].filter(Boolean).join("; ")
           : execution.message ||
-            "no Preview-safe menu action reached"
+            window.RMLI18n.t(
+              "settings_preview.pulse.no_safe_action"
+            )
         : execution?.message ||
-          "no connected Preview graph path";
+          window.RMLI18n.t(
+            "settings_preview.pulse.no_graph_path"
+          );
 
     setSettingsPreviewStatus(
-      `Preview pulse ${nextCount}: ${executionSummary}. Nothing was sent to Resonite.`,
+      window.RMLI18n.format(
+        "settings_preview.pulse.status",
+        {
+          count: nextCount,
+          summary: executionSummary
+        }
+      ),
       execution?.error
         ? "error"
         : "success"
@@ -31315,6 +31458,11 @@ function completeBuilderWork(
     );
 }
 
+function forceReleaseAllBuilderWork() {
+  return requireBuilderWorkController()
+    .forceReleaseAll();
+}
+
 function requestBuilderReplacementChoice(
   workSession,
   options = {}
@@ -31388,6 +31536,7 @@ function beginStartupStatus(
     progress: 0,
   });
   let finished = false;
+  let completing = false;
 
   const set = changes => {
     if (!label || finished) {
@@ -31430,6 +31579,7 @@ function beginStartupStatus(
         return false;
       }
       finished = true;
+      completing = false;
       if (label) {
         label.textContent =
           window.RMLI18n.t("{{i18n:js.presentation.d5839c5ced50}}");
@@ -31442,16 +31592,27 @@ function beginStartupStatus(
       return true;
     },
     async complete(changes = {}) {
-      if (finished) {
+      if (finished || completing) {
         return false;
       }
       set(changes);
+      completing = true;
+      let completed = false;
+      try {
+        completed =
+          await completeBuilderWork(
+            workSession,
+            changes
+          );
+      } catch (error) {
+        completing = false;
+        throw error;
+      }
+      completing = false;
+      if (!completed) {
+        return false;
+      }
       finished = true;
-      const completed =
-        await completeBuilderWork(
-          workSession,
-          changes
-        );
       if (label) {
         label.textContent =
           window.RMLI18n.t("{{i18n:js.presentation.d5839c5ced50}}");
@@ -31575,11 +31736,23 @@ function irreparableProjectJsonError(
         .filter(Boolean)
     )
   ];
-  const suffix = details.length > 0
-    ? ` ${details.slice(0, 12).join(" | ")}${details.length > 12 ? ` | and ${details.length - 12} more` : ""}`
+  const detailText = details.length > 0
+    ? ` ${details.slice(0, 12).join(" | ")}${details.length > 12 ? window.RMLI18n.format("import.replacement.more", { count: details.length - 12 }) : ""}`
     : "";
   const error = new Error(
-    `Irreparable project JSON: ${String(reason || "the stored project structure is invalid.")}${suffix} Safe node replacement cannot reconstruct this project without losing or inventing graph behavior. The JSON was not loaded.`
+    window.RMLI18n.format(
+      "import.error.irreparable",
+      {
+        reason:
+          String(
+            reason ||
+            window.RMLI18n.t(
+              "import.error.stored_structure_invalid"
+            )
+          ),
+        details: detailText
+      }
+    )
   );
   error.code =
     "RML_IRREPARABLE_PROJECT_JSON";
@@ -32376,7 +32549,9 @@ function captureRuntimeCatalogResolutionAuthority() {
 
 function assertRuntimeCatalogResolutionAuthority(
   authority,
-  phase = "import"
+  phase = window.RMLI18n.t(
+    "import.catalog_phase.import"
+  )
 ) {
   if (!authority) return;
   const current =
@@ -32388,7 +32563,18 @@ function assertRuntimeCatalogResolutionAuthority(
     return;
   }
   const error = new Error(
-    `The API catalog authority changed during ${String(phase || "import")}; the project must be resolved again against the current catalog.`
+    window.RMLI18n.format(
+      "import.error.catalog_authority_changed",
+      {
+        phase:
+          String(
+            phase ||
+            window.RMLI18n.t(
+              "import.catalog_phase.import"
+            )
+          )
+      }
+    )
   );
   error.code = "RML_IMPORT_CATALOG_STALE";
   error.transient = true;
@@ -33300,11 +33486,6 @@ async function ensureProjectRuntimePrerequisites(
 
   let graphTypeMigrationApplied = false;
 
-  // Type-bearing built-in nodes and Composite boundaries must be
-  // canonicalized while the saved API/type evidence is still intact.
-  // Catalog resolution and even structural port validation may replace
-  // API nodes, so doing this later can permanently lose the only safe
-  // old-id -> C#-type association.
   await ensureLazyScriptBundle(
     "runtime-core"
   );
@@ -33331,7 +33512,9 @@ async function ensureProjectRuntimePrerequisites(
       "function"
   ) {
     throw new Error(
-      "The graph type import migration is unavailable."
+      window.RMLI18n.t(
+        "import.graph_type_migration_unavailable"
+      )
     );
   }
   earlyGraphTypeMigration(graph);
@@ -33370,7 +33553,19 @@ async function ensureProjectRuntimePrerequisites(
             workSession,
             {
               detail:
-                `${completed.toLocaleString(window.RMLI18n?.language || undefined)} / ${total.toLocaleString(window.RMLI18n?.language || undefined)} graph records checked.`,
+                window.RMLI18n.format(
+                  "import.work.graph_records_checked",
+                  {
+                    completed:
+                      completed.toLocaleString(
+                        window.RMLI18n?.language || undefined
+                      ),
+                    total:
+                      total.toLocaleString(
+                        window.RMLI18n?.language || undefined
+                      )
+                  }
+                ),
               progress:
                 total > 0
                   ? 2 +
@@ -33388,7 +33583,9 @@ async function ensureProjectRuntimePrerequisites(
     );
   if (!structuralRepairability.valid) {
     throw irreparableProjectJsonError(
-      "its graph structure is damaged and cannot be restored by replacing operators.",
+      window.RMLI18n.t(
+        "import.error.graph_structure_damaged"
+      ),
       structuralRepairability.diagnostics
     );
   }
@@ -33536,7 +33733,9 @@ async function ensureProjectRuntimePrerequisites(
     ) {
       importCatalogSyncError =
         new Error(
-          "The import scanner gate is unavailable."
+          window.RMLI18n.t(
+            "import.catalog.scanner_gate_unavailable"
+          )
         );
       console.error(
         "[RML BUILDER INTERNAL FAILURE] The import could not start its single scanner health sweep.",
@@ -33552,7 +33751,9 @@ async function ensureProjectRuntimePrerequisites(
           message:
             window.RMLI18n.t("ui.auto.ef5bac1920fc"),
           detail:
-            "Exactly one seven-port health sweep is running for this import.",
+            window.RMLI18n.t(
+              "import.work.catalog_health_sweep"
+            ),
           progress: 6
         }
       );
@@ -33602,10 +33803,29 @@ async function ensureProjectRuntimePrerequisites(
                     ),
                   detail:
                     total > 0
-                      ? `${completed.toLocaleString(window.RMLI18n?.language || undefined)} / ${total.toLocaleString(window.RMLI18n?.language || undefined)} ${unit || "catalog units"} completed.`
+                      ? window.RMLI18n.format(
+                          "import.work.catalog_progress",
+                          {
+                            completed:
+                              completed.toLocaleString(
+                                window.RMLI18n?.language || undefined
+                              ),
+                            total:
+                              total.toLocaleString(
+                                window.RMLI18n?.language || undefined
+                              ),
+                            unit:
+                              unit ||
+                              window.RMLI18n.t(
+                                "import.work.catalog_units"
+                              )
+                          }
+                        )
                       : String(
                           detail?.phase ||
-                          "Catalog synchronization"
+                          window.RMLI18n.t(
+                            "import.work.catalog_synchronization"
+                          )
                         )
                 }
               );
@@ -33966,11 +34186,6 @@ async function ensureProjectRuntimePrerequisites(
             .unresolvedRequirements
         : [];
 
-    // A non-empty Live/cache catalog can still be incomplete for the
-    // imported project. Prefer the project's exact, executable portable
-    // contracts whenever the fail-closed planner can prove the complete
-    // unresolved set. Merely having some catalog available must not force
-    // semantically unrelated manual replacements.
     const portableImportPlanner =
       window.RMLDynamicGraphHost
         ?.planPreservedCatalogOperatorsForImport;
@@ -33989,9 +34204,6 @@ async function ensureProjectRuntimePrerequisites(
         ?.ready === true;
 
     if (unresolvedRequirements.length > 0) {
-      // HARD IMPORT GATE: unresolved API contracts must always enter the
-      // replacement pipeline. Offline portable preservation cannot bypass
-      // Auto Replace -> mandatory manual Replace for project import.
       if (false) {
         const planner =
           portableImportPlanner;
@@ -34356,7 +34568,9 @@ async function ensureProjectRuntimePrerequisites(
         await paintBuilderUi();
         assertRuntimeCatalogResolutionAuthority(
           catalogResolutionAuthority,
-          "replacement candidate resolution"
+          window.RMLI18n.t(
+            "import.catalog_phase.replacement_candidate_resolution"
+          )
         );
         let resolution = null;
         let resolutionError = null;
@@ -34467,13 +34681,6 @@ async function ensureProjectRuntimePrerequisites(
 
        for (const entry of replacementQueue) {
         if (entry.candidates.length === 0) {
-          /*
-           * Final replacement failure.
-           *
-           * There is no compatible replacement candidate.
-           * Preserve every original node, port and connection and
-           * explicitly convert the unresolved import state into DEAD.
-           */
           entry.status = "dead";
           entry.dead = true;
           entry.skipped = false;
@@ -34491,11 +34698,6 @@ async function ensureProjectRuntimePrerequisites(
             item.node.importRecovery = {
               schemaVersion: 1,
 
-              /*
-               * IMPORTANT:
-               * DEAD is a final, accepted recovery state.
-               * It is NOT unresolved anymore.
-               */
               unresolved: false,
               dead: true,
 
@@ -34610,13 +34812,6 @@ async function ensureProjectRuntimePrerequisites(
         }
       }
 
-      /*
-       * USER-CONTROLLED, MONOTONIC REPLACEMENT FLOW.
-       *
-       * There is deliberately no retry loop and no rollback path here.
-       * Every family advances exactly once to a final state:
-       * auto-replaced, manual-replaced, or dead.
-       */
       for (
         let index = 0;
         index < replacementQueue.length;
@@ -34669,7 +34864,9 @@ async function ensureProjectRuntimePrerequisites(
 
         assertRuntimeCatalogResolutionAuthority(
           catalogResolutionAuthority,
-          "replacement choice"
+          window.RMLI18n.t(
+            "import.catalog_phase.replacement_choice"
+          )
         );
 
         entry.replacementDialogCompleted = true;
@@ -34761,11 +34958,6 @@ async function ensureProjectRuntimePrerequisites(
             outputMap:
               structuredClone(selected.outputMap || {}),
 
-            /*
-             * NEVER delete old ports/connections automatically.
-             * Unmapped legacy endpoints stay in the stored topology and
-             * can be represented as DEAD endpoints instead of being pruned.
-             */
             removeInputPorts: [],
             removeOutputPorts: []
           }));
@@ -34780,11 +34972,6 @@ async function ensureProjectRuntimePrerequisites(
             nodeMigrations
           );
 
-        /*
-         * The migration function applies the requested user choices
-         * immediately. Commit them unconditionally. No automatic rollback,
-         * no validation-driven retry, and no return to an earlier queue item.
-         */
         transaction.commit();
         appliedNodeMigrations =
           structuredClone(nodeMigrations);
@@ -35064,7 +35251,9 @@ async function ensureProjectRuntimePrerequisites(
       )
     ) {
       throw irreparableProjectJsonError(
-        "its portable API contract plan changed or became incomplete before project construction.",
+        window.RMLI18n.t(
+          "import.error.portable_plan_changed"
+        ),
         Array.isArray(
           revalidatedPlan?.issues
         )
@@ -35132,7 +35321,9 @@ async function ensureProjectRuntimePrerequisites(
     captureRuntimeCatalogResolutionAuthority();
   assertRuntimeCatalogResolutionAuthority(
     catalogResolutionAuthority,
-    "import prerequisite finalization"
+    window.RMLI18n.t(
+      "import.catalog_phase.prerequisite_finalization"
+    )
   );
 
   if (catalogOnly) {
@@ -35430,7 +35621,9 @@ async function ensureProjectRuntimePrerequisites(
     );
   assertRuntimeCatalogResolutionAuthority(
     catalogResolutionAuthority,
-    "import contract publication"
+    window.RMLI18n.t(
+      "import.catalog_phase.contract_publication"
+    )
   );
   return {
     graph,
@@ -36112,8 +36305,7 @@ function waitForGraphCodegenSettlement(
         return false;
       }
       return !expectedKey ||
-        !detail?.key ||
-        detail.key === expectedKey;
+        detail?.key === expectedKey;
     };
     const handleSettled = event => {
       const detail =
@@ -36159,6 +36351,281 @@ function waitForGraphCodegenSettlement(
       );
       return;
     }
+  });
+}
+
+function startupReadinessFailure(
+  message,
+  cause = null
+) {
+  const error = new Error(String(
+    message ||
+    window.RMLI18n.t("startup.readiness.project_not_usable")
+  ));
+  error.code = "RML_STARTUP_READINESS_FAILED";
+  if (cause) {
+    error.cause = cause;
+  }
+  return error;
+}
+
+async function waitForStartupGeneratedPublication(
+  startupWork
+) {
+  const expectedProjectEpoch =
+    projectApplicationEpoch;
+
+  if (
+    typeof window.RMLCodeTemplates
+      ?.ensureFor !== "function"
+  ) {
+    throw startupReadinessFailure(
+      window.RMLI18n.t("startup.readiness.template_registry_unavailable")
+    );
+  }
+
+  startupWork.update({
+    title: window.RMLI18n.t("startup.generated.title"),
+    message:
+      window.RMLI18n.t("startup.generated.message"),
+    detail:
+      window.RMLI18n.t("startup.generated.detail")
+  });
+  await window.RMLCodeTemplates.ensureFor(
+    state
+  );
+
+  if (state.metadata?.includeGuide === true) {
+    await ensureLazyScriptBundle("guidance");
+    if (
+      typeof window.RMLGuidance?.ensureFor !==
+        "function"
+    ) {
+      throw startupReadinessFailure(
+        window.RMLI18n.t("startup.readiness.guidance_registry_unavailable")
+      );
+    }
+    await window.RMLGuidance.ensureFor(state);
+  }
+
+  for (;;) {
+    if (
+      expectedProjectEpoch !==
+        projectApplicationEpoch
+    ) {
+      throw startupReadinessFailure(
+        window.RMLI18n.t("startup.readiness.project_changed")
+      );
+    }
+
+    const extensionState =
+      state.extensions?.typedNodeGraph;
+    const usesBackgroundCodegen =
+      largeGraphUsesBackgroundCodegen(
+        extensionState
+      );
+    const expectedKey =
+      usesBackgroundCodegen
+        ? largeGraphCodegenKey(
+            extensionState
+          )
+        : "";
+    const afterRevision =
+      graphCodegenSettlementRevision;
+
+    startupWork.update({
+      detail: usesBackgroundCodegen
+        ? window.RMLI18n.t("startup.generated.runtime_graph_detail")
+        : window.RMLI18n.t("startup.generated.project_detail")
+    });
+    updateGeneratedOutput();
+
+    const publication =
+      currentValidatedGeneratedPublication();
+    if (publication) {
+      return publication;
+    }
+
+    const generation =
+      typedRuntimeGraphGenerationState();
+    if (
+      usesBackgroundCodegen &&
+      generation.required === true &&
+      generation.pending === true &&
+      expectedKey
+    ) {
+      const settlement =
+        await waitForGraphCodegenSettlement(
+          expectedProjectEpoch,
+          afterRevision,
+          expectedKey
+        );
+      if (settlement?.stale === true) {
+        continue;
+      }
+      if (settlement?.ok !== true) {
+        throw startupReadinessFailure(
+          String(
+            settlement?.error ||
+            window.RMLI18n.t("startup.readiness.background_codegen_failed")
+          )
+        );
+      }
+      continue;
+    }
+
+    const diagnostics = [
+      ...(Array.isArray(generation.diagnostics)
+        ? generation.diagnostics
+        : []),
+      ...exportReadinessDiagnostics()
+    ]
+      .map(value => String(value || "").trim())
+      .filter(Boolean);
+    throw startupReadinessFailure(
+      diagnostics[0] ||
+      window.RMLI18n.t("startup.readiness.snapshot_not_published")
+    );
+  }
+}
+
+async function waitForStartupProjectReadiness({
+  startupWork,
+  startupGraph,
+  runtimeGraphRequested,
+  expectedNodes,
+  expectedConnections
+}) {
+  startupWork.update({
+    title: window.RMLI18n.t("startup.builder.title"),
+    message:
+      window.RMLI18n.t("startup.builder.message"),
+    detail:
+      window.RMLI18n.t("startup.builder.detail")
+  });
+
+  const nodeModulesReady =
+    beginTypedNodeGraphModulesTracking();
+  const restoredGraphModulesReady =
+    startupGraph?.active === true
+      ? window.RMLScriptLoader
+          ?.prepareRestoredRuntimeGraph?.()
+      : Promise.resolve(true);
+
+  if (
+    !nodeModulesReady ||
+    typeof nodeModulesReady.then !==
+      "function"
+  ) {
+    throw startupReadinessFailure(
+      window.RMLI18n.t("startup.readiness.node_registry_not_awaitable")
+    );
+  }
+  if (
+    startupGraph?.active === true &&
+    (
+      !restoredGraphModulesReady ||
+      typeof restoredGraphModulesReady.then !==
+        "function"
+    )
+  ) {
+    throw startupReadinessFailure(
+      window.RMLI18n.t("startup.readiness.graph_modules_not_awaitable")
+    );
+  }
+
+  await Promise.all([
+    nodeModulesReady,
+    restoredGraphModulesReady
+  ]);
+
+  if (
+    !window.RMLModNodesReady ||
+    typeof window.RMLModNodesReady.then !==
+      "function"
+  ) {
+    throw startupReadinessFailure(
+      window.RMLI18n.t("startup.readiness.node_registry_contract_unavailable")
+    );
+  }
+  await window.RMLModNodesReady;
+
+  renderAll();
+  await paintBuilderUi();
+
+  let presentation = Object.freeze({
+    ready: true,
+    modelReady: true,
+    presentationFailed: false,
+    presentationError: ""
+  });
+  if (runtimeGraphRequested) {
+    startupWork.update({
+      title: window.RMLI18n.t("startup.runtime_graph.title"),
+      message:
+        expectedNodes > 1000 ||
+        expectedConnections > 2000
+          ? window.RMLI18n.format(
+              "startup.runtime_graph.large_message",
+              {
+                nodes: expectedNodes.toLocaleString(window.RMLI18n?.language || undefined),
+                connections: expectedConnections.toLocaleString(window.RMLI18n?.language || undefined)
+              }
+            )
+          : window.RMLI18n.t("startup.runtime_graph.message"),
+      detail:
+        window.RMLI18n.t("startup.runtime_graph.detail")
+    });
+    presentation =
+      await waitForImportedGraphUi(
+        expectedNodes,
+        expectedConnections,
+        {
+          projectEpoch:
+            projectApplicationEpoch,
+          graphDocument: startupGraph,
+          requestedPage: "runtime-graph"
+        }
+      );
+    if (
+      presentation?.ready === false ||
+      presentation?.modelReady === false ||
+      presentation?.presentationFailed === true
+    ) {
+      throw startupReadinessFailure(
+        String(
+          presentation?.presentationError ||
+          window.RMLI18n.t("startup.readiness.graph_presentation_failed")
+        )
+      );
+    }
+    document.documentElement.dataset
+      .rmlStartupGraphPresentation =
+        "ready";
+    document.dispatchEvent(
+      new CustomEvent(
+        "rml-builder:startup-graph-presentation-settled",
+        {
+          detail: Object.freeze({
+            ready: true,
+            modelReady: true,
+            presentationFailed: false,
+            presentationError: ""
+          })
+        }
+      )
+    );
+  }
+
+  await waitForStartupGeneratedPublication(
+    startupWork
+  );
+  await paintBuilderUi();
+
+  return Object.freeze({
+    presentation,
+    publication:
+      currentValidatedGeneratedPublication()
   });
 }
 
@@ -36373,8 +36840,24 @@ function waitForImportedGraphUi(
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let activityObserver = null;
     const expectedProjectEpoch =
       Number(projectEpoch) || 0;
+
+    const graphActivityNode = node => {
+      const element =
+        node?.nodeType === 1
+          ? node
+          : node?.parentElement;
+      if (!element) return false;
+      const selector =
+        ".rml-graph-root, .rml-graph-preparation-status";
+      return Boolean(
+        element.matches?.(selector) ||
+        element.closest?.(selector) ||
+        element.querySelector?.(selector)
+      );
+    };
 
     const finish = (
       error = null,
@@ -36382,9 +36865,15 @@ function waitForImportedGraphUi(
     ) => {
       if (settled) return;
       settled = true;
+      activityObserver?.disconnect();
+      activityObserver = null;
       document.removeEventListener(
         "rml-graph:presentation-complete",
         handleComplete
+      );
+      document.removeEventListener(
+        "rml-graph:render-complete",
+        handleGraphActivity
       );
       document.removeEventListener(
         "rml-builder:rendered",
@@ -36474,6 +36963,15 @@ function waitForImportedGraphUi(
       };
     };
 
+    const recordPresentationActivity = () => {
+      if (settled) return;
+      queueMicrotask(() => {
+        if (!settled) {
+          inspectNow();
+        }
+      });
+    };
+
     const inspectNow = () => {
       if (!window.RMLDynamicGraphHost) {
         return false;
@@ -36486,8 +36984,22 @@ function waitForImportedGraphUi(
           current.renderBlocked
         )
       ) {
+        const presentationFailureReason =
+          current.viewError ||
+          (
+            current.renderBlocked
+              ? window.RMLI18n.t(
+                  "import.graph_presentation.renderer_blocked"
+                )
+              : window.RMLI18n.t(
+                  "ui.literal.e5fd9aa24c94"
+                )
+          );
         const message =
-          `The Runtime Graph presentation could not be prepared: ${current.viewError || (current.renderBlocked ? "the active renderer reported a terminal blocked state" : window.RMLI18n.t("ui.literal.e5fd9aa24c94"))}.`;
+          window.RMLI18n.format(
+            "import.graph_presentation.prepare_failed",
+            { reason: presentationFailureReason }
+          );
         console.error(message);
         finish(new Error(message));
         return true;
@@ -36519,6 +37031,7 @@ function waitForImportedGraphUi(
       ) {
         return;
       }
+      recordPresentationActivity();
       queueMicrotask(() => {
         if (settled || inspectNow()) return;
         const current = hostStateMatches();
@@ -36531,7 +37044,31 @@ function waitForImportedGraphUi(
         ) {
           finish(
             new Error(
-              `The Runtime Graph initialized a different project state: expected ${Number(expectedNodes).toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${Number(expectedConnections).toLocaleString(window.RMLI18n?.language || undefined)} connections for project epoch ${expectedProjectEpoch}, but received ${Number(current.nodeCount).toLocaleString(window.RMLI18n?.language || undefined)} and ${Number(current.connectionCount).toLocaleString(window.RMLI18n?.language || undefined)} for epoch ${Number(current.hostProjectEpoch) || 0}. The JSON was not loaded.`
+              window.RMLI18n.format(
+                "import.graph_presentation.project_state_mismatch",
+                {
+                  expectedNodes:
+                    Number(expectedNodes).toLocaleString(
+                      window.RMLI18n?.language || undefined
+                    ),
+                  expectedConnections:
+                    Number(expectedConnections).toLocaleString(
+                      window.RMLI18n?.language || undefined
+                    ),
+                  expectedEpoch:
+                    expectedProjectEpoch,
+                  actualNodes:
+                    Number(current.nodeCount).toLocaleString(
+                      window.RMLI18n?.language || undefined
+                    ),
+                  actualConnections:
+                    Number(current.connectionCount).toLocaleString(
+                      window.RMLI18n?.language || undefined
+                    ),
+                  actualEpoch:
+                    Number(current.hostProjectEpoch) || 0
+                }
+              )
             )
           );
         }
@@ -36551,7 +37088,22 @@ function waitForImportedGraphUi(
       ) {
         return;
       }
+      recordPresentationActivity();
       inspectNow();
+    };
+    const handleGraphActivity = event => {
+      const renderedProjectEpoch =
+        Number(
+          event?.detail?.projectEpoch
+        ) || 0;
+      if (
+        expectedProjectEpoch > 0 &&
+        renderedProjectEpoch !==
+          expectedProjectEpoch
+      ) {
+        return;
+      }
+      recordPresentationActivity();
     };
     const handleReplacement = event => {
       const replacementProjectEpoch =
@@ -36568,7 +37120,15 @@ function waitForImportedGraphUi(
       }
       finish(
         new Error(
-          `The project changed while the Runtime Graph was initializing.${strict ? ` ${window.RMLI18n.t("ui.literal.12b43c510af7")}` : ""}`
+          window.RMLI18n.format(
+            "import.graph_presentation.project_changed",
+            {
+              detail:
+                strict
+                  ? ` ${window.RMLI18n.t("ui.literal.12b43c510af7")}`
+                  : ""
+            }
+          )
         )
       );
     };
@@ -36576,6 +37136,10 @@ function waitForImportedGraphUi(
     document.addEventListener(
       "rml-graph:presentation-complete",
       handleComplete
+    );
+    document.addEventListener(
+      "rml-graph:render-complete",
+      handleGraphActivity
     );
     document.addEventListener(
       "rml-builder:rendered",
@@ -36586,9 +37150,42 @@ function waitForImportedGraphUi(
       handleReplacement
     );
 
+    if (typeof MutationObserver === "function") {
+      activityObserver = new MutationObserver(
+        records => {
+          if (
+            records.some(record =>
+              graphActivityNode(
+                record.target
+              ) ||
+              Array.from(
+                record.addedNodes || []
+              ).some(graphActivityNode)
+            )
+          ) {
+            recordPresentationActivity();
+          }
+        }
+      );
+      activityObserver.observe(
+        document.documentElement,
+        {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributes: true,
+          attributeFilter: [
+            "aria-busy",
+            "data-rml-graph-phase"
+          ]
+        }
+      );
+    }
+
     if (inspectNow()) {
       return;
     }
+    recordPresentationActivity();
 
     const prepareRuntimeView = async () => {
       if (
@@ -36604,9 +37201,11 @@ function waitForImportedGraphUi(
       if (
         window.RMLStyleLoader?.ensure
       ) {
+        recordPresentationActivity();
         await window.RMLStyleLoader.ensure(
           "runtime-graph"
         );
+        recordPresentationActivity();
       }
       if (
         settled ||
@@ -36625,9 +37224,11 @@ function waitForImportedGraphUi(
           window.RMLI18n.t("ui.literal.4f8843d59f0b")
         );
       }
+      recordPresentationActivity();
       await window.RMLScriptLoader.ensure(
         "runtime-view"
       );
+      recordPresentationActivity();
       if (
         settled ||
         (
@@ -36647,11 +37248,25 @@ function waitForImportedGraphUi(
       }
       const current = hostStateMatches();
       const message =
-        `The Runtime Graph presentation module could not be prepared: ${error instanceof Error ? error.message : String(error)}.`;
+        window.RMLI18n.format(
+          "import.graph_presentation.module_prepare_failed",
+          {
+            message:
+              error instanceof Error
+                ? error.message
+                : String(error)
+          }
+        );
       console.error(message);
       finish(
         new Error(
-          `${message} Model identity matched: ${String(current.matches)}.`
+          window.RMLI18n.format(
+            "import.graph_presentation.module_prepare_failed_identity",
+            {
+              message,
+              matched: String(current.matches)
+            }
+          )
         )
       );
     });
@@ -36728,7 +37343,9 @@ async function applyLoadedProjectWithFeedback(
       });
     assertRuntimeCatalogResolutionAuthority(
       installationCatalogAuthority,
-      "project import preparation"
+      window.RMLI18n.t(
+        "import.catalog_phase.project_preparation"
+      )
     );
     const omittedUnavailableNodeCount =
       Array.isArray(
@@ -36739,6 +37356,13 @@ async function applyLoadedProjectWithFeedback(
             .removedUnavailableApiNodes
             .length
         : 0;
+    const compositeDisconnectedWires = Math.max(
+      0,
+      Number(
+        prerequisites.compositeReconciliation
+          ?.disconnectedWires
+      ) || 0
+    );
     const intentionallyDegradedGraph =
       omittedUnavailableNodeCount > 0;
     const applyProgress =
@@ -36781,9 +37405,31 @@ async function applyLoadedProjectWithFeedback(
           window.RMLI18n.t("ui.auto.09107e78910e"),
         message:
           prerequisites.compatibilityMode
-            ? `${Number(prerequisites.compositeReconciliation?.disconnectedWires || 0) > 0 ? `${Number(prerequisites.compositeReconciliation.disconnectedWires).toLocaleString(window.RMLI18n?.language || undefined)} obsolete outer wire${Number(prerequisites.compositeReconciliation.disconnectedWires) === 1 ? " was" : "s were"} removed by the confirmed Composite contract update. ` : ""}Every unavailable operator has a portable contract. The project and its offline definitions can now be installed atomically.`
+            ? window.RMLI18n.format(
+                compositeDisconnectedWires === 0
+                  ? "import.work.install.compatibility_message.none"
+                  : compositeDisconnectedWires === 1
+                    ? "import.work.install.compatibility_message.one"
+                    : "import.work.install.compatibility_message.other",
+                {
+                  count:
+                    compositeDisconnectedWires.toLocaleString(
+                      window.RMLI18n?.language || undefined
+                    )
+                }
+              )
             : intentionallyDegradedGraph
-              ? `${omittedUnavailableNodeCount.toLocaleString(window.RMLI18n?.language || undefined)} unavailable API node${omittedUnavailableNodeCount === 1 ? " was" : "s were"} omitted from the isolated project together with only their dependent connection chains. The repairable remainder can now be installed atomically.`
+              ? window.RMLI18n.format(
+                  omittedUnavailableNodeCount === 1
+                    ? "import.work.install.degraded_message.one"
+                    : "import.work.install.degraded_message.other",
+                  {
+                    count:
+                      omittedUnavailableNodeCount.toLocaleString(
+                        window.RMLI18n?.language || undefined
+                      )
+                  }
+                )
               : window.RMLI18n.t("ui.literal.47e8a252b6d5"),
         detail:
           window.RMLI18n.t("ui.literal.f5871c36b5d6"),
@@ -36793,7 +37439,9 @@ async function applyLoadedProjectWithFeedback(
     await paintBuilderUi();
     assertRuntimeCatalogResolutionAuthority(
       installationCatalogAuthority,
-      "project import preparation UI"
+      window.RMLI18n.t(
+        "import.catalog_phase.project_preparation_ui"
+      )
     );
 
     previousProject =
@@ -36805,7 +37453,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "1 / 4 project-installation preparation stages completed: rollback snapshot captured.",
+          window.RMLI18n.t(
+            "import.work.preparation.rollback"
+          ),
         progress:
           preparationStageProgress(1)
       }
@@ -36813,7 +37463,9 @@ async function applyLoadedProjectWithFeedback(
     await yieldBuilderTask();
     assertRuntimeCatalogResolutionAuthority(
       installationCatalogAuthority,
-      "project import rollback snapshot"
+      window.RMLI18n.t(
+        "import.catalog_phase.rollback_snapshot"
+      )
     );
 
     if (prerequisites.compatibilityMode) {
@@ -36836,7 +37488,9 @@ async function applyLoadedProjectWithFeedback(
         );
       assertRuntimeCatalogResolutionAuthority(
         installationCatalogAuthority,
-        "portable compatibility transaction creation"
+        window.RMLI18n.t(
+          "import.catalog_phase.compatibility_transaction_creation"
+        )
       );
       if (
         await Promise.resolve(
@@ -36855,7 +37509,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "2 / 4 project-installation preparation stages completed: compatibility registry settled.",
+          window.RMLI18n.t(
+            "import.work.preparation.compatibility"
+          ),
         progress:
           preparationStageProgress(2)
       }
@@ -36863,7 +37519,9 @@ async function applyLoadedProjectWithFeedback(
     await yieldBuilderTask();
     assertRuntimeCatalogResolutionAuthority(
       installationCatalogAuthority,
-      "project import compatibility settlement"
+      window.RMLI18n.t(
+        "import.catalog_phase.compatibility_settlement"
+      )
     );
 
     if (forceConfigurationPage) {
@@ -36937,7 +37595,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "3 / 4 project-installation preparation stages completed: presentation identity registered.",
+          window.RMLI18n.t(
+            "import.work.preparation.presentation"
+          ),
         progress:
           preparationStageProgress(3)
       }
@@ -36948,7 +37608,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "4 / 4 project-installation preparation stages completed: atomic project installation can begin.",
+          window.RMLI18n.t(
+            "import.work.preparation.ready"
+          ),
         progress:
           preparationStageProgress(4)
       }
@@ -36956,7 +37618,9 @@ async function applyLoadedProjectWithFeedback(
     await yieldBuilderTask();
     assertRuntimeCatalogResolutionAuthority(
       installationCatalogAuthority,
-      "atomic project installation"
+      window.RMLI18n.t(
+        "import.catalog_phase.atomic_installation"
+      )
     );
     const applicationStageProgress =
       completed =>
@@ -36986,7 +37650,13 @@ async function applyLoadedProjectWithFeedback(
         expectedImportedProjectEpoch
     ) {
       throw new Error(
-        `The imported project epoch changed unexpectedly: expected ${expectedImportedProjectEpoch}, received ${importedProjectEpoch}.`
+        window.RMLI18n.format(
+          "import.error.project_epoch_changed",
+          {
+            expected: expectedImportedProjectEpoch,
+            actual: importedProjectEpoch
+          }
+        )
       );
     }
     updateBuilderWork(
@@ -36996,7 +37666,15 @@ async function applyLoadedProjectWithFeedback(
         message:
           window.RMLI18n.t("ui.auto.5e89eb0efd95"),
         detail:
-          `1 / 7 interface construction stages completed. ${window.RMLI18n.t("ui.literal.716ca8adba93")}`,
+          window.RMLI18n.format(
+            "import.work.interface.stage_1",
+            {
+              detail:
+                window.RMLI18n.t(
+                  "ui.literal.716ca8adba93"
+                )
+            }
+          ),
         progress:
           applicationStageProgress(1)
       }
@@ -37009,7 +37687,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "2 / 7 interface construction stages completed: generated output is bound to the imported project.",
+          window.RMLI18n.t(
+            "import.work.interface.stage_2"
+          ),
         progress:
           applicationStageProgress(2)
       }
@@ -37018,7 +37698,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "3 / 7 interface construction stages completed: graph analysis certificate installed.",
+          window.RMLI18n.t(
+            "import.work.interface.stage_3"
+          ),
         progress:
           applicationStageProgress(3)
       }
@@ -37039,7 +37721,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "4 / 7 interface construction stages completed: graph document identity matches; generated output is running in parallel.",
+          window.RMLI18n.t(
+            "import.work.interface.stage_4"
+          ),
         progress:
           applicationStageProgress(4)
       }
@@ -37050,7 +37734,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "5 / 7 interface construction stages completed: project metadata rendered.",
+          window.RMLI18n.t(
+            "import.work.interface.stage_5"
+          ),
         progress:
           applicationStageProgress(5)
       }
@@ -37061,7 +37747,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "6 / 7 interface construction stages completed: project palette rendered.",
+          window.RMLI18n.t(
+            "import.work.interface.stage_6"
+          ),
         progress:
           applicationStageProgress(6)
       }
@@ -37076,7 +37764,19 @@ async function applyLoadedProjectWithFeedback(
         message:
           expectedNodes > 1000 ||
           expectedConnections > 2000
-            ? `Validating ${expectedNodes.toLocaleString()} nodes and ${expectedConnections.toLocaleString()} connections, then materializing only the visible graph area when the Runtime Graph page is open.`
+            ? window.RMLI18n.format(
+                "import.work.interface.large_graph_message",
+                {
+                  nodes:
+                    expectedNodes.toLocaleString(
+                      window.RMLI18n?.language || undefined
+                    ),
+                  connections:
+                    expectedConnections.toLocaleString(
+                      window.RMLI18n?.language || undefined
+                    )
+                }
+              )
             : window.RMLI18n.t("ui.literal.ef0705dd3730"),
         detail:
           window.RMLI18n.t("ui.literal.f10fe9059f1f"),
@@ -37093,7 +37793,25 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          `7 / 7 interface construction stages completed. ${expectedNodes.toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${expectedConnections.toLocaleString(window.RMLI18n?.language || undefined)} connections are installed.`,
+          window.RMLI18n.format(
+            expectedNodes === 1
+              ? expectedConnections === 1
+                ? "import.work.interface.stage_7.one_node.one_connection"
+                : "import.work.interface.stage_7.one_node.other_connections"
+              : expectedConnections === 1
+                ? "import.work.interface.stage_7.other_nodes.one_connection"
+                : "import.work.interface.stage_7.other_nodes.other_connections",
+            {
+              nodes:
+                expectedNodes.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                ),
+              connections:
+                expectedConnections.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                )
+            }
+          ),
         progress:
           applicationStageProgress(7)
       }
@@ -37118,7 +37836,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "1 / 4 installed-project verification stages completed: presentation is usable.",
+          window.RMLI18n.t(
+            "import.work.verification.presentation"
+          ),
         progress:
           verificationProgress(1)
       }
@@ -37149,7 +37869,19 @@ async function applyLoadedProjectWithFeedback(
             ? verification.issues.length
             : 0;
         throw new Error(
-          `The installed portable API contracts failed their exact post-install verification${verificationIssueCount > 0 ? ` (${verificationIssueCount.toLocaleString(window.RMLI18n?.language || undefined)} compatibility issue${verificationIssueCount === 1 ? "" : "s"})` : ""}. The JSON was not loaded.`
+          window.RMLI18n.format(
+            verificationIssueCount === 0
+              ? "import.error.portable_verification_failed.none"
+              : verificationIssueCount === 1
+                ? "import.error.portable_verification_failed.one"
+                : "import.error.portable_verification_failed.other",
+            {
+              count:
+                verificationIssueCount.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                )
+            }
+          )
         );
       }
       if (
@@ -37168,7 +37900,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "2 / 4 installed-project verification stages completed: compatibility state is exact.",
+          window.RMLI18n.t(
+            "import.work.verification.compatibility"
+          ),
         progress:
           verificationProgress(2)
       }
@@ -37184,7 +37918,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "3 / 4 installed-project verification stages completed: graph document identity matches.",
+          window.RMLI18n.t(
+            "import.work.verification.graph_identity"
+          ),
         progress:
           verificationProgress(3)
       }
@@ -37204,7 +37940,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "4 / 4 installed-project verification stages completed: runtime identity matches.",
+          window.RMLI18n.t(
+            "import.work.verification.runtime_identity"
+          ),
         progress:
           verificationProgress(4)
       }
@@ -37221,9 +37959,33 @@ async function applyLoadedProjectWithFeedback(
               : window.RMLI18n.t("ui.literal.28f5ac077e65"),
         message:
           prerequisites.compatibilityMode
-            ? `${Number(prerequisites.unresolvedNodeCount || 0).toLocaleString(window.RMLI18n?.language || undefined)} unresolved node${Number(prerequisites.unresolvedNodeCount || 0) === 1 ? " remains" : "s remain"} visible and editable. Their affected execution paths are disabled until a compatible replacement is selected.`
+            ? window.RMLI18n.format(
+                Number(
+                  prerequisites.unresolvedNodeCount || 0
+                ) === 1
+                  ? "import.work.installed.compatibility_message.one"
+                  : "import.work.installed.compatibility_message.other",
+                {
+                  count:
+                    Number(
+                      prerequisites.unresolvedNodeCount || 0
+                    ).toLocaleString(
+                      window.RMLI18n?.language || undefined
+                    )
+                }
+              )
             : intentionallyDegradedGraph
-              ? `${omittedUnavailableNodeCount.toLocaleString(window.RMLI18n?.language || undefined)} unavailable API node${omittedUnavailableNodeCount === 1 ? " is" : "s are"} absent. Any now-incomplete execution path stays editable so a current node can be added and reconnected manually.`
+              ? window.RMLI18n.format(
+                  omittedUnavailableNodeCount === 1
+                    ? "import.work.installed.degraded_message.one"
+                    : "import.work.installed.degraded_message.other",
+                  {
+                    count:
+                      omittedUnavailableNodeCount.toLocaleString(
+                        window.RMLI18n?.language || undefined
+                      )
+                  }
+                )
               : window.RMLI18n.t("ui.literal.d78b7e43ad4f"),
         detail:
           prerequisites.compatibilityMode
@@ -37280,7 +38042,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "1 / 4 finalization stages completed: project validation settled.",
+          window.RMLI18n.t(
+            "import.work.finalization.validation"
+          ),
         progress:
           finalizationProgress(1)
       }
@@ -37303,7 +38067,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "2 / 4 finalization stages completed: compatibility transaction settled.",
+          window.RMLI18n.t(
+            "import.work.finalization.compatibility"
+          ),
         progress:
           finalizationProgress(2)
       }
@@ -37317,7 +38083,9 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         detail:
-          "3 / 4 finalization stages completed: project storage committed.",
+          window.RMLI18n.t(
+            "import.work.finalization.storage"
+          ),
         progress:
           finalizationProgress(3)
       }
@@ -37371,20 +38139,52 @@ async function applyLoadedProjectWithFeedback(
         )}'`
       )
       .slice(0, 5);
+    const omittedApiNamesText =
+      `${omittedApiNames.join(", ")}${omittedApiNodes.length > 5 ? window.RMLI18n.format(omittedApiNodes.length - 5 === 1 ? "import.complete.omitted_api_more.one" : "import.complete.omitted_api_more.other", { count: (omittedApiNodes.length - 5).toLocaleString(window.RMLI18n?.language || undefined) }) : ""}`;
     const omittedApiDetail =
       omittedApiNodes.length > 0
-        ? `${omittedApiNodes.length.toLocaleString(window.RMLI18n?.language || undefined)} API node${omittedApiNodes.length === 1 ? " was" : "s were"} not present in the verified Live/cache catalog and had no same-kind, port-compatible replacement, so ${omittedApiNames.join(", ")}${omittedApiNodes.length > 5 ? ` and ${(omittedApiNodes.length - 5).toLocaleString(window.RMLI18n?.language || undefined)} more` : ""} ${omittedApiNodes.length === 1 ? "was" : "were"} omitted. ${omittedConnections.length.toLocaleString(window.RMLI18n?.language || undefined)} dependent connection${omittedConnections.length === 1 ? " was" : "s were"} removed with ${omittedConnections.length === 1 ? "it" : "them"}; unrelated nodes and routes were preserved. Add a current API node later and reconnect it.`
+        ? window.RMLI18n.format(
+            omittedApiNodes.length === 1
+              ? omittedConnections.length === 1
+                ? "import.complete.omitted_api_detail.one_node.one_connection"
+                : "import.complete.omitted_api_detail.one_node.other_connections"
+              : omittedConnections.length === 1
+                ? "import.complete.omitted_api_detail.other_nodes.one_connection"
+                : "import.complete.omitted_api_detail.other_nodes.other_connections",
+            {
+              count:
+                omittedApiNodes.length.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                ),
+              names: omittedApiNamesText,
+              connections:
+                omittedConnections.length.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                )
+            }
+          )
         : "";
     const graphPresentationDetail =
       graphResult?.ready === false
-        ? `${graphResult.presentationError || window.RMLI18n.t("ui.literal.8c15010ea643")} The complete validated project data and generated output are retained; the Runtime Graph remains unavailable for interaction until its presentation reports ready.`
+        ? window.RMLI18n.format(
+            "import.complete.graph_unavailable_detail",
+            {
+              error:
+                graphResult.presentationError ||
+                window.RMLI18n.t(
+                  "ui.literal.8c15010ea643"
+                )
+            }
+          )
         : "";
 
     updateBuilderWork(
       session,
       {
         detail:
-          "4 / 4 finalization stages completed: generated output is queued and the imported project is usable.",
+          window.RMLI18n.t(
+            "import.work.finalization.complete"
+          ),
         progress:
           finalizationProgress(4)
       }
@@ -37401,12 +38201,43 @@ async function applyLoadedProjectWithFeedback(
               ? window.RMLI18n.t("ui.literal.09f72397ef47")
             : window.RMLI18n.t("ui.literal.0e47cf96af8d"),
         message:
-          `Loaded ${displayName} successfully.`,
+          window.RMLI18n.format(
+            "project.file.load_success",
+            { filename: displayName }
+          ),
         detail:
           omittedApiDetail ||
           graphPresentationDetail ||
           (prerequisites.compatibilityMode
-            ? `${Number(prerequisites.unresolvedNodeCount || 0).toLocaleString(window.RMLI18n?.language || undefined)} unavailable node${Number(prerequisites.unresolvedNodeCount || 0) === 1 ? " was" : "s were"} preserved with every still-valid stored port and connection.${Number(prerequisites.compositeReconciliation?.disconnectedWires || 0) > 0 ? ` ${Number(prerequisites.compositeReconciliation.disconnectedWires).toLocaleString(window.RMLI18n?.language || undefined)} outer wire${Number(prerequisites.compositeReconciliation.disconnectedWires) === 1 ? " was" : "s were"} removed because its exposed Composite endpoint is connected internally and therefore no longer exists in the real outer contract.` : ""} Search for a verified compatible replacement in each node's inspector. Export remains blocked only for affected execution paths.`
+            ? window.RMLI18n.format(
+                Number(
+                  prerequisites.unresolvedNodeCount || 0
+                ) === 1
+                  ? "import.complete.compatibility_detail.one"
+                  : "import.complete.compatibility_detail.other",
+                {
+                  count:
+                    Number(
+                      prerequisites.unresolvedNodeCount || 0
+                    ).toLocaleString(
+                      window.RMLI18n?.language || undefined
+                    ),
+                  wireDetail:
+                    compositeDisconnectedWires > 0
+                      ? window.RMLI18n.format(
+                          compositeDisconnectedWires === 1
+                            ? "import.complete.compatibility_wire_detail.one"
+                            : "import.complete.compatibility_wire_detail.other",
+                          {
+                            count:
+                              compositeDisconnectedWires.toLocaleString(
+                                window.RMLI18n?.language || undefined
+                              )
+                          }
+                        )
+                      : ""
+                }
+              )
             : prerequisites.catalog
             ?.cacheSatisfied === true
             ? window.RMLI18n.t("ui.literal.7e0942be7121")
@@ -37437,11 +38268,17 @@ async function applyLoadedProjectWithFeedback(
         session,
         {
           title:
-            "API catalog changed — resolving the import again",
+            window.RMLI18n.t(
+              "import.catalog_stale.title"
+            ),
           message:
-            "The staged project is being checked against the current catalog authority.",
+            window.RMLI18n.t(
+              "import.catalog_stale.message"
+            ),
           detail:
-            "No project state was installed from the stale catalog snapshot. Confirmed graph edits remain in the staged project.",
+            window.RMLI18n.t(
+              "import.catalog_stale.detail"
+            ),
           progress: 0
         }
       );
@@ -37467,7 +38304,9 @@ async function applyLoadedProjectWithFeedback(
         portableRegistryTransaction = null;
         if (!previousProject) {
           throw new Error(
-            "The previous project snapshot is unavailable."
+            window.RMLI18n.t(
+              "import.error.previous_snapshot_unavailable"
+            )
           );
         }
         applyLoadedProject(
@@ -38055,7 +38894,19 @@ async function saveProjectJson() {
           )
         : 0;
     setProjectFileStatus(
-      `Saved ${filename} with GZIP compression${reduction > 0 ? ` (${reduction}% smaller)` : ""}.`,
+      window.RMLI18n.format(
+        "project.file.save_success",
+        {
+          filename,
+          reduction:
+            reduction > 0
+              ? window.RMLI18n.format(
+                  "project.file.save_reduction",
+                  { percent: reduction }
+                )
+              : ""
+        }
+      ),
       "success"
     );
   } catch (error) {
@@ -38080,7 +38931,10 @@ async function loadProjectJsonFile(
   let documentKind = "project";
 
   setProjectFileStatus(
-    `Reading and validating ${file.name}…`
+    window.RMLI18n.format(
+      "project.file.reading_validating",
+      { filename: file.name }
+    )
   );
   setProjectLoadProgress(
     true,
@@ -38097,7 +38951,15 @@ async function loadProjectJsonFile(
       PROJECT_FILE_MAX_BYTES
     ) {
       throw new Error(
-        `The selected file is larger than the ${formatProjectByteLimit(PROJECT_FILE_MAX_BYTES)} project limit.`
+        window.RMLI18n.format(
+          "project.file.too_large",
+          {
+            limit:
+              formatProjectByteLimit(
+                PROJECT_FILE_MAX_BYTES
+              )
+          }
+        )
       );
     }
 
@@ -38145,12 +39007,22 @@ async function loadProjectJsonFile(
 
       const compositeImportWorkSession =
         beginBuilderWork({
-          kicker: "Project loading",
-          title: "Importing the Saved API Composite…",
+          kicker:
+            window.RMLI18n.t(
+              "saved_composite.import.work.kicker"
+            ),
+          title:
+            window.RMLI18n.t(
+              "saved_composite.import.work.title"
+            ),
           message:
-            "The complete compatibility check and atomic library update are running.",
+            window.RMLI18n.t(
+              "saved_composite.import.work.message"
+            ),
           detail:
-            "The loading screen remains visible until the Saved Composite is stored or the import reports an error.",
+            window.RMLI18n.t(
+              "saved_composite.import.work.detail"
+            ),
           progress: 4,
         });
       const handleSavedCompositeImportProgress = event => {
@@ -38218,51 +39090,91 @@ async function loadProjectJsonFile(
           phase === "library"
             ? {
                 title:
-                  "Loading the Saved Composite library…",
+                  window.RMLI18n.t(
+                    "saved_composite.import.phase.library.title"
+                  ),
                 message:
-                  "The existing library is being prepared before imported records are compared.",
-                unit: "library steps"
+                  window.RMLI18n.t(
+                    "saved_composite.import.phase.library.message"
+                  ),
+                unit:
+                  window.RMLI18n.t(
+                    "saved_composite.import.phase.library.unit"
+                  )
               }
             : phase === "parse"
               ? {
                   title:
-                    "Reading Saved Composite records…",
+                    window.RMLI18n.t(
+                      "saved_composite.import.phase.parse.title"
+                    ),
                   message:
-                    "The complete imported record set has been decoded.",
-                  unit: "records decoded"
+                    window.RMLI18n.t(
+                      "saved_composite.import.phase.parse.message"
+                    ),
+                  unit:
+                    window.RMLI18n.t(
+                      "saved_composite.import.phase.parse.unit"
+                    )
                 }
               : phase === "resolve"
                 ? {
                     title:
-                      "Resolving Saved Composite API contracts…",
+                      window.RMLI18n.t(
+                        "saved_composite.import.phase.resolve.title"
+                      ),
                     message:
-                      "Each imported graph is being checked against the available API catalog.",
-                    unit: "records resolved"
+                      window.RMLI18n.t(
+                        "saved_composite.import.phase.resolve.message"
+                      ),
+                    unit:
+                      window.RMLI18n.t(
+                        "saved_composite.import.phase.resolve.unit"
+                      )
                   }
                 : phase === "merge"
                   ? {
                       title:
-                        "Merging Saved Composite records…",
+                        window.RMLI18n.t(
+                          "saved_composite.import.phase.merge.title"
+                        ),
                       message:
-                        "Imported records are being compared with the current library.",
-                      unit: "records merged"
+                        window.RMLI18n.t(
+                          "saved_composite.import.phase.merge.message"
+                        ),
+                      unit:
+                        window.RMLI18n.t(
+                          "saved_composite.import.phase.merge.unit"
+                        )
                     }
                   : phase === "persist"
                     ? {
                         title:
-                          "Saving the Saved Composite library…",
+                          window.RMLI18n.t(
+                            "saved_composite.import.phase.persist.title"
+                          ),
                         message:
-                          "The complete library update is being committed atomically.",
+                          window.RMLI18n.t(
+                            "saved_composite.import.phase.persist.message"
+                          ),
                         unit:
-                          "storage transactions"
+                          window.RMLI18n.t(
+                            "saved_composite.import.phase.persist.unit"
+                          )
                       }
                     : {
                         title:
-                          "Updating placed Saved Composite instances…",
+                          window.RMLI18n.t(
+                            "saved_composite.import.phase.instances.title"
+                          ),
                         message:
-                          "Every affected placed instance is being reconciled with the stored record.",
+                          window.RMLI18n.t(
+                            "saved_composite.import.phase.instances.message"
+                          ),
                         unit:
-                          "instance records reconciled"
+                          window.RMLI18n.t(
+                            "saved_composite.import.phase.instances.unit"
+                          )
                       };
         updateBuilderWork(
           compositeImportWorkSession,
@@ -38270,7 +39182,36 @@ async function loadProjectJsonFile(
             title: phaseCopy.title,
             message: phaseCopy.message,
             detail:
-              `${phaseCompleted.toLocaleString(window.RMLI18n?.language || undefined)} / ${phaseTotal.toLocaleString(window.RMLI18n?.language || undefined)} ${phaseCopy.unit}${total > 0 ? ` · ${completed.toLocaleString(window.RMLI18n?.language || undefined)} / ${total.toLocaleString(window.RMLI18n?.language || undefined)} total work units` : ""}`,
+              window.RMLI18n.format(
+                "saved_composite.import.progress",
+                {
+                  phaseCompleted:
+                    phaseCompleted.toLocaleString(
+                      window.RMLI18n?.language || undefined
+                    ),
+                  phaseTotal:
+                    phaseTotal.toLocaleString(
+                      window.RMLI18n?.language || undefined
+                    ),
+                  unit: phaseCopy.unit,
+                  totalWork:
+                    total > 0
+                      ? window.RMLI18n.format(
+                          "saved_composite.import.progress.total",
+                          {
+                            completed:
+                              completed.toLocaleString(
+                                window.RMLI18n?.language || undefined
+                              ),
+                            total:
+                              total.toLocaleString(
+                                window.RMLI18n?.language || undefined
+                              )
+                          }
+                        )
+                      : ""
+                }
+              ),
             progress:
               progressForUnits(completed)
           }
@@ -38391,6 +39332,10 @@ async function loadProjectJsonFile(
             0
           )
         );
+      const localizedImportNumber = value =>
+        Number(value || 0).toLocaleString(
+          window.RMLI18n?.language || undefined
+        );
       const omissionDetails =
         omittedApiNodeDetails.map(item => {
           const connections =
@@ -38417,12 +39362,190 @@ async function loadProjectJsonFile(
             item?.operatorId,
             item?.nodeName
           );
-          return `${String(item?.compositeName || window.RMLI18n.t("ui.literal.8030a124d0bc"))}: '${readableApi}'${connections.length > 0 ? `; ${connections.length.toLocaleString(window.RMLI18n?.language || undefined)} dependent connection${connections.length === 1 ? " was" : "s were"} removed` : "; no connected wires were removed"}`;
+          const values = {
+            composite:
+              String(
+                item?.compositeName ||
+                window.RMLI18n.t(
+                  "ui.literal.8030a124d0bc"
+                )
+              ),
+            api: readableApi,
+            count:
+              localizedImportNumber(
+                connections.length
+              )
+          };
+          return window.RMLI18n.format(
+            connections.length === 1
+              ? "saved_composite.import.omission_detail.connection.one"
+              : connections.length > 1
+                ? "saved_composite.import.omission_detail.connection.other"
+                : "saved_composite.import.omission_detail.no_connections",
+            values
+          );
         });
-      const compositeImportStatusMessage =
-        importSummary
-          ? `Composite import completed: ${Number(importSummary.added || 0).toLocaleString(window.RMLI18n?.language || undefined)} new, ${Number(importSummary.updated || 0).toLocaleString(window.RMLI18n?.language || undefined)} updated, ${Number(importSummary.unchanged || 0).toLocaleString(window.RMLI18n?.language || undefined)} unchanged and ${Number(importSummary.discarded || 0).toLocaleString(window.RMLI18n?.language || undefined)} discarded.${omittedApiNodes > 0 ? ` ${omittedApiNodes.toLocaleString(window.RMLI18n?.language || undefined)} unavailable API node${omittedApiNodes === 1 ? " was" : "s were"} omitted with ${omittedApiConnections.toLocaleString(window.RMLI18n?.language || undefined)} dependent connection${omittedApiConnections === 1 ? "" : "s"}; the remaining graph was loaded.` : ""}${offlinePreservedApiNodes > 0 ? ` ${offlinePreservedApiNodes.toLocaleString(window.RMLI18n?.language || undefined)} API node${offlinePreservedApiNodes === 1 ? " was" : "s were"} preserved from complete stored portable contracts because neither cache nor Live could be verified.` : ""}${replacedInstances > 0 ? ` ${replacedInstances.toLocaleString(window.RMLI18n?.language || undefined)} placed instance${replacedInstances === 1 ? " was" : "s were"} replaced.${linkedByName > 0 ? ` ${linkedByName.toLocaleString(window.RMLI18n?.language || undefined)} matched by exact normalized name and received the imported fingerprint.` : ""}` : declinedReplacements > 0 ? ` The Library import remains stored; ${declinedReplacements.toLocaleString(window.RMLI18n?.language || undefined)} optional replacement${declinedReplacements === 1 ? " was" : "s were"} declined and the open project was not changed.` : ` ${window.RMLI18n.t("ui.literal.4a44cc28eabb")}`}${disconnectedWires > 0 ? ` ${disconnectedWires.toLocaleString(window.RMLI18n?.language || undefined)} obsolete outer wire${disconnectedWires === 1 ? " was" : "s were"} removed after confirmation and must be reconnected where still needed.` : ""}${replacementErrors > 0 ? ` ${replacementErrors.toLocaleString(window.RMLI18n?.language || undefined)} graph replacement${replacementErrors === 1 ? " failed" : "s failed"} atomically; the Library import remains stored.` : ""}`
-          : `Imported ${Number(imported?.length || 0).toLocaleString(window.RMLI18n?.language || undefined)} Saved API Composite${imported?.length === 1 ? "" : "s"}. The open project was not changed.`;
+      let compositeImportStatusMessage;
+      if (importSummary) {
+        const statusParts = [
+          window.RMLI18n.format(
+            "saved_composite.import.status.summary",
+            {
+              added:
+                localizedImportNumber(
+                  importSummary.added
+                ),
+              updated:
+                localizedImportNumber(
+                  importSummary.updated
+                ),
+              unchanged:
+                localizedImportNumber(
+                  importSummary.unchanged
+                ),
+              discarded:
+                localizedImportNumber(
+                  importSummary.discarded
+                )
+            }
+          )
+        ];
+        if (omittedApiNodes > 0) {
+          const omittedStatusKey =
+            omittedApiNodes === 1
+              ? omittedApiConnections === 1
+                ? "saved_composite.import.status.omitted.node_one.connection_one"
+                : "saved_composite.import.status.omitted.node_one.connections_other"
+              : omittedApiConnections === 1
+                ? "saved_composite.import.status.omitted.nodes_other.connection_one"
+                : "saved_composite.import.status.omitted.nodes_other.connections_other";
+          statusParts.push(
+            window.RMLI18n.format(
+              omittedStatusKey,
+              {
+                nodes:
+                  localizedImportNumber(
+                    omittedApiNodes
+                  ),
+                connections:
+                  localizedImportNumber(
+                    omittedApiConnections
+                  )
+              }
+            )
+          );
+        }
+        if (offlinePreservedApiNodes > 0) {
+          statusParts.push(
+            window.RMLI18n.format(
+              offlinePreservedApiNodes === 1
+                ? "saved_composite.import.status.offline_preserved.one"
+                : "saved_composite.import.status.offline_preserved.other",
+              {
+                count:
+                  localizedImportNumber(
+                    offlinePreservedApiNodes
+                  )
+              }
+            )
+          );
+        }
+        if (replacedInstances > 0) {
+          statusParts.push(
+            window.RMLI18n.format(
+              replacedInstances === 1
+                ? "saved_composite.import.status.instances_replaced.one"
+                : "saved_composite.import.status.instances_replaced.other",
+              {
+                count:
+                  localizedImportNumber(
+                    replacedInstances
+                  )
+              }
+            )
+          );
+          if (linkedByName > 0) {
+            statusParts.push(
+              window.RMLI18n.format(
+                "saved_composite.import.status.linked_by_name",
+                {
+                  count:
+                    localizedImportNumber(
+                      linkedByName
+                    )
+                }
+              )
+            );
+          }
+        } else if (declinedReplacements > 0) {
+          statusParts.push(
+            window.RMLI18n.format(
+              declinedReplacements === 1
+                ? "saved_composite.import.status.replacements_declined.one"
+                : "saved_composite.import.status.replacements_declined.other",
+              {
+                count:
+                  localizedImportNumber(
+                    declinedReplacements
+                  )
+              }
+            )
+          );
+        } else {
+          statusParts.push(
+            window.RMLI18n.t(
+              "ui.literal.4a44cc28eabb"
+            )
+          );
+        }
+        if (disconnectedWires > 0) {
+          statusParts.push(
+            window.RMLI18n.format(
+              disconnectedWires === 1
+                ? "saved_composite.import.status.wires_removed.one"
+                : "saved_composite.import.status.wires_removed.other",
+              {
+                count:
+                  localizedImportNumber(
+                    disconnectedWires
+                  )
+              }
+            )
+          );
+        }
+        if (replacementErrors > 0) {
+          statusParts.push(
+            window.RMLI18n.format(
+              replacementErrors === 1
+                ? "saved_composite.import.status.replacement_errors.one"
+                : "saved_composite.import.status.replacement_errors.other",
+              {
+                count:
+                  localizedImportNumber(
+                    replacementErrors
+                  )
+              }
+            )
+          );
+        }
+        compositeImportStatusMessage =
+          statusParts.join(" ");
+      } else {
+        const importedCount =
+          Number(imported?.length || 0);
+        compositeImportStatusMessage =
+          window.RMLI18n.format(
+            importedCount === 1
+              ? "saved_composite.import.status.imported.one"
+              : "saved_composite.import.status.imported.other",
+            {
+              count:
+                localizedImportNumber(
+                  importedCount
+                )
+            }
+          );
+      }
       const compositeImportStatusTone =
         replacementErrors > 0 ||
         omittedApiNodes > 0 ||
@@ -38433,11 +39556,17 @@ async function loadProjectJsonFile(
         compositeImportWorkSession,
         {
           title:
-            "Saved API Composite import complete",
+            window.RMLI18n.t(
+              "saved_composite.import.complete.title"
+            ),
           message:
-            "The compatibility result and library transaction have both completed.",
+            window.RMLI18n.t(
+              "saved_composite.import.complete.message"
+            ),
           detail:
-            "The completed result is now being shown."
+            window.RMLI18n.t(
+              "saved_composite.import.complete.detail"
+            )
         }
       );
       if (omittedApiNodes > 0) {
@@ -38450,9 +39579,34 @@ async function loadProjectJsonFile(
               ? window.RMLI18n.t("ui.literal.76dd9118051b")
               : window.RMLI18n.t("ui.literal.4ff6413bab9c"),
           message:
-            `The remaining Saved Composite graph was imported successfully. ${omittedApiNodes.toLocaleString(window.RMLI18n?.language || undefined)} unavailable API node${omittedApiNodes === 1 ? " was" : "s were"} neither reconstructed automatically nor replaceable with a compatible current node and ${omittedApiNodes === 1 ? "was" : "were"} therefore omitted.`,
+            window.RMLI18n.format(
+              omittedApiNodes === 1
+                ? "saved_composite.import.notice.omitted.message.one"
+                : "saved_composite.import.notice.omitted.message.other",
+              {
+                count:
+                  localizedImportNumber(
+                    omittedApiNodes
+                  )
+              }
+            ),
           details:
-            `${omittedApiConnections.toLocaleString(window.RMLI18n?.language || undefined)} dependent connection${omittedApiConnections === 1 ? " was" : "s were"} removed with ${omittedApiConnections === 1 ? "it" : "them"}; unrelated nodes and routes were preserved. ${omissionDetails.slice(0, 12).join(" | ")}${omissionDetails.length > 12 ? ` | and ${(omissionDetails.length - 12).toLocaleString(window.RMLI18n?.language || undefined)} more` : ""}`,
+            [
+              window.RMLI18n.format(
+                omittedApiConnections === 1
+                  ? "saved_composite.import.notice.omitted.connections.one"
+                  : "saved_composite.import.notice.omitted.connections.other",
+                {
+                  count:
+                    localizedImportNumber(
+                      omittedApiConnections
+                    )
+                }
+              ),
+              omissionDetails.length > 0
+                ? `${omissionDetails.slice(0, 12).join(" | ")}${omissionDetails.length > 12 ? window.RMLI18n.format("import.replacement.more", { count: localizedImportNumber(omissionDetails.length - 12) }) : ""}`
+                : ""
+            ].filter(Boolean).join(" "),
           confirmLabel: window.RMLI18n.t("ui.literal.9ce3bd4224c8")
         });
       } else if (
@@ -38465,9 +39619,45 @@ async function loadProjectJsonFile(
           title:
             window.RMLI18n.t("ui.auto.3624b4a635ca"),
           message:
-            `The Saved Composite was imported instead of being rejected. ${offlinePreservedApiNodes.toLocaleString(window.RMLI18n?.language || undefined)} API node${offlinePreservedApiNodes === 1 ? " was" : "s were"} retained from complete, conflict-free stored contracts because the verified cache did not provide a usable current catalog.`,
+            window.RMLI18n.format(
+              offlinePreservedApiNodes === 1
+                ? "saved_composite.import.notice.offline.message.one"
+                : "saved_composite.import.notice.offline.message.other",
+              {
+                count:
+                  localizedImportNumber(
+                    offlinePreservedApiNodes
+                  )
+              }
+            ),
           details:
-            `${offlinePreservationDetails.map(value => `${String(value?.compositeName || window.RMLI18n.t("ui.literal.8030a124d0bc"))}: ${Math.max(0, Number(value?.nodeCount) || 0).toLocaleString(window.RMLI18n?.language || undefined)} preserved API node${Number(value?.nodeCount) === 1 ? "" : "s"}`).join(" | ")} No node was guessed or deleted merely because the catalog was unavailable. The Builder will reconcile these contracts when a verified cache or Live catalog becomes available.`,
+            [
+              offlinePreservationDetails.map(value => {
+                const count = Math.max(
+                  0,
+                  Number(value?.nodeCount) || 0
+                );
+                return window.RMLI18n.format(
+                  count === 1
+                    ? "saved_composite.import.notice.offline.entry.one"
+                    : "saved_composite.import.notice.offline.entry.other",
+                  {
+                    composite:
+                      String(
+                        value?.compositeName ||
+                        window.RMLI18n.t(
+                          "ui.literal.8030a124d0bc"
+                        )
+                      ),
+                    count:
+                      localizedImportNumber(count)
+                  }
+                );
+              }).join(" | "),
+              window.RMLI18n.t(
+                "saved_composite.import.notice.offline.detail"
+              )
+            ].filter(Boolean).join(" "),
           confirmLabel: window.RMLI18n.t("ui.literal.9ce3bd4224c8")
         });
       }
@@ -38632,7 +39822,10 @@ async function loadProjectJsonFile(
           : [];
       void importWarnings;
       setProjectFileStatus(
-        `Loaded ${file.name} successfully.`,
+        window.RMLI18n.format(
+          "project.file.load_success",
+          { filename: file.name }
+        ),
         "success"
       );
     } catch (error) {
@@ -40081,7 +41274,10 @@ function renderBrowserCompilerReferenceList() {
       "export-compiler-reference-item";
 
     const name = document.createElement("strong");
-    name.textContent = `Found: ${file.name}`;
+    name.textContent = window.RMLI18n.format(
+      "export.compiler_references.found",
+      { filename: file.name }
+    );
     item.append(name);
 
     const path = browserCompilerReferencePath(file);
@@ -40250,12 +41446,12 @@ function selectBrowserCompilerFiles(
 
 let browserCompilerUserSelectionPromise = null;
 let browserCompilerUserSelectionAbortController = null;
-const BROWSER_COMPILER_CHOOSER_HARD_TIMEOUT_MS =
-  5 * 60 * 1000;
 
 function cancelBrowserCompilerUserSelection(
   expectedPromise = null,
-  message = "The compiler reference selection was cancelled."
+  message = window.RMLI18n.t(
+    "export.compiler_references.selection_cancelled"
+  )
 ) {
   if (
     expectedPromise &&
@@ -40289,7 +41485,6 @@ function requestBrowserCompilerInputFiles(
 
   return new Promise((resolve, reject) => {
     let settled = false;
-    let hardDeadlineTimer = 0;
     const cleanup = () => {
       input.removeEventListener("change", changed);
       input.removeEventListener("cancel", cancelled);
@@ -40297,12 +41492,6 @@ function requestBrowserCompilerInputFiles(
         "abort",
         cancelled
       );
-      if (hardDeadlineTimer) {
-        window.clearTimeout(
-          hardDeadlineTimer
-        );
-        hardDeadlineTimer = 0;
-      }
     };
     const finish = files => {
       if (settled) return;
@@ -40324,10 +41513,6 @@ function requestBrowserCompilerInputFiles(
       cancelled,
       { once: true }
     );
-    hardDeadlineTimer = window.setTimeout(
-      cancelled,
-      BROWSER_COMPILER_CHOOSER_HARD_TIMEOUT_MS
-    );
     if (signal?.aborted) {
       cancelled();
       return;
@@ -40340,7 +41525,13 @@ function requestBrowserCompilerInputFiles(
       cleanup();
       input.value = "";
       const failure = new Error(
-        `The file chooser could not be opened from this user action: ${error?.message || String(error)}`
+        window.RMLI18n.format(
+          "export.compiler_references.file_chooser_failed",
+          {
+            message:
+              error?.message || String(error)
+          }
+        )
       );
       failure.code = "RML_FILE_CHOOSER_NOT_ALLOWED";
       reject(failure);
@@ -40421,7 +41612,15 @@ async function chooseBrowserCompilerReferenceDirectory() {
         selected.files.length;
     } else {
       browserCompilerBuildStatusText =
-        `Folder selected: ${directoryFiles.length.toLocaleString()} files. DLL matching will continue when generated files are ready.`;
+        window.RMLI18n.format(
+          "export.compiler_references.folder_selected_pending",
+          {
+            count:
+              directoryFiles.length.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+          }
+        );
     }
     return directoryDllFiles;
   } catch (error) {
@@ -40536,7 +41735,15 @@ async function collectBrowserCompilerDroppedFiles(
         });
       }
       setBrowserCompilerSearchStatus(
-        `Reading folder tree… ${queue.length.toLocaleString()} entries found`
+        window.RMLI18n.format(
+          "export.compiler_references.reading_folder_tree",
+          {
+            count:
+              queue.length.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+          }
+        )
       );
     } else if (current.entry.isFile) {
       fileCount += 1;
@@ -40574,7 +41781,19 @@ async function collectBrowserCompilerDroppedFiles(
       );
     }
     setBrowserCompilerSearchStatus(
-      `Reading DLL files… ${files.length.toLocaleString()}/${fileEntries.length.toLocaleString()}`
+      window.RMLI18n.format(
+        "export.compiler_references.reading_dll_files",
+        {
+          completed:
+            files.length.toLocaleString(
+              window.RMLI18n?.language || undefined
+            ),
+          total:
+            fileEntries.length.toLocaleString(
+              window.RMLI18n?.language || undefined
+            )
+        }
+      )
     );
   }
 
@@ -40747,7 +41966,9 @@ async function ensureBrowserCompilerReferences(
         null;
       if (!directoryPromise) {
         throw browserCompilerReferenceSelectionError(
-          "The Resonite folder must be selected directly from the ZIP button. Click ZIP erstellen again to open the folder chooser."
+          window.RMLI18n.t(
+            "export.compiler_references.folder_selection_required"
+          )
         );
       }
       const cancelDirectorySelection = () => {
@@ -40797,7 +42018,15 @@ async function ensureBrowserCompilerReferences(
         directoryFiles.length;
       browserCompilerDirectoryMatchCount = 0;
       setBrowserCompilerSearchStatus(
-        `Checking ${directoryFiles.length.toLocaleString()} folder files…`
+        window.RMLI18n.format(
+          "export.compiler_references.checking_folder_files",
+          {
+            count:
+              directoryFiles.length.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+          }
+        )
       );
       const folderResult = selectBrowserCompilerFiles(
         directoryDllFiles,
@@ -40811,7 +42040,22 @@ async function ensureBrowserCompilerReferences(
 
     if (missing.length > 0) {
       throw browserCompilerReferenceSelectionError(
-        `Folder checked: ${browserCompilerDirectoryFileCount.toLocaleString()} files, ${browserCompilerDirectoryMatchCount} required DLL${browserCompilerDirectoryMatchCount === 1 ? "" : "s"} found. Still missing: ${missing.join(", ")}. Drop the missing DLLs or another folder onto the Missing DLLs field.`
+        window.RMLI18n.format(
+          browserCompilerDirectoryMatchCount === 1
+            ? "export.compiler_references.folder_checked_missing.one"
+            : "export.compiler_references.folder_checked_missing.other",
+          {
+            files:
+              browserCompilerDirectoryFileCount.toLocaleString(
+                window.RMLI18n?.language || undefined
+              ),
+            found:
+              browserCompilerDirectoryMatchCount.toLocaleString(
+                window.RMLI18n?.language || undefined
+              ),
+            missing: missing.join(", ")
+          }
+        )
       );
     }
   } finally {
@@ -40935,12 +42179,25 @@ function assertRuntimeGraphCompilationSource(
     artifactFingerprint !== expectedFingerprint
   ) {
     throw runtimeGraphCompilationSourceError(
-      "Runtime graph compilation was refused because its generated C# source certificate is incomplete."
+      window.RMLI18n.t(
+        "export.compiler.runtime_graph.certificate_incomplete"
+      )
     );
   }
   if (semanticDiagnostics.length > 0) {
     throw runtimeGraphCompilationSourceError(
-      `Runtime graph compilation was refused because graph generation reported ${semanticDiagnostics.length} semantic diagnostic${semanticDiagnostics.length === 1 ? "" : "s"}: ${semanticDiagnostics[0]}`
+      window.RMLI18n.format(
+        semanticDiagnostics.length === 1
+          ? "export.compiler.runtime_graph.semantic_diagnostics.one"
+          : "export.compiler.runtime_graph.semantic_diagnostics.other",
+        {
+          count:
+            semanticDiagnostics.length.toLocaleString(
+              window.RMLI18n?.language || undefined
+            ),
+          diagnostic: semanticDiagnostics[0]
+        }
+      )
     );
   }
   const matches = (Array.isArray(projects)
@@ -40977,7 +42234,10 @@ function assertRuntimeGraphCompilationSource(
     actualFingerprint !== expectedFingerprint
   ) {
     throw runtimeGraphCompilationSourceError(
-      `Runtime graph compilation was refused because '${expectedSourceName}' is missing from or differs in the actual compiler source set.`
+      window.RMLI18n.format(
+        "export.compiler.runtime_graph.source_mismatch",
+        { filename: expectedSourceName }
+      )
     );
   }
 }
@@ -41333,7 +42593,7 @@ function updateBrowserCompilerStatus(
       { count: missing.length, dlls: missing.join(", ") }
     );
     elements.exportCompilerReferenceStatus.textContent =
-      `${missingSummary} Drop DLLs or a Resonite folder here.`;
+      missingSummary;
     elements.exportCompilerReferenceStatus.dataset.state =
       "missing";
   } else {
@@ -41360,14 +42620,39 @@ function updateBrowserCompilerStatus(
       window.RMLI18n.t("{{i18n:js.presentation.19c59c5f8401}}");
   } else if (cacheReady) {
     browserCompilerBuildStatusText =
-      `${browserCompilerBuildCache.outputs.length} DLL${browserCompilerBuildCache.outputs.length === 1 ? "" : "s"} ready for the ZIP.`;
+      window.RMLI18n.format(
+        browserCompilerBuildCache.outputs.length === 1
+          ? "export.compiler_references.zip_ready.one"
+          : "export.compiler_references.zip_ready.other",
+        {
+          count:
+            browserCompilerBuildCache.outputs.length
+              .toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+        }
+      );
   } else if (backgroundSemanticExportFailure) {
     browserCompilerBuildStatusText =
       backgroundSemanticExportFailure;
   } else if (missing.length > 0) {
     browserCompilerBuildStatusText =
       browserCompilerDirectoryFileCount > 0
-        ? `Folder checked: ${browserCompilerDirectoryFileCount.toLocaleString()} files · ${browserCompilerDirectoryMatchCount} required DLL${browserCompilerDirectoryMatchCount === 1 ? "" : "s"} found. Drop missing DLLs or another folder above.`
+        ? window.RMLI18n.format(
+            browserCompilerDirectoryMatchCount === 1
+              ? "export.compiler_references.folder_checked_status.one"
+              : "export.compiler_references.folder_checked_status.other",
+            {
+              files:
+                browserCompilerDirectoryFileCount.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                ),
+              found:
+                browserCompilerDirectoryMatchCount.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                )
+            }
+          )
         : "";
   } else {
     browserCompilerBuildStatusText =
@@ -41575,7 +42860,15 @@ async function compileGeneratedBrowserDlls(
     );
   if (missing.length > 0) {
     throw browserCompilerReferenceSelectionError(
-      `Missing compiler reference DLLs: ${missing.join(", ")}`
+      window.RMLI18n.format(
+        missing.length === 1
+          ? "export.compiler_references.missing.one"
+          : "export.compiler_references.missing.other",
+        {
+          count: missing.length,
+          dlls: missing.join(", ")
+        }
+      )
     );
   }
 
@@ -41614,7 +42907,8 @@ async function compileGeneratedBrowserDlls(
       initialReferenceRevision;
     let compiledReferenceIdentities =
       initialReferenceIdentities;
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+    const attemptedReferenceStates = new Set();
+    while (true) {
       assertBrowserCompilerSignal(signal);
       if (
         projectEpoch !== projectApplicationEpoch
@@ -41651,6 +42945,20 @@ async function compileGeneratedBrowserDlls(
           "the selected compiler references changed while their contents were verified"
         );
       }
+      const referenceState =
+        browserCompilerReferenceFingerprint(
+          compiledReferenceFiles,
+          compiledReferenceRevision,
+          compiledReferenceIdentities
+        );
+      if (
+        attemptedReferenceStates.has(
+          referenceState
+        )
+      ) {
+        break;
+      }
+      attemptedReferenceStates.add(referenceState);
       result = await compiler.compile(
         projects.flatMap(project =>
           project.sources
@@ -41673,10 +42981,26 @@ async function compileGeneratedBrowserDlls(
 
             if (progress?.phase === "references") {
               browserCompilerBuildStatusText =
-                `References ${progress.completed}/${progress.total}: ${progress.name}`;
+                window.RMLI18n.format(
+                  "export.compiler.progress.references",
+                  {
+                    completed:
+                      progress.completed,
+                    total: progress.total,
+                    name: progress.name
+                  }
+                );
             } else {
               browserCompilerBuildStatusText =
-                `Building ${progress.completed}/${progress.total}: ${progress.name}`;
+                window.RMLI18n.format(
+                  "export.compiler.progress.building",
+                  {
+                    completed:
+                      progress.completed,
+                    total: progress.total,
+                    name: progress.name
+                  }
+                );
             }
             refreshUnifiedExportStatus();
           }
@@ -41726,7 +43050,10 @@ async function compileGeneratedBrowserDlls(
       }
 
       setBrowserCompilerSearchStatus(
-        `Finding ${indirectMissing.join(", ")}…`
+        window.RMLI18n.format(
+          "export.compiler_references.finding",
+          { dlls: indirectMissing.join(", ") }
+        )
       );
       const discovered =
         selectBrowserCompilerFiles(
@@ -41741,7 +43068,14 @@ async function compileGeneratedBrowserDlls(
         discovered.missing.length > 0
       ) {
         throw browserCompilerReferenceSelectionError(
-          `Not found in the Resonite folder: ${discovered.missing.join(", ") || indirectMissing.join(", ")}. Drop the missing DLLs or another folder onto the Missing DLLs field.`
+          window.RMLI18n.format(
+            "export.compiler_references.not_found",
+            {
+              dlls:
+                discovered.missing.join(", ") ||
+                indirectMissing.join(", ")
+            }
+          )
         );
       }
     }
@@ -41921,9 +43255,8 @@ function isExportCatalogLiveVerified() {
   return Boolean(
     report &&
     typeof report === "object" &&
-    report.catalogSource === "scanner" &&
-    report.liveCatalogVerified === true &&
-    report.verificationPassed === true
+    report.verificationPassed === true &&
+    String(report.catalogFingerprint || "").trim()
   );
 }
 
@@ -42007,7 +43340,10 @@ function updateExportDialog() {
   setExportPreflightStage(exportPreflightStage);
   setExportControlAvailability(
     elements.exportDownloadSelected,
-    false
+    false,
+    window.RMLI18n.t(
+      "export.preflight.detail.prepare"
+    )
   );
   setExportControlAvailability(
     elements.exportSelectCompilerDirectory,
@@ -42038,14 +43374,34 @@ function updateExportDialog() {
   const publication =
     currentValidatedGeneratedPublication();
   if (!publication) {
+    const readinessDiagnostics =
+      exportReadinessDiagnostics();
+    const generationIsRunning =
+      exportReadiness.phase === "checking" ||
+      generatedOutputRefreshPendingBeforeDom ||
+      generatedOutputRefreshPendingForEditorEdits;
     elements.exportDownloadHint.textContent =
-      window.RMLI18n.t(
-        "generated.validation.in_progress"
-      );
+      exportReadiness.phase === "error" &&
+      readinessDiagnostics.length > 0
+        ? readinessDiagnostics.join(" · ")
+        : generationIsRunning
+          ? window.RMLI18n.t(
+              "generated.validation.in_progress"
+            )
+          : window.RMLI18n.t(
+              "generated.validation.publication_required"
+            );
+    elements.exportDownloadHint.classList.toggle(
+      "error",
+      exportReadiness.phase === "error" ||
+        !generationIsRunning
+    );
     setExportControlAvailability(
       elements.exportDownloadSelected,
-      false
+      false,
+      elements.exportDownloadHint.textContent
     );
+    refreshUnifiedExportStatus();
     return;
   }
   const completeCatalog =
@@ -42114,15 +43470,29 @@ function updateExportDialog() {
     activeProjectCount > 1;
 
   elements.exportCsFilename.textContent =
-    `${sourceCount} generated source file${
-      sourceCount === 1 ? "" : "s"
-    }`;
+    window.RMLI18n.format(
+      sourceCount === 1
+        ? "export.artifacts.sources.one"
+        : "export.artifacts.sources.other",
+      {
+        count:
+          sourceCount.toLocaleString(
+            window.RMLI18n?.language || undefined
+          )
+      }
+    );
   elements.exportCsprojFilename.textContent =
-    `${projectBuildCount} project/build/support file${
+    window.RMLI18n.format(
       projectBuildCount === 1
-        ? ""
-        : "s"
-    }`;
+        ? "export.artifacts.project_files.one"
+        : "export.artifacts.project_files.other",
+      {
+        count:
+          projectBuildCount.toLocaleString(
+            window.RMLI18n?.language || undefined
+          )
+      }
+    );
   if (elements.exportNodeIndexFilename) {
     elements.exportNodeIndexFilename.textContent =
       nodeIndexArtifacts.length === 1
@@ -42140,13 +43510,38 @@ function updateExportDialog() {
     "aria-invalid",
     String(projectPathMissing)
   );
-  const zipActionAvailable =
-    hasSelection &&
-    !projectPathMissing &&
-    !exportDeliveryBusy;
+  const exportUiState = deriveExportUiState({
+    readinessPhase: exportReadiness.phase,
+    explicitStage: exportPreflightStage,
+    preflightActive: Boolean(exportPreflightRequest),
+    deliveryActive: exportDeliveryBusy,
+    referenceActive: Boolean(
+      browserCompilerReferenceSearchRunning
+    ),
+    compilerActive: Boolean(browserCompilerBuilding),
+    generationPending: Boolean(
+      generatedOutputRefreshPendingBeforeDom ||
+      generatedOutputRefreshPendingForEditorEdits
+    ),
+    hasPublication: true,
+    hasSelection
+  });
+  const unavailableReason =
+    exportUiState.blockedReason === "running"
+      ? window.RMLI18n.t(
+          `export.preflight.detail.${
+            exportUiState.phase || "prepare"
+          }`
+        )
+      : exportUiState.blockedReason === "selection"
+        ? window.RMLI18n.t(
+            "{{i18n:js.presentation.d4342f6c8bb7}}"
+          )
+        : "";
   setExportControlAvailability(
     elements.exportDownloadSelected,
-    zipActionAvailable
+    exportUiState.canInvoke,
+    unavailableReason
   );
 
   if (!hasSelection) {
@@ -42161,7 +43556,14 @@ function updateExportDialog() {
     elements.exportDownloadSelected.textContent =
       window.RMLI18n.t("ui.literal.c9caa7143a49");
 
-    elements.exportDownloadHint.textContent = "";
+    elements.exportDownloadHint.textContent =
+      projectPathMissing &&
+      browserCompilerDirectoryFiles.length === 0
+        ? window.RMLI18n.t(
+            "index.text.db16b96f969c"
+          )
+        : "";
+    refreshUnifiedExportStatus();
     return;
   }
 
@@ -42185,7 +43587,28 @@ function updateExportDialog() {
     elements.exportDownloadSelected.textContent =
       window.RMLI18n.t("{{i18n:js.presentation.7bd0e4b0ebc2}}");
     elements.exportDownloadHint.textContent =
-      `ZIP will contain ${displayCatalog.artifacts.length} files across ${activeProjectCount} independently compiled projects${destinations.length > 0 ? `, deploying to ${destinations.join(" and ")}` : ""}.`;
+      window.RMLI18n.format(
+        destinations.length > 0
+          ? "export.archive.multi_project.with_destinations"
+          : "export.archive.multi_project",
+        {
+          files:
+            displayCatalog.artifacts.length
+              .toLocaleString(
+                window.RMLI18n?.language || undefined
+              ),
+          projects:
+            activeProjectCount.toLocaleString(
+              window.RMLI18n?.language || undefined
+            ),
+          destinations:
+            destinations.join(
+              window.RMLI18n.t(
+                "export.archive.destination_separator"
+              )
+            )
+        }
+      );
     return;
   }
 
@@ -42198,14 +43621,25 @@ function updateExportDialog() {
       artifact.requiresResonitePath &&
       !pathAvailable
         ? window.RMLI18n.t("ui.literal.ecb08c4d0add")
-        : `${artifact.relativePath} will be downloaded directly.`;
+        : window.RMLI18n.format(
+            "export.artifact.direct_download",
+            { path: artifact.relativePath }
+          );
     return;
   }
 
   elements.exportDownloadSelected.textContent =
     window.RMLI18n.t("{{i18n:js.presentation.7bd0e4b0ebc2}}");
   elements.exportDownloadHint.textContent =
-    `${catalog.artifacts.length} files will be bundled into the ZIP.`;
+    window.RMLI18n.format(
+      "export.archive.bundle",
+      {
+        count:
+          catalog.artifacts.length.toLocaleString(
+            window.RMLI18n?.language || undefined
+          )
+      }
+    );
 }
 
 function syncExportOptions({
@@ -42513,35 +43947,49 @@ async function downloadSelectedExport() {
     state.exportOptions.includeCompiled === true;
   const publication =
     currentValidatedGeneratedPublication();
-  let primedCompilerSelection = null;
-  let primedCompilerSelectionController = null;
-  if (
+  const missingCompilerReferences =
+    requireSemantic && publication
+      ? missingBrowserCompilerReferences(
+          publication.catalog
+        )
+      : [];
+  const projectFolderSelectionNeeded = Boolean(
     requireSemantic &&
     publication &&
-    missingBrowserCompilerReferences(
-      publication.catalog
-    ).length > 0
-  ) {
-    cancelBrowserCompilerUserSelection(
-      null,
-      "A newer export reference selection was started."
-    );
-    primedCompilerSelectionController =
-      new AbortController();
-    primedCompilerSelection =
-      requestBrowserCompilerDirectoryFiles(
-        primedCompilerSelectionController
-          .signal
-      );
-    browserCompilerUserSelectionPromise =
-      primedCompilerSelection;
-    browserCompilerUserSelectionAbortController =
-      primedCompilerSelectionController;
-  }
+    state.exportOptions.includeCsproj === true &&
+    !String(
+      state.exportOptions.resonitePath || ""
+    ).trim() &&
+    browserCompilerDirectoryFiles.length === 0
+  );
+  const compilerFolderSelectionNeeded = Boolean(
+    requireSemantic &&
+    publication &&
+    (
+      missingCompilerReferences.length > 0 ||
+      projectFolderSelectionNeeded
+    )
+  );
   exportDeliveryBusy = true;
   updateExportDialog();
   let checked;
   try {
+    if (compilerFolderSelectionNeeded) {
+      backgroundSemanticExportFailure = "";
+      const directoryFiles =
+        await chooseBrowserCompilerReferenceDirectory();
+      if (directoryFiles.length === 0) {
+        const error =
+          browserCompilerReferenceSelectionError(
+            window.RMLI18n.t(
+              "ui.literal.7475400470fe"
+            )
+          );
+        backgroundSemanticExportFailure =
+          error.message;
+        throw error;
+      }
+    }
     checked = requireSemantic
       ? await requestExportPreflight({
           requireSyntax: false,
@@ -42559,20 +44007,24 @@ async function downloadSelectedExport() {
               })
             : null;
         })();
-  } catch {
-    cancelBrowserCompilerUserSelection(
-      primedCompilerSelection,
-      "Export preparation stopped before compiler references were selected."
-    );
+  } catch (error) {
+    if (
+      requireSemantic &&
+      !backgroundSemanticExportFailure &&
+      !expectedExportCancellation(error)
+    ) {
+      backgroundSemanticExportFailure =
+        uiSanitizeMachineText(
+          error instanceof Error
+            ? error.message
+            : String(error)
+        );
+    }
     exportDeliveryBusy = false;
     updateExportDialog();
     return;
   }
   if (!checked) {
-    cancelBrowserCompilerUserSelection(
-      primedCompilerSelection,
-      "Export preparation did not produce a current snapshot."
-    );
     exportDeliveryBusy = false;
     updateExportDialog();
     return;
@@ -42692,11 +44144,13 @@ async function downloadSelectedExport() {
     );
   } catch (error) {
     if (expectedExportCancellation(error)) {
-      setExportReadiness(
-        "idle",
-        {},
-        getDiagnostics()
-      );
+      if (!requireSemantic) {
+        setExportReadiness(
+          "idle",
+          {},
+          getDiagnostics()
+        );
+      }
     } else if (
       error?.code ===
         "RML_COMPILER_REFERENCES_REQUIRED"
@@ -42730,11 +44184,9 @@ async function downloadSelectedExport() {
         originalLabel;
 
       if (nonBlockingCompilationFailure) {
-        setExportReadiness(
-          "error",
-          { diagnostics: [nonBlockingCompilationFailure] },
-          getDiagnostics()
-        );
+        backgroundSemanticExportFailure =
+          nonBlockingCompilationFailure;
+        refreshUnifiedExportStatus();
         elements.exportDownloadHint.textContent = "";
         elements.exportDownloadHint.classList.remove("error");
       }
@@ -43656,7 +45108,6 @@ function showDelayedButtonHelp(target) {
   try {
     bubble.showPopover();
   } catch (_) {
-    // Older engines without Popover API still get the ordinary fixed overlay.
   }
 
   const rect = target.getBoundingClientRect();
@@ -44807,7 +46258,7 @@ function builderCodegenStateSnapshot() {
       ? state.extensions.typedNodeGraph
       : null;
 
-  return {
+  return structuredClone({
     metadata: {
       ...state.metadata
     },
@@ -44832,7 +46283,7 @@ function builderCodegenStateSnapshot() {
       collapsedPaletteGroups:
         state.collapsedPaletteGroups
     }
-  };
+  });
 }
 
 function exposeBuilderBridge() {
@@ -45097,8 +46548,13 @@ function exposeBuilderBridge() {
     },
 
     markGeneratedOutputPending() {
+      generatedOutputRefreshPendingForEditorEdits = true;
       if (!exportPreflightRequest) {
-        exportReadiness = Object.freeze({ ...exportReadiness, phase: "idle", fingerprint: "", diagnostics: Object.freeze([]) });
+        exportReadiness = Object.freeze({
+          ...exportReadiness,
+          phase: "checking",
+          diagnostics: Object.freeze([])
+        });
       }
       applyPrimaryExportAvailability([]);
       projectDraftPersistSchedule += 1;
@@ -48454,6 +49910,140 @@ function installUniversalScrollLayerSelector() {
   );
 }
 
+async function releaseBuilderStartupRecovery(
+  startupWork,
+  error,
+  {
+    runtimeGraphRequested = false,
+    noticeReady = false
+  } = {}
+) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : String(error || "The restored project could not be generated.");
+  const root = document.documentElement;
+  root.dataset.rmlBuilderReady = "true";
+  root.dataset.rmlBuilderRecovery = "true";
+
+  if (
+    runtimeGraphRequested &&
+    root.dataset
+      .rmlStartupGraphPresentation !== "ready"
+  ) {
+    root.dataset.rmlStartupGraphPresentation =
+      "failed";
+    document.dispatchEvent(
+      new CustomEvent(
+        "rml-builder:startup-graph-presentation-settled",
+        {
+          detail: Object.freeze({
+            ready: false,
+            modelReady: false,
+            presentationFailed: true,
+            presentationError: message
+          })
+        }
+      )
+    );
+  }
+
+  try {
+    renderAll();
+  } catch (renderError) {
+    console.error(
+      "[RML BUILDER RECOVERY] The recovery workspace could not be rendered completely.",
+      renderError
+    );
+  }
+
+  const detail = Object.freeze({
+    recovery: true,
+    error: message
+  });
+  document.dispatchEvent(
+    new CustomEvent(
+      "rml-builder:ready",
+      { detail }
+    )
+  );
+  document.dispatchEvent(
+    new CustomEvent(
+      "rml-builder:startup-recovery",
+      { detail }
+    )
+  );
+
+  try {
+    await paintBuilderUi();
+  } catch (paintError) {
+    console.error(
+      "[RML BUILDER RECOVERY] The recovery workspace could not be painted completely.",
+      paintError
+    );
+  }
+
+  let overlayReleased = false;
+  try {
+    overlayReleased =
+      await startupWork.complete({
+      title: window.RMLI18n.t("startup.recovery.opened_title"),
+      message:
+        window.RMLI18n.t("startup.recovery.opened_message"),
+      detail: message
+      });
+  } catch (overlayError) {
+    console.error(
+      "[RML BUILDER RECOVERY] The startup overlay could not complete normally and was released directly.",
+      overlayError
+    );
+  }
+  if (!overlayReleased) {
+    const sessionReleased =
+      startupWork.finish();
+    if (!sessionReleased) {
+      forceReleaseAllBuilderWork();
+    }
+  }
+
+  if (elements.workspaceRestoreState) {
+    elements.workspaceRestoreState.textContent =
+      window.RMLI18n.format(
+        "startup.recovery.required",
+        { message: uiSanitizeMachineText(message) }
+      );
+    const container =
+      elements.workspaceRestoreState.closest?.(
+        ".local-state"
+      ) ||
+      elements.workspaceRestoreState.parentElement;
+    if (container?.dataset) {
+      container.dataset.state = "error";
+    }
+  }
+
+  if (noticeReady) {
+    queueMicrotask(() => {
+      void showBuilderNotice({
+        tone: "warning",
+        kicker: window.RMLI18n.t("startup.recovery.kicker"),
+        title: window.RMLI18n.t("startup.recovery.notice_title"),
+        message:
+          window.RMLI18n.t("startup.recovery.notice_message"),
+        details: message,
+        confirmLabel: window.RMLI18n.t("startup.recovery.continue")
+      }).catch(noticeError => {
+        console.error(
+          "[RML BUILDER RECOVERY] The recovery notice could not be shown.",
+          noticeError
+        );
+      });
+    });
+  }
+
+  return message;
+}
+
 async function initialize() {
   if (
     document.documentElement.dataset
@@ -48492,6 +50082,9 @@ async function initialize() {
     beginStartupStatus(
       window.RMLI18n.t("ui.literal.975839933e3e")
     );
+  let startupRuntimeGraphRequested = false;
+  let startupRecoveryNoticeReady = false;
+  try {
   const startupStageTotal = 19;
   let startupStageCompleted = 0;
   const completeStartupStage = async (
@@ -48518,7 +50111,9 @@ async function initialize() {
   preventGlobalDoubleSelection();
   await restore();
   await completeStartupStage(
-    "The saved project source has been restored.",
+    window.RMLI18n.t(
+      "startup.stage.saved_source_restored"
+    ),
     {
       title:
         window.RMLI18n.t("ui.auto.7f6e03f3041b"),
@@ -48528,7 +50123,7 @@ async function initialize() {
   );
   const startupGraph =
     state.extensions?.typedNodeGraph;
-  const startupRuntimeGraphRequested =
+  startupRuntimeGraphRequested =
     startupGraph?.active === true &&
     (
       state.activePage ||
@@ -48536,11 +50131,15 @@ async function initialize() {
     ) === "runtime-graph";
   renderMetadata();
   await completeStartupStage(
-    "Project metadata controls are ready."
+    window.RMLI18n.t(
+      "startup.stage.metadata_controls_ready"
+    )
   );
   renderPalette();
   await completeStartupStage(
-    "The node palette has been rendered."
+    window.RMLI18n.t(
+      "startup.stage.palette_rendered"
+    )
   );
 
   document
@@ -48589,7 +50188,9 @@ async function initialize() {
     });
 
   await completeStartupStage(
-    "Palette pointer and drag bindings are ready."
+    window.RMLI18n.t(
+      "startup.stage.palette_bindings_ready"
+    )
   );
 
   document.addEventListener(
@@ -48753,7 +50354,9 @@ async function initialize() {
   );
 
   await completeStartupStage(
-    "Global drag-over and pointer-move routing are ready."
+    window.RMLI18n.t(
+      "startup.stage.global_drag_routing_ready"
+    )
   );
 
   document.addEventListener(
@@ -48863,7 +50466,9 @@ async function initialize() {
   );
 
   await completeStartupStage(
-    "Pointer-release routing is ready."
+    window.RMLI18n.t(
+      "startup.stage.pointer_release_ready"
+    )
   );
 
   document.addEventListener(
@@ -48946,7 +50551,9 @@ async function initialize() {
   );
 
   await completeStartupStage(
-    "Pointer-cancellation recovery is ready."
+    window.RMLI18n.t(
+      "startup.stage.pointer_cancellation_ready"
+    )
   );
 
   document.addEventListener(
@@ -49014,7 +50621,9 @@ async function initialize() {
   );
 
   await completeStartupStage(
-    "Keyboard drag cancellation is ready."
+    window.RMLI18n.t(
+      "startup.stage.keyboard_drag_cancellation_ready"
+    )
   );
 
   document.addEventListener(
@@ -49241,7 +50850,9 @@ async function initialize() {
   );
 
   await completeStartupStage(
-    "Wheel, drop and drag-end routing are ready."
+    window.RMLI18n.t(
+      "startup.stage.wheel_drop_routing_ready"
+    )
   );
 
   document
@@ -49284,15 +50895,24 @@ async function initialize() {
           const message =
             error instanceof Error
               ? error.message
-              : `${EXAMPLE_PROJECT_FILE_NAME} could not be loaded.`;
+              : window.RMLI18n.format(
+                  "example.load.failed_message",
+                  { file: EXAMPLE_PROJECT_FILE_NAME }
+                );
           setProjectFileStatus(
-            `Could not load the example: ${message}`,
+            window.RMLI18n.format(
+              "example.load.status_error",
+              { message }
+            ),
             "error"
           );
           await showBuilderNotice({
             tone: "warning",
             kicker: window.RMLI18n.t("ui.auto.d46163b52091"),
-            title: `${EXAMPLE_PROJECT_FILE_NAME} could not be loaded`,
+            title: window.RMLI18n.format(
+              "example.load.failed_title",
+              { file: EXAMPLE_PROJECT_FILE_NAME }
+            ),
             message,
             details:
               window.RMLI18n.t("ui.literal.d4d6a4909598"),
@@ -49370,7 +50990,9 @@ async function initialize() {
   installDelayedButtonHelp();
 
   await completeStartupStage(
-    "Primary project, output and navigation actions are ready."
+    window.RMLI18n.t(
+      "startup.stage.primary_actions_ready"
+    )
   );
 
   elements.informationOpen.addEventListener(
@@ -49445,7 +51067,9 @@ async function initialize() {
   );
 
   await completeStartupStage(
-    "Information and live settings-preview inputs are ready."
+    window.RMLI18n.t(
+      "startup.stage.information_preview_inputs_ready"
+    )
   );
   elements.settingsPreviewSavePanel.addEventListener(
     "click",
@@ -49502,7 +51126,9 @@ async function initialize() {
   );
 
   await completeStartupStage(
-    "Settings-preview save and dialog controls are ready."
+    window.RMLI18n.t(
+      "startup.stage.preview_dialog_controls_ready"
+    )
   );
   elements.projectManager.addEventListener(
     "click",
@@ -49560,7 +51186,9 @@ async function initialize() {
   );
 
   await completeStartupStage(
-    "Project import and project-dialog controls are ready."
+    window.RMLI18n.t(
+      "startup.stage.project_dialog_controls_ready"
+    )
   );
   elements.builderMessageCancel.addEventListener(
     "click",
@@ -49605,8 +51233,11 @@ async function initialize() {
   );
 
   await completeStartupStage(
-    "Builder confirmation-dialog controls are ready."
+    window.RMLI18n.t(
+      "startup.stage.confirmation_controls_ready"
+    )
   );
+  startupRecoveryNoticeReady = true;
   elements.downloadCode.addEventListener("click", openExportDialog);
   installLazyStyleWarmup(
     elements.downloadCode,
@@ -49626,7 +51257,9 @@ async function initialize() {
   );
 
   await completeStartupStage(
-    "Export entry points and lazy interface bundles are ready."
+    window.RMLI18n.t(
+      "startup.stage.export_entry_points_ready"
+    )
   );
   elements.exportClose.addEventListener("click", closeExportDialog);
   elements.exportCancel.addEventListener("click", closeExportDialog);
@@ -49696,7 +51329,9 @@ async function initialize() {
   });
 
   await completeStartupStage(
-    "Export options, references and artifact actions are ready."
+    window.RMLI18n.t(
+      "startup.stage.export_controls_ready"
+    )
   );
 
   window.addEventListener(
@@ -49729,7 +51364,9 @@ async function initialize() {
   startUniversalCustomSelectObserver();
 
   await completeStartupStage(
-    "Adaptive dialogs and custom-select controls are ready."
+    window.RMLI18n.t(
+      "startup.stage.adaptive_controls_ready"
+    )
   );
 
   renderAll();
@@ -49740,12 +51377,6 @@ async function initialize() {
   }
   await paintBuilderUi();
 
-  exposeBuilderBridge();
-  beginTypedNodeGraphModulesTracking();
-  await completeStartupStage(
-    "The first workspace frame and public Builder bridge are ready."
-  );
-
   const startupExpectedNodes =
     Array.isArray(startupGraph?.nodes)
       ? startupGraph.nodes.length
@@ -49754,45 +51385,87 @@ async function initialize() {
     Array.isArray(startupGraph?.connections)
       ? startupGraph.connections.length
       : 0;
-  const startupGraphReady =
-    waitForImportedGraphUi(
-      startupExpectedNodes,
-      startupExpectedConnections
-    );
-  startupWork.update({
-      title: window.RMLI18n.t("ui.auto.d4710dc2171e"),
-      message:
-        startupExpectedNodes > 1000 ||
-        startupExpectedConnections > 2000
-          ? `Preparing the complete ${startupExpectedNodes.toLocaleString()}-node and ${startupExpectedConnections.toLocaleString()}-connection scene.`
-          : window.RMLI18n.t("ui.literal.56b1bbdd5ba5")
-    });
-  if (startupWork.visible) {
-    await paintBuilderUi();
-  }
-
-  const startupGraphResult =
-    await startupGraphReady;
+  document.documentElement.dataset
+    .rmlStartupGraphPresentation =
+      startupRuntimeGraphRequested
+        ? "pending"
+        : "not-requested";
+  exposeBuilderBridge();
   await completeStartupStage(
-    `${startupExpectedNodes.toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${startupExpectedConnections.toLocaleString(window.RMLI18n?.language || undefined)} connections reached their required presentation state.`
+    window.RMLI18n.t(
+      "startup.stage.bridge_ready"
+    )
   );
-  await startupWork.complete({
+
+  try {
+    const readiness =
+      await waitForStartupProjectReadiness({
+        startupWork,
+        startupGraph,
+        runtimeGraphRequested:
+          startupRuntimeGraphRequested,
+        expectedNodes:
+          startupExpectedNodes,
+        expectedConnections:
+          startupExpectedConnections
+      });
+
+    await completeStartupStage(
+      startupRuntimeGraphRequested
+        ? window.RMLI18n.format(
+            startupExpectedNodes === 1
+              ? startupExpectedConnections === 1
+                ? "startup.stage.project_ready.with_graph.one_node.one_connection"
+                : "startup.stage.project_ready.with_graph.one_node.other_connections"
+              : startupExpectedConnections === 1
+                ? "startup.stage.project_ready.with_graph.other_nodes.one_connection"
+                : "startup.stage.project_ready.with_graph.other_nodes.other_connections",
+            {
+              nodes:
+                startupExpectedNodes.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                ),
+              connections:
+                startupExpectedConnections.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                )
+            }
+          )
+        : window.RMLI18n.t(
+            "startup.stage.project_ready.no_graph"
+          )
+    );
+
+    if (!readiness.publication) {
+      throw startupReadinessFailure(
+        window.RMLI18n.t(
+          "startup.readiness.publication_unavailable"
+        )
+      );
+    }
+
+    document.documentElement.dataset
+      .rmlBuilderReady = "true";
+    delete document.documentElement.dataset
+      .rmlBuilderRecovery;
+    document.dispatchEvent(
+      new CustomEvent(
+        "rml-builder:ready"
+      )
+    );
+    await paintBuilderUi();
+    await startupWork.complete({
       title: window.RMLI18n.t("ui.auto.228428151f64"),
       message:
         window.RMLI18n.t("ui.auto.23f4bfd57160"),
       detail:
-        false
-          ? window.RMLI18n.t("ui.literal.ad4a3aa8c7c7")
-          : window.RMLI18n.t("ui.literal.1d0f8c614529")
+        window.RMLI18n.t(
+          "startup.complete.detail"
+        )
     });
-
-  document.documentElement.dataset
-    .rmlBuilderReady = "true";
-  document.dispatchEvent(
-    new CustomEvent(
-      "rml-builder:ready"
-    )
-  );
+  } catch (error) {
+    throw error;
+  }
 
   if (initialExampleProjectLoadError) {
     const error =
@@ -49802,7 +51475,10 @@ async function initialize() {
     await showBuilderNotice({
       tone: "warning",
       kicker: window.RMLI18n.t("ui.auto.7fab4a1cfa3a"),
-      title: `${EXAMPLE_PROJECT_FILE_NAME} was not loaded`,
+      title: window.RMLI18n.format(
+        "example.load.not_loaded_title",
+        { file: EXAMPLE_PROJECT_FILE_NAME }
+      ),
       message: error.message,
       details:
         window.RMLI18n.t("ui.literal.41b0f49628d0"),
@@ -49811,6 +51487,18 @@ async function initialize() {
   }
 
   await paintBuilderUi();
+  } catch (error) {
+    await releaseBuilderStartupRecovery(
+      startupWork,
+      error,
+      {
+        runtimeGraphRequested:
+          startupRuntimeGraphRequested,
+        noticeReady:
+          startupRecoveryNoticeReady
+      }
+    );
+  }
 }
 
 if (
@@ -50648,7 +52336,15 @@ function rmlRuntimeDisplayInspector() {
     bindingTitle.textContent =
       orderedBindings.length === 1
         ? window.RMLI18n.t("ui.literal.8519f9fa5009")
-        : `Displayed values · ${orderedBindings.length}`;
+        : window.RMLI18n.format(
+            "runtime_display.sources.count.other",
+            {
+              count:
+                orderedBindings.length.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                )
+            }
+          );
 
     const bindingHint =
       document.createElement("small");
@@ -51022,7 +52718,10 @@ function rmlRuntimeDisplayInjectCSharp(
               label:
                 String(
                   binding.label ||
-                  `Display Value ${sourceIndex + 1}`
+                  window.RMLI18n.format(
+                    "runtime_display.source.default_label",
+                    { index: sourceIndex + 1 }
+                  )
                 ),
               field:
                 `${field}_Value${sourceIndex}`,
@@ -51041,7 +52740,10 @@ function rmlRuntimeDisplayInjectCSharp(
       const label =
         String(
           node.fieldName ||
-          `Runtime Display ${index + 1}`
+          window.RMLI18n.format(
+            "runtime_display.default_label",
+            { index: index + 1 }
+          )
         );
       const key =
         String(
@@ -52786,7 +54488,13 @@ function rmlRuntimeDisplayRenderPreviewRows() {
 
         copyButton.setAttribute(
           "aria-label",
-          `Copy ${column.label}, item ${row + 1}`
+          window.RMLI18n.format(
+            "runtime_display.preview.copy_item_aria",
+            {
+              label: column.label,
+              item: row + 1
+            }
+          )
         );
 
         copyButton.title =

@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.24.90-reliable-folder-direct-dll-build";
+    "1.25.00-canonical-type-reconciliation-startup-recovery";
   const LOADER_VERSION = 95;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -127,16 +127,8 @@
     128 * 1024;
   const STREAM_DEMAND_TRANSIENT_FLUSH_BYTES =
     2 * 1024 * 1024;
-  // Progress is presentation data, not catalog data.  Publishing it for every
-  // streamed record turns a large catalog into hundreds of thousands of DOM
-  // and observer updates on the hot ingest path.  Keep the UI responsive with
-  // bounded record batches while always publishing the first and final state.
   const STREAM_DEMAND_PROGRESS_RECORDS = 1024;
   const STREAM_DEMAND_QUERY_LIMIT = 240;
-  // A project can legitimately reference more than 32 declaring types.  The
-  // streamed cache still stays demand-bounded, but every owner explicitly
-  // required by the imported project must be eligible for full member
-  // hydration so inherited API projections can be rebuilt natively.
   const STREAM_DEMAND_EPHEMERAL_OWNER_CAP = 256;
   const STREAM_DEMAND_DEPENDENCY_OWNER_CAP = 2048;
   const REQUIRED_API_FACTORY_VERSION = 41;
@@ -146,27 +138,27 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=1.24.90-reliable-folder-direct-dll-build&visual-function-semantics=803",
+    "mod_nodes.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&visual-function-semantics=803&i18n-rev=1",
     scriptUrl
   ).href;
   const csharpContractsUrl = new URL(
-    "../core/csharp_contracts.js?v=1.24.90-reliable-folder-direct-dll-build",
+    "../core/csharp_contracts.js?v=1.25.00-canonical-type-reconciliation-startup-recovery",
     scriptUrl
   ).href;
   const csharpNodesUrl = new URL(
-    "csharp_nodes.js?v=1.24.90-reliable-folder-direct-dll-build",
+    "csharp_nodes.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&i18n-rev=1",
     scriptUrl
   ).href;
   const universalPerformanceNodesUrl = new URL(
-    "universal_performance_nodes.js?v=1.24.90-reliable-folder-direct-dll-build",
+    "universal_performance_nodes.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&i18n-rev=1",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.24.90-reliable-folder-direct-dll-build",
+    "../compiler/visual_csharp.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&i18n-rev=2",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.24.90-reliable-folder-direct-dll-build&factory=41&schema=4&portable-types=1&specializations=2&inherited-demand=1",
+    "api_nodes.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&factory=41&schema=4&portable-types=1&specializations=2&inherited-demand=1&i18n-rev=1",
     scriptUrl
   ).href;
 
@@ -1465,9 +1457,6 @@
         return false;
       }
       notified = true;
-      // Notification is the irreversible publication boundary.  Consumers
-      // are isolated from one another here: an observer failure must never
-      // escape and make the caller roll back only half of a generation.
       try {
         updateStatus(catalog);
       } catch (error) {
@@ -1512,6 +1501,8 @@
   let scannerCheckPromise = null;
   let scannerCheckGeneration = "";
   let scannerCheckWorkSession = 0;
+  let scannerCheckWorkOwner = 0;
+  let scannerCheckWorkOwnerSequence = 0;
   let scannerCheckMismatchSessionKey = "";
   let scannerCheckPresentedSessionKey = "";
   let scannerCheckRejectedSessionKey = "";
@@ -1545,6 +1536,31 @@
       catalogFingerprint: ""
     });
   let catalogStreamDemandManifest = null;
+  let catalogAuthorityObjectSequence = 0;
+  const catalogAuthorityObjectIds =
+    new WeakMap();
+
+  function catalogAuthorityObjectId(value) {
+    if (
+      !value ||
+      (typeof value !== "object" &&
+        typeof value !== "function")
+    ) {
+      return "none";
+    }
+    let identity =
+      catalogAuthorityObjectIds.get(value);
+    if (!identity) {
+      identity = String(
+        ++catalogAuthorityObjectSequence
+      );
+      catalogAuthorityObjectIds.set(
+        value,
+        identity
+      );
+    }
+    return identity;
+  }
 
   function catalogDemandStaleError(
     message = "The catalog demand generation changed while the operation was running."
@@ -1554,6 +1570,42 @@
       "RML_CATALOG_CACHE_GENERATION_CHANGED";
     error.transient = true;
     return error;
+  }
+
+  function catalogDemandCycleError(
+    action = "the catalog demand operation"
+  ) {
+    const error = catalogDemandStaleError(
+      `The authoritative catalog state repeated without allowing ${String(action)} to commit. The stale-state cycle was stopped without imposing a retry or time limit.`
+    );
+    error.cycle = true;
+    error.transient = false;
+    return error;
+  }
+
+  function catalogDemandAuthorityKey(
+    state,
+    extra = null
+  ) {
+    const lease = state &&
+      catalogDemandStateLeases.get(state);
+    return JSON.stringify({
+      epoch: Number(
+        lease?.epoch ?? catalogDemandStateEpoch
+      ) || 0,
+      generation: String(
+        state?.generation ||
+        state?.manifest?.generation ||
+        state?.fullManifest?.generation ||
+        ""
+      ),
+      fingerprint: String(
+        state?.manifest?.catalogFingerprint ||
+        state?.fullManifest?.catalogFingerprint ||
+        ""
+      ),
+      extra
+    });
   }
 
   function publishCatalogDemandState(
@@ -1825,7 +1877,7 @@
     if (live) {
       element.dataset.source = "scanner";
       element.textContent =
-        "Resonite API · Live";
+        window.RMLI18n.t("catalog.status.live");
       element.setAttribute(
         "aria-pressed",
         "true"
@@ -1897,6 +1949,11 @@
   function updateUnavailableStatus() {
     updateStatus();
   }
+
+  window.addEventListener(
+    "rml-language-changed",
+    updateStatus
+  );
 
   function setSafeLocalStorageValue(
     key,
@@ -1983,7 +2040,10 @@
     });
   }
 
-  async function fetchJson(url, signal = null) {
+  async function fetchJson(
+    url,
+    signal = null
+  ) {
     const controller = new AbortController();
     const abort = () => controller.abort();
     if (signal?.aborted) abort();
@@ -2329,9 +2389,7 @@
         errorMessage:
           window.RMLI18n.t("ui.literal.b86a898007fb"),
         abortMessage:
-          window.RMLI18n.t("ui.literal.a4e8e8baf994"),
-        timeoutMessage:
-          "The local catalog cache write stopped responding; the active in-memory catalog remains usable."
+          window.RMLI18n.t("ui.literal.a4e8e8baf994")
       }
     ).catch(error => {
       throw catalogCachePersistenceError(
@@ -2367,9 +2425,7 @@
         errorMessage:
           window.RMLI18n.t("ui.literal.4b255e933f18"),
         abortMessage:
-          window.RMLI18n.t("ui.literal.dd513fe319e9"),
-        timeoutMessage:
-          "The local catalog cache commit stopped responding; the previous committed cache remains active."
+          window.RMLI18n.t("ui.literal.dd513fe319e9")
       }
     );
   }
@@ -2398,9 +2454,7 @@
         errorMessage:
           window.RMLI18n.t("ui.literal.98dc843f8986"),
         abortMessage:
-          window.RMLI18n.t("ui.literal.7fb445caf1a2"),
-        timeoutMessage:
-          "The local catalog cache cleanup stopped responding; the Builder will continue without waiting for it."
+          window.RMLI18n.t("ui.literal.7fb445caf1a2")
       }
     );
   }
@@ -2532,9 +2586,7 @@
           errorMessage:
             "The streamed catalog cache batch could not be written.",
           abortMessage:
-            "The streamed catalog cache batch was rejected.",
-          timeoutMessage:
-            "The streamed catalog cache write stopped responding."
+            "The streamed catalog cache batch was rejected."
         }
       );
     } finally {
@@ -3454,6 +3506,402 @@
       advanced: "Advanced / Raw C#"
     });
 
+  const CATALOG_STREAM_GROUP_PRESENTATION_KEYS =
+    Object.freeze({
+      [CATALOG_STREAM_GROUPS.types]:
+        "api.catalog.group.types",
+      [CATALOG_STREAM_GROUPS.constructors]:
+        "api.catalog.group.constructors",
+      [CATALOG_STREAM_GROUPS.methods]:
+        "api.catalog.group.methods",
+      [CATALOG_STREAM_GROUPS.hooks]:
+        "api.catalog.group.hooks",
+      [CATALOG_STREAM_GROUPS.properties]:
+        "api.catalog.group.properties",
+      [CATALOG_STREAM_GROUPS.fields]:
+        "api.catalog.group.fields",
+      [CATALOG_STREAM_GROUPS.events]:
+        "api.catalog.group.events",
+      [CATALOG_STREAM_GROUPS.advanced]:
+        "api.catalog.group.advanced"
+    });
+
+  function catalogStreamPresentation(
+    key,
+    fallback,
+    values = {}
+  ) {
+    const normalizedValues = Object.fromEntries(
+      Object.entries(
+        values && typeof values === "object"
+          ? values
+          : {}
+      )
+        .sort(([left], [right]) =>
+          left < right ? -1 : left > right ? 1 : 0
+        )
+        .map(([name, value]) => [
+          String(name),
+          String(value ?? "")
+        ])
+    );
+    return Object.freeze({
+      key: String(key || ""),
+      fallback: String(fallback || ""),
+      values: Object.freeze(normalizedValues)
+    });
+  }
+
+  function catalogStreamPresentationTemplate(
+    template,
+    values = {}
+  ) {
+    return String(template || "").replace(
+      /\{([A-Za-z0-9_]+)\}/g,
+      (match, name) =>
+        Object.hasOwn(values, name)
+          ? String(values[name] ?? "")
+          : match
+    );
+  }
+
+  function catalogStreamPresentationParts(
+    value,
+    fallback = ""
+  ) {
+    if (
+      !value ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      !String(value.key || "")
+    ) {
+      return Object.freeze({
+        text: String(value || fallback),
+        presentation: null
+      });
+    }
+    const values = Object.freeze({
+      ...(value.values || {})
+    });
+    return Object.freeze({
+      text: catalogStreamPresentationTemplate(
+        value.fallback || fallback,
+        values
+      ),
+      presentation: Object.freeze({
+        key: String(value.key),
+        values
+      })
+    });
+  }
+
+  function catalogStreamLocalizePresentation(
+    presentation,
+    fallback = ""
+  ) {
+    const key = String(
+      presentation?.key || ""
+    );
+    if (!key) return String(fallback || "");
+    let template = "";
+    try {
+      const translate = window.RMLI18n?.t;
+      if (typeof translate === "function") {
+        const translated = String(
+          translate.call(window.RMLI18n, key) ?? ""
+        );
+        if (translated && translated !== key) {
+          template = translated;
+        }
+      }
+    } catch {}
+    return catalogStreamPresentationTemplate(
+      template || fallback,
+      presentation?.values || {}
+    );
+  }
+
+  function catalogStreamLocalizedGroup(group) {
+    const canonical = String(group || "Other");
+    const key =
+      CATALOG_STREAM_GROUP_PRESENTATION_KEYS[
+        canonical
+      ];
+    return key
+      ? catalogStreamLocalizePresentation(
+          { key },
+          canonical
+        )
+      : canonical;
+  }
+
+  function catalogStreamCanonicalGroup(group) {
+    const requested = String(group || "");
+    if (
+      !requested ||
+      Object.hasOwn(
+        CATALOG_STREAM_GROUP_PRESENTATION_KEYS,
+        requested
+      )
+    ) {
+      return requested;
+    }
+    try {
+      const relocalize =
+        window.RMLI18n?.relocalizeValue;
+      if (typeof relocalize === "function") {
+        const current = String(
+          relocalize.call(
+            window.RMLI18n,
+            requested
+          ) || ""
+        );
+        if (
+          Object.hasOwn(
+            CATALOG_STREAM_GROUP_PRESENTATION_KEYS,
+            current
+          )
+        ) {
+          return current;
+        }
+      }
+    } catch {}
+    for (const canonical of Object.keys(
+      CATALOG_STREAM_GROUP_PRESENTATION_KEYS
+    )) {
+      if (
+        catalogStreamLocalizedGroup(canonical) ===
+        requested
+      ) {
+        return canonical;
+      }
+    }
+    return requested;
+  }
+
+  function catalogStreamStoredPresentation(
+    key,
+    values = {}
+  ) {
+    return Object.freeze({
+      key: String(key || ""),
+      values: Object.freeze({ ...values })
+    });
+  }
+
+  function catalogStreamLegacyPresentation(
+    definition
+  ) {
+    if (
+      definition?.scannerCatalogStreamGenerated !==
+        true
+    ) {
+      return Object.freeze({});
+    }
+    const kind = String(
+      definition.apiMemberKind || ""
+    );
+    const title = String(definition.title || "");
+    const description = String(
+      definition.description || ""
+    );
+    const separator = title.indexOf(" · ");
+    const displayName = separator >= 0
+      ? title.slice(separator + 3)
+      : "";
+    const memberSeparator =
+      displayName.lastIndexOf(".");
+    const displayType = memberSeparator >= 0
+      ? displayName.slice(0, memberSeparator)
+      : displayName;
+    const member = memberSeparator >= 0
+      ? displayName.slice(memberSeparator + 1)
+      : "";
+    const owner = String(
+      definition.catalogType || ""
+    );
+    const trailingType =
+      description.match(/ \((.+)\)\.$/)?.[1] ||
+      "";
+    let titlePresentation = null;
+    let descriptionPresentation = null;
+
+    if (kind === "type" && displayName) {
+      titlePresentation =
+        catalogStreamStoredPresentation(
+          title.startsWith("Enum type · ")
+            ? "api.catalog.title.enum_type"
+            : "api.catalog.title.type",
+          { name: displayName }
+        );
+      descriptionPresentation =
+        catalogStreamStoredPresentation(
+          "api.catalog.description.type_constant",
+          { type: owner }
+        );
+    } else if (kind === "enum" && displayName) {
+      titlePresentation =
+        catalogStreamStoredPresentation(
+          "api.catalog.title.enum",
+          { name: displayName }
+        );
+      descriptionPresentation =
+        catalogStreamStoredPresentation(
+          "api.catalog.description.enum_constant",
+          { type: owner }
+        );
+    } else if (
+      kind === "hook-method" &&
+      displayName
+    ) {
+      titlePresentation =
+        catalogStreamStoredPresentation(
+          "api.catalog.title.hook",
+          { name: displayName }
+        );
+      if (
+        description.startsWith(
+          "Typed Harmony hook for "
+        )
+      ) {
+        descriptionPresentation =
+          catalogStreamStoredPresentation(
+            "api.catalog.description.harmony_hook",
+            {
+              name:
+                `${owner}.${member || displayName}`
+            }
+          );
+      }
+    } else if (
+      kind === "constructor" &&
+      displayName
+    ) {
+      titlePresentation =
+        catalogStreamStoredPresentation(
+          "api.catalog.title.constructor",
+          { type: displayName }
+        );
+      if (description === `Constructs ${owner}.`) {
+        descriptionPresentation =
+          catalogStreamStoredPresentation(
+            "api.catalog.description.constructor",
+            { type: owner }
+          );
+      }
+    } else if (
+      kind === "method" &&
+      displayType &&
+      member
+    ) {
+      titlePresentation =
+        catalogStreamStoredPresentation(
+          title.startsWith("Static · ")
+            ? "api.catalog.title.static_method"
+            : "api.catalog.title.method_call",
+          { type: displayType, member }
+        );
+    } else if (
+      [
+        "property-get",
+        "property-set",
+        "field-get",
+        "field-set",
+        "event"
+      ].includes(kind) &&
+      displayType &&
+      member
+    ) {
+      const keys = {
+        "property-get": [
+          "api.catalog.title.property_get",
+          "api.catalog.description.property_get"
+        ],
+        "property-set": [
+          "api.catalog.title.property_set",
+          "api.catalog.description.property_set"
+        ],
+        "field-get": [
+          "api.catalog.title.field_read",
+          "api.catalog.description.field_read"
+        ],
+        "field-set": [
+          "api.catalog.title.field_write",
+          "api.catalog.description.field_write"
+        ],
+        event: [
+          "api.catalog.title.event",
+          "api.catalog.description.event"
+        ]
+      }[kind];
+      titlePresentation =
+        catalogStreamStoredPresentation(
+          keys[0],
+          { type: displayType, member }
+        );
+      descriptionPresentation =
+        catalogStreamStoredPresentation(
+          keys[1],
+          kind === "event"
+            ? {
+                type: owner,
+                member,
+                handler: trailingType
+              }
+            : {
+                type: owner,
+                member,
+                valueType: trailingType
+              }
+        );
+    }
+
+    return Object.freeze({
+      ...(titlePresentation
+        ? { title: titlePresentation }
+        : {}),
+      ...(descriptionPresentation
+        ? { description: descriptionPresentation }
+        : {})
+    });
+  }
+
+  function catalogStreamLocalizedDefinition(
+    definition
+  ) {
+    const source =
+      definition && typeof definition === "object"
+        ? definition
+        : {};
+    const storedPresentation =
+      source.apiPresentation &&
+      typeof source.apiPresentation === "object"
+        ? source.apiPresentation
+        : {};
+    const presentation = {
+      ...catalogStreamLegacyPresentation(source),
+      ...storedPresentation
+    };
+    return Object.freeze({
+      ...source,
+      title: catalogStreamLocalizePresentation(
+        presentation.title,
+        source.title || "API"
+      ),
+      description:
+        catalogStreamLocalizePresentation(
+          presentation.description,
+          source.description || ""
+        ),
+      group: catalogStreamLocalizePresentation(
+        presentation.group,
+        catalogStreamLocalizedGroup(
+          source.group || "Other"
+        )
+      )
+    });
+  }
+
   function catalogStreamDefinition(
     operatorId,
     owner,
@@ -3468,16 +3916,42 @@
       customCSharp = true
     }
   ) {
+    const titleParts =
+      catalogStreamPresentationParts(
+        title,
+        "API"
+      );
+    const descriptionParts =
+      catalogStreamPresentationParts(
+        description,
+        ""
+      );
+    const groupParts =
+      catalogStreamPresentationParts(
+        group,
+        "Other"
+      );
+    const groupText = groupParts.text;
+    const groupKey =
+      CATALOG_STREAM_GROUP_PRESENTATION_KEYS[
+        groupText
+      ];
+    const groupPresentation = groupKey
+      ? Object.freeze({
+          key: groupKey,
+          values: Object.freeze({})
+        })
+      : groupParts.presentation;
     const definition = Object.freeze({
-      title: String(title || "API"),
-      description: String(description || ""),
+      title: titleParts.text,
+      description: descriptionParts.text,
       apiSearchText: String(
         searchText || ""
       ),
-      group: String(group || "Other"),
+      group: groupText,
       symbol: String(symbol || "API"),
       expertOnly:
-        group ===
+        groupText ===
           CATALOG_STREAM_GROUPS.advanced,
       hiddenFromPalette: false,
       catalogGenerated: true,
@@ -3488,7 +3962,21 @@
         catalogStreamNormalizeCsType(owner),
       apiMemberKind: String(kind || ""),
       customCSharpCatalogNode:
-        customCSharp === true
+        customCSharp === true,
+      apiPresentation: Object.freeze({
+        ...(titleParts.presentation
+          ? { title: titleParts.presentation }
+          : {}),
+        ...(groupPresentation
+          ? { group: groupPresentation }
+          : {}),
+        ...(descriptionParts.presentation
+          ? {
+              description:
+                descriptionParts.presentation
+            }
+          : {})
+      })
     });
     return Object.freeze({
       operatorId,
@@ -3601,14 +4089,28 @@
         index: Number(record.index)
       },
       {
-        title:
-          `${row.kind === "enum" ? "Enum type" : "Type"} · ${row.name || catalogStreamShortTypeName(owner)}`,
+        title: catalogStreamPresentation(
+          row.kind === "enum"
+            ? "api.catalog.title.enum_type"
+            : "api.catalog.title.type",
+          row.kind === "enum"
+            ? "Enum type · {name}"
+            : "Type · {name}",
+          {
+            name:
+              row.name ||
+              catalogStreamShortTypeName(owner)
+          }
+        ),
         group,
         symbol: "TYPE",
         kind: "type",
         searchText: `${owner} type typeof`,
-        description:
-          `Exact System.Type constant for ${owner}.`
+        description: catalogStreamPresentation(
+          "api.catalog.description.type_constant",
+          "Exact System.Type constant for {type}.",
+          { type: owner }
+        )
       }
     )];
   }
@@ -3645,15 +4147,24 @@
         index: Number(record.index)
       },
       {
-        title:
-          `Enum · ${catalogStreamShortTypeName(owner)}`,
+        title: catalogStreamPresentation(
+          "api.catalog.title.enum",
+          "Enum · {name}",
+          {
+            name:
+              catalogStreamShortTypeName(owner)
+          }
+        ),
         group,
         symbol: "ENUM",
         kind: "enum",
         searchText:
           `${owner} ${row.underlyingType || ""} ${row.isFlags === true ? "flags" : ""}`,
-        description:
-          `Typed constant for ${owner}.`
+        description: catalogStreamPresentation(
+          "api.catalog.description.enum_constant",
+          "Typed constant for {type}.",
+          { type: owner }
+        )
       }
     )];
   }
@@ -3748,8 +4259,14 @@
         owner,
         locator,
         {
-          title:
-            `Hook · ${displayOwner}.${method.name}`,
+          title: catalogStreamPresentation(
+            "api.catalog.title.hook",
+            "Hook · {name}",
+            {
+              name:
+                `${displayOwner}.${method.name}`
+            }
+          ),
           group:
             CATALOG_STREAM_GROUPS.hooks,
           symbol: "H<T>",
@@ -3758,7 +4275,13 @@
             `${owner} ${method.name} ${method.signature || ""} Harmony hook ${method.visibility || "public"}`,
           description:
             method.signature ||
-            `Typed Harmony hook for ${owner}.${method.name}.`,
+            catalogStreamPresentation(
+              "api.catalog.description.harmony_hook",
+              "Typed Harmony hook for {name}.",
+              {
+                name: `${owner}.${method.name}`
+              }
+            ),
           customCSharp: false
         }
       );
@@ -3791,7 +4314,11 @@
         owner,
         locator,
         {
-          title: `New · ${displayOwner}`,
+          title: catalogStreamPresentation(
+            "api.catalog.title.constructor",
+            "New · {type}",
+            { type: displayOwner }
+          ),
           group: group(
             CATALOG_STREAM_GROUPS.constructors
           ),
@@ -3801,7 +4328,11 @@
             `${owner} ${member.signature || "constructor new"}`,
           description:
             member.signature ||
-            `Constructs ${owner}.`
+            catalogStreamPresentation(
+              "api.catalog.description.constructor",
+              "Constructs {type}.",
+              { type: owner }
+            )
         }
       )];
     }
@@ -3864,8 +4395,18 @@
         owner,
         locator,
         {
-          title:
-            `${member.isStatic === true ? "Static" : "Call"} · ${displayOwner}.${member.name}`,
+          title: catalogStreamPresentation(
+            member.isStatic === true
+              ? "api.catalog.title.static_method"
+              : "api.catalog.title.method_call",
+            member.isStatic === true
+              ? "Static · {type}.{member}"
+              : "Call · {type}.{member}",
+            {
+              type: displayOwner,
+              member: member.name
+            }
+          ),
           group:
             noisy || !direct
               ? CATALOG_STREAM_GROUPS.advanced
@@ -3940,8 +4481,14 @@
           owner,
           locator,
           {
-            title:
-              `Get · ${displayOwner}.${member.name}`,
+            title: catalogStreamPresentation(
+              "api.catalog.title.property_get",
+              "Get · {type}.{member}",
+              {
+                type: displayOwner,
+                member: member.name
+              }
+            ),
             group: group(
               CATALOG_STREAM_GROUPS.properties
             ),
@@ -3949,8 +4496,15 @@
             kind: "property-get",
             searchText:
               `${owner} ${member.name} property get read ${valueType}`,
-            description:
-              `Reads ${owner}.${member.name} (${valueType}).`
+            description: catalogStreamPresentation(
+              "api.catalog.description.property_get",
+              "Reads {type}.{member} ({valueType}).",
+              {
+                type: owner,
+                member: member.name,
+                valueType
+              }
+            )
           }
         ));
       }
@@ -3982,8 +4536,14 @@
           owner,
           locator,
           {
-            title:
-              `Set · ${displayOwner}.${member.name}`,
+            title: catalogStreamPresentation(
+              "api.catalog.title.property_set",
+              "Set · {type}.{member}",
+              {
+                type: displayOwner,
+                member: member.name
+              }
+            ),
             group: group(
               CATALOG_STREAM_GROUPS.properties
             ),
@@ -3991,8 +4551,15 @@
             kind: "property-set",
             searchText:
               `${owner} ${member.name} property set write ${valueType}`,
-            description:
-              `Writes ${owner}.${member.name} (${valueType}).`
+            description: catalogStreamPresentation(
+              "api.catalog.description.property_set",
+              "Writes {type}.{member} ({valueType}).",
+              {
+                type: owner,
+                member: member.name,
+                valueType
+              }
+            )
           }
         ));
       }
@@ -4033,8 +4600,14 @@
         owner,
         locator,
         {
-          title:
-            `Read · ${displayOwner}.${member.name}`,
+          title: catalogStreamPresentation(
+            "api.catalog.title.field_read",
+            "Read · {type}.{member}",
+            {
+              type: displayOwner,
+              member: member.name
+            }
+          ),
           group: group(
             CATALOG_STREAM_GROUPS.fields
           ),
@@ -4042,8 +4615,15 @@
           kind: "field-get",
           searchText:
             `${owner} ${member.name} field read get ${valueType}`,
-          description:
-            `Reads field ${owner}.${member.name} (${valueType}).`
+          description: catalogStreamPresentation(
+            "api.catalog.description.field_read",
+            "Reads field {type}.{member} ({valueType}).",
+            {
+              type: owner,
+              member: member.name,
+              valueType
+            }
+          )
         }
       ));
       if (
@@ -4070,8 +4650,14 @@
           owner,
           locator,
           {
-            title:
-              `Write · ${displayOwner}.${member.name}`,
+            title: catalogStreamPresentation(
+              "api.catalog.title.field_write",
+              "Write · {type}.{member}",
+              {
+                type: displayOwner,
+                member: member.name
+              }
+            ),
             group: group(
               CATALOG_STREAM_GROUPS.fields
             ),
@@ -4079,8 +4665,15 @@
             kind: "field-set",
             searchText:
               `${owner} ${member.name} field write set ${valueType}`,
-            description:
-              `Writes field ${owner}.${member.name} (${valueType}).`
+            description: catalogStreamPresentation(
+              "api.catalog.description.field_write",
+              "Writes field {type}.{member} ({valueType}).",
+              {
+                type: owner,
+                member: member.name,
+                valueType
+              }
+            )
           }
         ));
       }
@@ -4107,8 +4700,14 @@
         owner,
         locator,
         {
-          title:
-            `On · ${displayOwner}.${member.name}`,
+          title: catalogStreamPresentation(
+            "api.catalog.title.event",
+            "On · {type}.{member}",
+            {
+              type: displayOwner,
+              member: member.name
+            }
+          ),
           group: group(
             CATALOG_STREAM_GROUPS.events
           ),
@@ -4116,8 +4715,15 @@
           kind: "event",
           searchText:
             `${owner} ${member.name} event ${member.handlerType || ""}`,
-          description:
-            `Typed catalog event wrapper for ${owner}.${member.name} (${handler}).`,
+          description: catalogStreamPresentation(
+            "api.catalog.description.event",
+            "Typed catalog event wrapper for {type}.{member} ({handler}).",
+            {
+              type: owner,
+              member: member.name,
+              handler
+            }
+          ),
           customCSharp: false
         }
       )];
@@ -5020,9 +5626,7 @@
           errorMessage:
             "The streamed catalog generation could not be committed.",
           abortMessage:
-            "The streamed catalog generation commit was rejected.",
-          timeoutMessage:
-            "The streamed catalog generation commit stopped responding."
+            "The streamed catalog generation commit was rejected."
         }
       );
     } catch (error) {
@@ -5059,9 +5663,7 @@
           errorMessage:
             "The streamed catalog staging marker could not be written.",
           abortMessage:
-            "The streamed catalog staging marker was rejected.",
-          timeoutMessage:
-            "The streamed catalog staging marker stopped responding."
+            "The streamed catalog staging marker was rejected."
         }
       );
     } catch (error) {
@@ -9542,10 +10144,6 @@
           normalizedOwner
         );
       if (actualOwner !== normalizedOwner) {
-        // Alias resolution can converge a closed generic request on an open
-        // generic owner that is already present.  Re-check the canonical row
-        // before reading it again: hydration is monotone, so a dependency-only
-        // read must never replace a partial or complete member-bearing row.
         const canonicalExisting =
           state.rows.get(actualOwner);
         if (
@@ -9980,13 +10578,6 @@
           unresolved.push(operatorId);
           continue;
         }
-        // Every demanded API contract is projected from its declaring type,
-        // not just from the one member row routed by its operator id.  Keep
-        // that owner complete for every load path (initial restore, import,
-        // and an explicit Live refresh), then hydrate its complete base chain
-        // below.  This is the catalog invariant that makes inherited and
-        // generic contracts independent of which operator happened to seed
-        // the demand snapshot.
         addCompleteOwner(
           portableOwner || owner,
           operatorId
@@ -10392,8 +10983,8 @@
   async function verifiedCatalogStreamDemandRecord(
     database
   ) {
-    let lastStaleError = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    const seenAuthorities = new Set();
+    while (true) {
       const expectedState = catalogDemandState;
       try {
         const active = await readCatalogCacheValue(
@@ -10427,6 +11018,36 @@
         ) {
           return null;
         }
+        const authorityKey =
+          catalogDemandAuthorityKey(
+            expectedState,
+            {
+              activeGeneration: String(
+                active.generation || ""
+              ),
+              activeManifestId: String(
+                active.manifestId || ""
+              ),
+              activeFingerprint: String(
+                active.catalogFingerprint || ""
+              ),
+              manifestId: String(
+                manifest.id || ""
+              ),
+              manifestGeneration: String(
+                manifest.generation || ""
+              ),
+              manifestFingerprint: String(
+                manifest.catalogFingerprint || ""
+              )
+            }
+          );
+        if (seenAuthorities.has(authorityKey)) {
+          throw catalogDemandCycleError(
+            "the streamed catalog snapshot"
+          );
+        }
+        seenAuthorities.add(authorityKey);
         const frozenManifest =
           Object.freeze(manifest);
         const state =
@@ -10501,14 +11122,12 @@
         if (!isCatalogDemandStaleError(error)) {
           throw error;
         }
-        lastStaleError = error;
-        if (attempt < 2) {
-          await yieldCatalogCacheWork();
+        if (error?.cycle === true) {
+          throw error;
         }
+        await yieldCatalogCacheWork();
       }
     }
-    throw lastStaleError ||
-      catalogDemandStaleError();
   }
 
   function createCatalogDemandState(
@@ -10952,7 +11571,8 @@
     options = {}
   ) {
     let lastStaleError = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    const seenAuthorities = new Set();
+    while (true) {
       const state = catalogDemandState;
       if (!state?.streamV1) {
         if (lastStaleError) {
@@ -10964,10 +11584,33 @@
           loaded: 0
         });
       }
+      const authorityKey =
+        catalogDemandAuthorityKey(
+          state,
+          {
+            requestedOperatorIds: [
+              ...new Set(
+                (Array.isArray(operatorIds)
+                  ? operatorIds
+                  : [])
+                  .map(value =>
+                    String(value || "")
+                  )
+              )
+            ].sort()
+          }
+        );
+      if (seenAuthorities.has(authorityKey)) {
+        throw catalogDemandCycleError(
+          "streamed operator hydration"
+        );
+      }
+      seenAuthorities.add(authorityKey);
       const lease = catalogDemandStateLease(state);
       if (!lease) {
         lastStaleError =
           catalogDemandStaleError();
+        await yieldCatalogCacheWork();
         continue;
       }
       let database;
@@ -11140,10 +11783,10 @@
             isCatalogDemandStaleError(error)
               ? error
               : catalogDemandStaleError();
-          if (
-            catalogDemandState === state &&
-            attempt < 2
-          ) {
+          if (error?.cycle === true) {
+            throw error;
+          }
+          if (catalogDemandState === state) {
             let refreshDatabase;
             try {
               refreshDatabase =
@@ -11162,11 +11805,8 @@
               refreshDatabase?.close?.();
             }
           }
-          if (attempt < 2) {
-            await yieldCatalogCacheWork();
-            continue;
-          }
-          throw lastStaleError;
+          await yieldCatalogCacheWork();
+          continue;
         }
         state.fallbackReason = String(
           error?.message || error
@@ -11187,8 +11827,6 @@
         database?.close?.();
       }
     }
-    throw lastStaleError ||
-      catalogDemandStaleError();
   }
 
   function ensureCatalogDemandOperators(
@@ -11773,7 +12411,8 @@
         visibleGroups.map(
           ([name, count]) =>
             Object.freeze({
-              name,
+              name:
+                catalogStreamLocalizedGroup(name),
               count
             })
         )
@@ -11829,7 +12468,7 @@
     }
     const signal = options?.signal || null;
     catalogStreamThrowIfAborted(signal);
-    const group = String(
+    const group = catalogStreamCanonicalGroup(
       options.group || ""
     );
     const query = String(
@@ -12111,11 +12750,15 @@
         const record =
           operatorRecords.get(operatorId);
         if (!record?.definition) continue;
+        const localizedDefinition =
+          catalogStreamLocalizedDefinition(
+            record.definition
+          );
         entries.push(Object.freeze({
           operatorId,
           definition:
             Object.freeze({
-              ...record.definition,
+              ...localizedDefinition,
               apiSearchText:
                 query
                   ? `${record.definition.apiSearchText || ""} ${query}`.trim()
@@ -12140,6 +12783,19 @@
     } finally {
       database?.close?.();
     }
+  }
+
+  function catalogDemandPalettePresentationRevision() {
+    if (!catalogDemandState?.streamV1) return "";
+    const language = String(
+      window.RMLI18n?.language ||
+      document.documentElement?.lang ||
+      "en"
+    );
+    return `${String(
+      catalogDemandState.manifest
+        .catalogFingerprint || ""
+    )}:presentation:${language}`;
   }
 
   async function verifiedLegacyV2CacheRecord(
@@ -12533,11 +13189,35 @@
         cachedCatalogRecord = streamed;
         return streamed;
       }
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      const seenGenerations = new Set();
+      while (true) {
         const stored =
           await readCatalogCacheRecord(
             database
           );
+        const generationKey = JSON.stringify({
+          id: String(stored?.id || ""),
+          generation: String(
+            stored?.generation || ""
+          ),
+          fingerprint: String(
+            stored?.fingerprint ||
+            stored?.catalogFingerprint ||
+            ""
+          ),
+          contentHash: String(
+            stored?.contentHash || ""
+          ),
+          chunkCount: Number(
+            stored?.chunkCount
+          ) || 0
+        });
+        if (seenGenerations.has(generationKey)) {
+          throw catalogDemandCycleError(
+            "the cached catalog generation read"
+          );
+        }
+        seenGenerations.add(generationKey);
         const legacyByteLength =
           Array.isArray(stored?.chunks)
             ? stored.chunks.reduce(
@@ -12581,14 +13261,13 @@
           if (
             error?.code ===
               "RML_CATALOG_CACHE_GENERATION_CHANGED" &&
-            attempt === 0
+            error?.cycle !== true
           ) {
             continue;
           }
           throw error;
         }
       }
-      return null;
     } catch (error) {
       if (isCatalogDemandStaleError(error)) {
         throw error;
@@ -12927,8 +13606,8 @@
       Number(
         window.RMLScannerStatusControl?.version
       ) >= 2 &&
-      window.RMLScannerStatusControl?.moduleId ===
-        CATALOG_LOADER_MODULE_ID
+      window.RMLScannerStatusControl?.owner ===
+        "script-loader"
     ) {
       manualCatalogActivationInstalled = true;
       window.RMLScannerStatusControl
@@ -13270,6 +13949,53 @@
     return report;
   }
 
+  function catalogFactoryAuthorityKey(catalog) {
+    const registry =
+      window.RMLModNodeRegistry || null;
+    const definitions =
+      registry?.getNodeDefinitions?.() ||
+      null;
+    const report =
+      window.RMLApiNodeFactoryReport ||
+      null;
+    return JSON.stringify({
+      catalogFingerprint: String(
+        catalog?.catalogFingerprint || ""
+      ),
+      engineVersion: String(
+        catalog?.engineVersion || ""
+      ),
+      registry: catalogAuthorityObjectId(
+        registry
+      ),
+      definitionCount:
+        definitions &&
+        typeof definitions === "object"
+          ? Object.keys(definitions).length
+          : 0,
+      definitionRevision: Number(
+        window.__RMLNodeDefinitionRevision
+      ) || 0,
+      reportFingerprint: String(
+        report?.catalogFingerprint || ""
+      ),
+      reportFactoryVersion: Number(
+        report?.factoryVersion
+      ) || 0
+    });
+  }
+
+  function catalogFactoryCycleError(error) {
+    const cycle = new Error(
+      "The API node factory registry returned to an already attempted authoritative state. The rebuild cycle was stopped without imposing a retry or time limit.",
+      { cause: error }
+    );
+    cycle.code =
+      "RML_API_FACTORY_AUTHORITY_CYCLE";
+    cycle.cycle = true;
+    return cycle;
+  }
+
   async function activateCatalogAndFactoryNow(
     catalog,
     { signal = null } = {}
@@ -13379,13 +14105,18 @@
       signal
     };
 
-    let rebuildError = null;
-
-    for (
-      let attempt = 0;
-      attempt < 3;
-      attempt += 1
-    ) {
+    const attemptedAuthorities = new Set();
+    while (true) {
+      const authorityKey =
+        catalogFactoryAuthorityKey(catalog);
+      if (
+        attemptedAuthorities.has(
+          authorityKey
+        )
+      ) {
+        throw catalogFactoryCycleError();
+      }
+      attemptedAuthorities.add(authorityKey);
       try {
         await awaitCatalogSettlement(
           controller.rebuild(
@@ -13396,11 +14127,8 @@
           "The API node factory rebuild"
         );
 
-        rebuildError = null;
         break;
       } catch (error) {
-        rebuildError = error;
-
         const message = String(
           error?.message || error || ""
         );
@@ -13417,10 +14145,7 @@
             )
           );
 
-        if (
-          !registryChanged ||
-          attempt >= 2
-        ) {
+        if (!registryChanged) {
           throw error;
         }
 
@@ -13431,11 +14156,17 @@
           signal,
           "The API node factory registry retry yield"
         );
-      }
-    }
 
-    if (rebuildError) {
-      throw rebuildError;
+        if (
+          attemptedAuthorities.has(
+            catalogFactoryAuthorityKey(catalog)
+          )
+        ) {
+          throw catalogFactoryCycleError(
+            error
+          );
+        }
+      }
     }
 
     report =
@@ -13555,9 +14286,6 @@
       errors: outcomes.filter(probe =>
         probe?.outcome === "error"
       ).length,
-      timeouts: outcomes.filter(probe =>
-        probe?.outcome === "timeout"
-      ).length,
       aborted: outcomes.filter(probe =>
         probe?.outcome === "aborted"
       ).length
@@ -13578,13 +14306,6 @@
     );
     const aborted =
       options.aborted === true;
-    const timedOut = Boolean(
-      !aborted &&
-      (
-        options.timedOut === true ||
-        name === "AbortError"
-      )
-    );
     const httpMatch = message.match(
       /^(?:HTTP\s+)?([1-5]\d{2})(?:\s+(.+))?$/i
     );
@@ -13598,9 +14319,7 @@
     return Object.freeze({
       outcome: aborted
         ? "aborted"
-        : timedOut
-          ? "timeout"
-          : "error",
+        : "error",
       http: Object.freeze({
         status,
         statusText
@@ -13609,8 +14328,7 @@
         name,
         message,
         code: String(error?.code || ""),
-        aborted,
-        timedOut
+        aborted
       })
     });
   }
@@ -13745,24 +14463,37 @@
   ) {
     const requestEpoch =
       ++catalogHealthSweepRequestEpoch;
-    const outcomes = [];
-    let selected = null;
-    for (
-      let port = DEFAULT_PORT_FIRST;
-      port <= DEFAULT_PORT_LAST;
-      port += 1
-    ) {
+    const ports = Array.from(
+      {
+        length:
+          DEFAULT_PORT_LAST -
+          DEFAULT_PORT_FIRST +
+          1
+      },
+      (_, index) =>
+        DEFAULT_PORT_FIRST + index
+    );
+    const probe = async port => {
       if (signal?.aborted === true) {
-        break;
+        return Object.freeze({
+          port,
+          ...catalogHealthSweepFailure(
+            new DOMException(
+              "The scanner health sweep was aborted.",
+              "AbortError"
+            ),
+            { aborted: true }
+          )
+        });
       }
-      let outcome;
       try {
         const health = await fetchJson(
           `http://127.0.0.1:${port}/health`,
           signal
         );
-        outcome = Object.freeze({
+        return Object.freeze({
           port,
+          attempts: 1,
           outcome:
             health?.ok === true
               ? "healthy"
@@ -13785,8 +14516,9 @@
           ).trim().toLowerCase()
         });
       } catch (error) {
-        outcome = Object.freeze({
+        return Object.freeze({
           port,
+          attempts: 1,
           ...catalogHealthSweepFailure(
             error,
             {
@@ -13796,17 +14528,18 @@
           )
         });
       }
-      if (
-        requestEpoch !==
-          catalogHealthSweepRequestEpoch
-      ) {
-        return null;
-      }
-      outcomes.push(outcome);
-      if (outcome.health?.ok === true) {
-        selected = outcome;
-        break;
-      }
+    };
+    const outcomes = await Promise.all(
+      ports.map(probe)
+    );
+    const selected = outcomes.find(
+      outcome => outcome.health?.ok === true
+    ) || null;
+    if (
+      requestEpoch !==
+        catalogHealthSweepRequestEpoch
+    ) {
+      return null;
     }
     publishCatalogHealthSweepDiagnostics({
       requestEpoch,
@@ -14181,7 +14914,12 @@
         sessionKey
       ) {
         ensureScannerCheckWork(
-          options,
+          options.showWorkOnCatalogChange === true
+            ? {
+                ...options,
+                showWork: true
+              }
+            : options,
           sessionKey
         );
       }
@@ -14413,6 +15151,9 @@
           ensureScannerCheckWork(
             {
               ...options,
+              showWork:
+                options.showWork === true ||
+                options.showWorkOnCatalogChange === true,
             },
             sessionKey
           );
@@ -14429,7 +15170,7 @@
               phase:
                 "catalog-demand-stream",
               message:
-                "The API catalog is being updated in bounded demand records."
+                window.RMLI18n.t("catalog.status.demand_update")
             }
           );
           document.documentElement.dataset
@@ -15086,9 +15827,15 @@
           ) {
             scannerCheckAbortController = null;
           }
-          await finishScannerCheckWork(
-            factoryActivated
-          );
+          if (
+            options.deferScannerCheckWorkFinish !==
+              true &&
+            scannerCheckWorkOwner === 0
+          ) {
+            await finishScannerCheckWork(
+              factoryActivated
+            );
+          }
           updateStatus();
         }
         externalSignal?.removeEventListener?.(
@@ -17165,7 +17912,7 @@
     });
   }
 
-  async function synchronizeAvailableCatalog(
+  async function synchronizeAvailableCatalogCore(
     options = {}
   ) {
     notifyCatalogGate(
@@ -17189,8 +17936,6 @@
       healthSweepEpoch !==
         catalogHealthSweepRequestEpoch
     ) {
-      // A newer caller owns scanner availability now.  An older completion
-      // must not demote, announce, or overwrite that caller's result.
       return Boolean(
         activeBuilderCatalogSessionKey ||
         statusCatalog()
@@ -17249,7 +17994,9 @@
         ...options,
         session: proxySession,
         silent: true,
-        throwOnFailure: false
+        throwOnFailure: false,
+        deferScannerCheckWorkFinish:
+          options.showWork === true
       });
       if (
         synchronized === true &&
@@ -17346,6 +18093,55 @@
     return false;
   }
 
+  async function synchronizeAvailableCatalog(
+    options = {}
+  ) {
+    const showWork = options.showWork === true;
+    const workOwner = showWork
+      ? ++scannerCheckWorkOwnerSequence
+      : 0;
+
+    if (showWork) {
+      scannerCheckWorkOwner = workOwner;
+      ensureScannerCheckWork(
+        options,
+        `health-sweep:${workOwner}`
+      );
+      updateScannerCheckWork({
+        title:
+          window.RMLI18n.t("ui.auto.4fbd685b87a4"),
+        message:
+          window.RMLI18n.t("ui.auto.ef5bac1920fc"),
+        detail:
+          window.RMLI18n.t("ui.auto.112240abb0c0"),
+        progress: 1
+      });
+    }
+
+    try {
+      return await synchronizeAvailableCatalogCore(
+        options
+      );
+    } finally {
+      if (
+        showWork &&
+        scannerCheckWorkOwner === workOwner
+      ) {
+        scannerCheckWorkOwner = 0;
+        await finishScannerCheckWork(false);
+        const statusElement =
+          document.getElementById(
+            "api-catalog-state"
+          );
+        statusElement?.setAttribute(
+          "aria-busy",
+          "false"
+        );
+        updateStatus();
+      }
+    }
+  }
+
   window.addEventListener("rml-api-node-factory-ready", updateStatus);
   window.addEventListener("rml-scanner-connection", updateStatus);
   window.addEventListener("rml-runtime-readiness", updateStatus);
@@ -17356,6 +18152,9 @@
     {
       value: Object.freeze({
         version: 1,
+        get revision() {
+          return catalogDemandPalettePresentationRevision();
+        },
         getPaletteIndex() {
           return catalogDemandPaletteIndex();
         },

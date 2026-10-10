@@ -335,10 +335,6 @@ const GRAPH_VECTOR_SCALAR_CSHARP_TYPES =
 const GRAPH_TYPE_BY_CSHARP_TYPE =
   new Map();
 
-// Presentation-only C# names carried by the currently loaded project.
-// These contracts deliberately do not enter TYPE_INFO: an offline project
-// must remain non-executable until its real catalog types are available, but
-// its validated C# type names are still safe and useful to display.
 const GRAPH_PORTABLE_TYPE_PRESENTATIONS =
   new Map();
 
@@ -380,7 +376,7 @@ function graphCanonicalCsType(typeOrCsType) {
 
 function graphTypeIsInternalIdentifier(value) {
   const id = String(value || "").trim();
-  return /^(?:api[.:]|apiEnum[.:]|normal(?:Exact|Array):|collectList:|contract\.|unavailable\.preserved\.)/.test(id) ||
+  return /^(?:api[.:]|apiEnum[.:]|normal(?:Exact|Array|Delegate|Dictionary):|csharpExact:|collectList:|contract\.|unavailable\.preserved\.)/.test(id) ||
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ||
     /(?:^|[.:_-])[0-9a-f]{12,}$/i.test(id);
 }
@@ -816,7 +812,8 @@ function canonicalGraphType(typeOrCsType) {
     const information = TYPE_INFO[id];
     if (
       information &&
-      !id.startsWith("normalExact:")
+      !id.startsWith("normalExact:") &&
+      !id.startsWith("csharpExact:")
     ) {
       return id;
     }
@@ -1474,7 +1471,7 @@ const OPERATOR_DEFINITIONS = {
           "rmlDisplaySlot",
           {
             detail:
-              "Optional binding to one Display Value (RML Menu) item from Configuration Outline. The displayed value is this monitor's live pulse count."
+              window.RMLI18n.t("graph.node.debug_display_impulse.menu_binding_help")
           }
         )
       ],
@@ -2009,12 +2006,419 @@ function registerGraphCodegenPlugin(
     GRAPH_CODEGEN_PLUGINS.push(plugin);
   }
 
+function graphStructuralListContract(
+    specification
+  ) {
+    const source =
+      specification?.structuralList;
+    if (
+      !source ||
+      typeof source !== "object" ||
+      Array.isArray(source)
+    ) {
+      return null;
+    }
+
+    const minimum = Math.max(
+      0,
+      Math.trunc(
+        Number(source.minimum) || 0
+      )
+    );
+    const maximum = Math.max(
+      minimum,
+      Math.trunc(
+        Number(source.maximum) || 64
+      )
+    );
+    const defaultCount = Math.max(
+      minimum,
+      Math.min(
+        maximum,
+        Math.trunc(
+          Number(source.defaultCount) ||
+            minimum
+        )
+      )
+    );
+
+    return {
+      listKey: String(
+        specification?.key || "items"
+      ),
+      itemsKey: String(
+        source.itemsKey ||
+          `${specification?.key || "items"}Entries`
+      ),
+      idPrefix:
+        String(source.idPrefix || "item") ||
+        "item",
+      minimum,
+      maximum,
+      defaultCount,
+      legacyCountKeys:
+        Array.isArray(source.legacyCountKeys)
+          ? source.legacyCountKeys
+              .map(value =>
+                String(value || "").trim()
+              )
+              .filter(Boolean)
+          : [],
+      legacyItemPrefix: String(
+        source.legacyItemPrefix || ""
+      ),
+      legacyItemSuffix: String(
+        source.legacyItemSuffix || ""
+      )
+    };
+  }
+
+function graphStructuralListTextValues(
+    value
+  ) {
+    if (Array.isArray(value)) {
+      return value.map(entry =>
+        typeof entry === "object" &&
+        entry !== null
+          ? String(
+              entry.type ??
+              entry.value ??
+              ""
+            ).trim()
+          : String(entry ?? "").trim()
+      );
+    }
+
+    const source = String(value ?? "");
+    if (!source) return [];
+    if (/\r|\n/.test(source)) {
+      return source
+        .replace(/\r\n?/g, "\n")
+        .split("\n")
+        .map(entry => entry.trim());
+    }
+
+    const values = [];
+    let current = "";
+    let angleDepth = 0;
+    let squareDepth = 0;
+    let parenthesisDepth = 0;
+    const commit = () => {
+      const value = current.trim();
+      if (value) values.push(value);
+      current = "";
+    };
+    for (const character of source) {
+      if (character === "<") angleDepth += 1;
+      if (character === ">") {
+        angleDepth = Math.max(0, angleDepth - 1);
+      }
+      if (character === "[") squareDepth += 1;
+      if (character === "]") {
+        squareDepth = Math.max(0, squareDepth - 1);
+      }
+      if (character === "(") {
+        parenthesisDepth += 1;
+      }
+      if (character === ")") {
+        parenthesisDepth = Math.max(
+          0,
+          parenthesisDepth - 1
+        );
+      }
+      if (
+        (character === "," || character === ";") &&
+        angleDepth === 0 &&
+        squareDepth === 0 &&
+        parenthesisDepth === 0
+      ) {
+        commit();
+      } else {
+        current += character;
+      }
+    }
+    commit();
+    return values;
+  }
+
+function graphStructuralListEntries(
+    parameters,
+    specification
+  ) {
+    const contract =
+      graphStructuralListContract(
+        specification
+      );
+    if (!contract) return [];
+
+    const source =
+      parameters &&
+      typeof parameters === "object"
+        ? parameters
+        : {};
+    const stored = Array.isArray(
+      source[contract.itemsKey]
+    )
+      ? source[contract.itemsKey]
+      : null;
+    const rawList = source[contract.listKey];
+    const listed =
+      graphStructuralListTextValues(rawList);
+    const hasCanonicalList =
+      stored !== null ||
+      (
+        Object.hasOwn(
+          source,
+          contract.listKey
+        ) &&
+        (
+          Array.isArray(rawList)
+            ? rawList.length > 0
+            : String(rawList ?? "")
+                .length > 0
+        )
+      );
+
+    let legacyCount = 0;
+    for (const key of
+      contract.legacyCountKeys) {
+      const value = Math.trunc(
+        Number(source[key]) || 0
+      );
+      legacyCount = Math.max(
+        legacyCount,
+        value
+      );
+    }
+
+    let legacyLastIndex = 0;
+    if (contract.legacyItemPrefix) {
+      for (
+        let index = 1;
+        index <= contract.maximum;
+        index += 1
+      ) {
+        const key =
+          `${contract.legacyItemPrefix}${index}${contract.legacyItemSuffix}`;
+        if (
+          Object.hasOwn(source, key) &&
+          String(source[key] ?? "").trim()
+        ) {
+          legacyLastIndex = index;
+        }
+      }
+    }
+
+    const requestedCount = stored
+      ? stored.length
+      : hasCanonicalList
+        ? listed.length
+        : Math.max(
+            legacyCount,
+            legacyLastIndex,
+            contract.defaultCount
+          );
+    const count = Math.max(
+      contract.minimum,
+      Math.min(
+        contract.maximum,
+        requestedCount ||
+          contract.defaultCount
+      )
+    );
+    const entries = [];
+    const usedIds = new Set();
+
+    for (
+      let index = 0;
+      index < count;
+      index += 1
+    ) {
+      const storedEntry =
+        stored?.[index];
+      const preferredId = String(
+        storedEntry &&
+        typeof storedEntry === "object"
+          ? storedEntry.id || ""
+          : ""
+      )
+        .trim()
+        .replace(/[^A-Za-z0-9_-]/g, "_");
+      let id = preferredId ||
+        `${contract.idPrefix}${index + 1}`;
+      if (usedIds.has(id)) {
+        let sequence = index + 1;
+        do {
+          sequence += 1;
+          id = `${contract.idPrefix}${sequence}`;
+        } while (usedIds.has(id));
+      }
+      usedIds.add(id);
+
+      let type = "";
+      if (
+        storedEntry &&
+        typeof storedEntry === "object"
+      ) {
+        type = String(
+          storedEntry.type ??
+          storedEntry.value ??
+          ""
+        ).trim();
+      } else if (hasCanonicalList) {
+        type = String(
+          listed[index] ?? ""
+        ).trim();
+      } else if (
+        contract.legacyItemPrefix
+      ) {
+        type = String(
+          source[
+            `${contract.legacyItemPrefix}${index + 1}${contract.legacyItemSuffix}`
+          ] ?? ""
+        ).trim();
+      }
+
+      entries.push({ id, type });
+    }
+
+    return entries;
+  }
+
+function graphStructuralListNextId(
+    entries,
+    specification
+  ) {
+    const contract =
+      graphStructuralListContract(
+        specification
+      );
+    if (!contract) return "item1";
+    const used = new Set(
+      (Array.isArray(entries) ? entries : [])
+        .map(entry =>
+          String(entry?.id || "").trim()
+        )
+        .filter(Boolean)
+    );
+    let highest = 0;
+    const escapedPrefix =
+      contract.idPrefix.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+    const pattern = new RegExp(
+      `^${escapedPrefix}(\\d+)$`
+    );
+    for (const id of used) {
+      const match = pattern.exec(id);
+      if (match) {
+        highest = Math.max(
+          highest,
+          Number(match[1]) || 0
+        );
+      }
+    }
+    let sequence = highest + 1;
+    let candidate =
+      `${contract.idPrefix}${sequence}`;
+    while (used.has(candidate)) {
+      sequence += 1;
+      candidate =
+        `${contract.idPrefix}${sequence}`;
+    }
+    return candidate;
+  }
+
+function writeGraphStructuralListEntries(
+    parameters,
+    specification,
+    entries
+  ) {
+    const contract =
+      graphStructuralListContract(
+        specification
+      );
+    if (
+      !contract ||
+      !parameters ||
+      typeof parameters !== "object"
+    ) {
+      return [];
+    }
+
+    const normalized = [];
+    const usedIds = new Set();
+    for (const entry of
+      Array.isArray(entries) ? entries : []) {
+      if (normalized.length >= contract.maximum) {
+        break;
+      }
+      let id = String(entry?.id || "")
+        .trim()
+        .replace(/[^A-Za-z0-9_-]/g, "_");
+      if (!id || usedIds.has(id)) {
+        id = graphStructuralListNextId(
+          normalized,
+          specification
+        );
+      }
+      usedIds.add(id);
+      normalized.push({
+        id,
+        type: String(
+          entry?.type ??
+          entry?.value ??
+          ""
+        ).trim()
+      });
+    }
+
+    while (
+      normalized.length < contract.minimum
+    ) {
+      const id = graphStructuralListNextId(
+        normalized,
+        specification
+      );
+      normalized.push({ id, type: "" });
+    }
+
+    parameters[contract.itemsKey] =
+      normalized.map(entry => ({
+        id: entry.id,
+        type: entry.type
+      }));
+    parameters[contract.listKey] =
+      normalized
+        .map(entry => entry.type)
+        .join("\n");
+
+    for (const key of
+      contract.legacyCountKeys) {
+      delete parameters[key];
+    }
+    if (contract.legacyItemPrefix) {
+      for (
+        let index = 1;
+        index <= contract.maximum;
+        index += 1
+      ) {
+        delete parameters[
+          `${contract.legacyItemPrefix}${index}${contract.legacyItemSuffix}`
+        ];
+      }
+    }
+
+    return parameters[contract.itemsKey];
+  }
+
 Object.defineProperty(
     window,
     "RMLModNodeRegistry",
     {
       value: Object.freeze({
-        version: 9,
+        version: 10,
         port,
         genericPort,
         registerType:
@@ -2092,6 +2496,42 @@ Object.defineProperty(
         },
         getValueTypes() {
           return VALUE_TYPES;
+        },
+        structuralListContract(
+          specification
+        ) {
+          return graphStructuralListContract(
+            specification
+          );
+        },
+        structuralListEntries(
+          parameters,
+          specification
+        ) {
+          return graphStructuralListEntries(
+            parameters,
+            specification
+          );
+        },
+        structuralListNextId(
+          entries,
+          specification
+        ) {
+          return graphStructuralListNextId(
+            entries,
+            specification
+          );
+        },
+        writeStructuralListEntries(
+          parameters,
+          specification,
+          entries
+        ) {
+          return writeGraphStructuralListEntries(
+            parameters,
+            specification,
+            entries
+          );
         }
       }),
       writable: false,

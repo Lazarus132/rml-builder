@@ -174,7 +174,6 @@ let graphParameterPointerTrackingInstalled = false;
 let graphParameterCommitReady = false;
 let graphParameterCommitFrame = 0;
 let graphParameterCommitTask = null;
-let graphParameterCommitTaskDeadlineTimer = 0;
 let graphParameterCommitRetryTimer = 0;
 let graphParameterGestureObserver = null;
 const graphParameterActivePointers = new Map();
@@ -1132,26 +1131,13 @@ function releaseEmergencyGraphPreparation(
     });
     attempt(() => {
       preparation.root.dataset.rmlGraphPhase =
-        "recoverable";
+        "failed";
       preparation.root.dataset
         .rmlGraphPresentationRecovery =
           "minimal";
       preparation.root.removeAttribute(
         "aria-busy"
       );
-    });
-    attempt(() => {
-      preparation.viewport.inert = false;
-    });
-    attempt(() => {
-      const toolbar = preparation.root
-          ?._rmlGraphPresentationDom
-          ?.toolbar ||
-        dom.toolbar ||
-        preparation.root.querySelector(
-          ".rml-graph-toolbar"
-        );
-      if (toolbar) toolbar.inert = false;
     });
     attempt(() => {
       const status = preparation.status;
@@ -1186,7 +1172,6 @@ function releaseEmergencyGraphPreparation(
       status.append(text, retry);
     });
     runtimeGraphPresentationPending = false;
-    attempt(() => recordActiveGraphPresentationViewState());
     attempt(() => updatePackButton());
     attempt(() => showGraphSvgFallbackWarning());
     attempt(() => {
@@ -1197,7 +1182,8 @@ function releaseEmergencyGraphPreparation(
             detail: {
               ...graphRenderCompleteDetail(),
               presentation:
-                "model-preserved-retryable",
+                "failed-retryable",
+              failed: true,
               recoveredError: message
             }
           }
@@ -2048,6 +2034,42 @@ let graphHostInitialized = false;
 let graphBaseModulesReady = false;
 
 let graphHostError = null;
+
+let resolveGraphHostReady = null;
+let rejectGraphHostReady = null;
+const graphHostReadyPromise = new Promise((resolve, reject) => {
+  resolveGraphHostReady = resolve;
+  rejectGraphHostReady = reject;
+});
+void graphHostReadyPromise.catch(() => {});
+
+function completeGraphHostReady() {
+  if (!resolveGraphHostReady) return;
+  const resolve = resolveGraphHostReady;
+  resolveGraphHostReady = null;
+  rejectGraphHostReady = null;
+  resolve(true);
+}
+
+function failGraphHostReady(error) {
+  graphHostError =
+    error instanceof Error
+      ? error
+      : new Error(String(error));
+  if (rejectGraphHostReady) {
+    const reject = rejectGraphHostReady;
+    resolveGraphHostReady = null;
+    rejectGraphHostReady = null;
+    reject(graphHostError);
+  }
+  document.dispatchEvent(
+    new CustomEvent("rml-graph:host-failed", {
+      detail: Object.freeze({
+        error: graphHostError.message
+      })
+    })
+  );
+}
 
 let runtimeBridgeSubscription = null;
 
@@ -4681,7 +4703,7 @@ function setRmlNodeSymbolContent(element, symbol) {
   svg.setAttribute("aria-hidden", "true");
   svg.classList.add("rml-node-symbol-svg");
   const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", `assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#${iconId}`);
+  use.setAttribute("href", `assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#${iconId}`);
   svg.appendChild(use);
   element.appendChild(svg);
 }
@@ -5939,7 +5961,10 @@ function navigateToGraphNavigationLevel(
             : target.kind === "api-composite"
               ? window.RMLI18n.t("ui.text.e4f5f8cbde11")
               : window.RMLI18n.t("ui.text.ba090b5e07cf"),
-        title: `Opening ${target.label}…`,
+        title: window.RMLI18n.format(
+          "composite.transition.opening",
+          { title: target.label }
+        ),
         message:
           window.RMLI18n.t("ui.auto.2717bcc7b975"),
         detail:
@@ -5995,11 +6020,15 @@ function navigateToGraphNavigationLevel(
             workSession
           );
           showGraphMessage(
-            `The selected graph level could not be opened: ${
-              error instanceof Error
-                ? error.message
-                : String(error)
-            }`,
+            window.RMLI18n.format(
+              "graph.navigation.open_error",
+              {
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : String(error)
+              }
+            ),
             "error"
           );
         });
@@ -6130,7 +6159,13 @@ function createGraphNavigationTrail(
         element.disabled = !level.exists;
         element.setAttribute(
           "aria-label",
-          `Open level ${index + 1}: ${level.label}`
+          window.RMLI18n.format(
+            "graph.navigation.open_level_aria",
+            {
+              level: index + 1,
+              label: level.label
+            }
+          )
         );
         element.addEventListener(
           "click",
@@ -6154,9 +6189,18 @@ function createGraphNavigationTrail(
     depth.className =
       "rml-graph-navigation-depth";
     depth.textContent =
-      `Level ${levels.length}`;
+      window.RMLI18n.format(
+        "graph.navigation.level",
+        { level: levels.length }
+      );
     depth.title =
-      `Current graph level ${levels.length} of ${levels.length}`;
+      window.RMLI18n.format(
+        "graph.navigation.current_level",
+        {
+          current: levels.length,
+          total: levels.length
+        }
+      );
     depth.setAttribute(
       "aria-label",
       depth.title
@@ -6237,7 +6281,13 @@ function createGraphNavigationTrail(
         );
         button.setAttribute(
           "aria-label",
-          `Open level ${index + 1}: ${level.label}`
+          window.RMLI18n.format(
+            "graph.navigation.open_level_aria",
+            {
+              level: index + 1,
+              label: level.label
+            }
+          )
         );
         Object.assign(
           button.style,
@@ -6617,7 +6667,14 @@ function selectConnectedApiNodes(
     renderGraphInspector();
     showGraphMessage(
       selected.size > 1
-        ? `${selected.size.toLocaleString(window.RMLI18n?.language || undefined)} connected API nodes selected. Choose Create API Composite in the inspector.`
+        ? window.RMLI18n.format(
+            "graph.selection.connected_api_nodes_selected",
+            {
+              count: selected.size.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+            }
+          )
         : window.RMLI18n.t("ui.literal.e7034e9154b4"),
       selected.size > 1
         ? "success"
@@ -10778,12 +10835,6 @@ function cancelGraphParameterCommit() {
     }
     graphParameterCommitTask?.cancel();
     graphParameterCommitTask = null;
-    if (graphParameterCommitTaskDeadlineTimer) {
-      window.clearTimeout(
-        graphParameterCommitTaskDeadlineTimer
-      );
-      graphParameterCommitTaskDeadlineTimer = 0;
-    }
     if (graphParameterCommitRetryTimer) {
       window.clearTimeout(
         graphParameterCommitRetryTimer
@@ -10858,42 +10909,6 @@ function scheduleGraphParameterCommitRetry(
     return true;
   }
 
-function armGraphParameterCommitTaskDeadline(
-    task,
-    epoch
-  ) {
-    if (graphParameterCommitTaskDeadlineTimer) {
-      window.clearTimeout(
-        graphParameterCommitTaskDeadlineTimer
-      );
-    }
-    graphParameterCommitTaskDeadlineTimer =
-      window.setTimeout(() => {
-        graphParameterCommitTaskDeadlineTimer = 0;
-        if (graphParameterCommitTask !== task) {
-          return;
-        }
-        task.cancel();
-        graphParameterCommitTask = null;
-        if (
-          epoch === builderProjectEpoch &&
-          graphParameterPersistenceDirty
-        ) {
-          scheduleGraphParameterCommitRetry();
-        }
-      }, 1000);
-  }
-
-function clearGraphParameterCommitTaskDeadline() {
-    if (!graphParameterCommitTaskDeadlineTimer) {
-      return;
-    }
-    window.clearTimeout(
-      graphParameterCommitTaskDeadlineTimer
-    );
-    graphParameterCommitTaskDeadlineTimer = 0;
-  }
-
 function requestGraphParameterCommit() {
     const gestureActive = graphParameterGestureActive();
     if (!gestureActive) graphParameterGestureObserver?.disconnect();
@@ -10912,7 +10927,6 @@ function requestGraphParameterCommit() {
       graphParameterCommitTask = task;
       const run = () => {
         if (graphParameterCommitTask !== task) return;
-        clearGraphParameterCommitTaskDeadline();
         graphParameterCommitTask = null;
         if (epoch !== builderProjectEpoch) return;
         if (!graphParameterPersistenceDirty) return;
@@ -10930,7 +10944,6 @@ function requestGraphParameterCommit() {
           priority: "background", signal: controller.signal
         }).catch(error => {
           if (graphParameterCommitTask === task) {
-            clearGraphParameterCommitTaskDeadline();
             graphParameterCommitTask = null;
             scheduleGraphParameterCommitRetry();
           }
@@ -10951,10 +10964,6 @@ function requestGraphParameterCommit() {
         };
         channel.port2.postMessage(null);
       }
-      armGraphParameterCommitTaskDeadline(
-        task,
-        epoch
-      );
     };
     if (document.visibilityState === "hidden") {
       enqueue();
@@ -15211,7 +15220,7 @@ function graphPresentationVisible() {
   }
 
 function graphOutlineToggleMarkup() {
-    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-outline"></use></svg>`;
+    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-outline"></use></svg>`;
   }
 
 function markGraphPackPresentationPending() {
@@ -15424,11 +15433,15 @@ function updatePackButton() {
           ? window.RMLI18n.t("ui.literal.6a8eaedc7841")
         : catalogFailed
           ? hostFailed
-            ? `The Runtime Graph base modules failed: ${
-                graphHostError instanceof Error
-                  ? graphHostError.message
-                  : String(graphHostError)
-            }`
+            ? window.RMLI18n.format(
+                "graph.host.modules_failed",
+                {
+                  error:
+                    graphHostError instanceof Error
+                      ? graphHostError.message
+                      : String(graphHostError)
+                }
+              )
             : graphCatalogReadinessMessage ||
             window.RMLI18n.t("ui.literal.5f57111e3e7f")
         : graph?.active
@@ -15472,10 +15485,16 @@ function sourceIsOutdated() {
       ) &&
       graph.sourceSignature
     ) {
-      return Boolean(
-        packedSnapshotSyncScheduled ||
-        packedSnapshotSourceRevision !==
+      if (
+        !packedSnapshotSyncScheduled &&
+        packedSnapshotSourceRevision ===
           builderSourceRevision
+      ) {
+        return false;
+      }
+      return (
+        graph.sourceSignature !==
+        currentBuilderSignature()
       );
     }
 
@@ -15502,13 +15521,22 @@ function updateSourceBadge() {
       synchronizing
     );
 
+    const packedRootItemCount =
+      graph.configSnapshot?.nodes
+        ?.length || 0;
     dom.sourceBadge.textContent =
       synchronizing
         ? window.RMLI18n.t("ui.literal.2023c1046414")
-        : `${
-            graph.configSnapshot?.nodes
-              ?.length || 0
-          } root item(s) packed · auto-synced · strict typed wiring`;
+        : window.RMLI18n.format(
+            packedRootItemCount === 1
+              ? "graph.source_badge.summary.one"
+              : "graph.source_badge.summary.other",
+            {
+              count: packedRootItemCount.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+            }
+          );
   }
 
 function showGraphMessage(
@@ -15632,11 +15660,15 @@ async function togglePackedNodeMode() {
     ) {
       showGraphMessage(
         graphHostError
-          ? `The Runtime Graph base modules failed: ${
-              graphHostError instanceof Error
-                ? graphHostError.message
-                : String(graphHostError)
-            }`
+          ? window.RMLI18n.format(
+              "graph.host.modules_failed",
+              {
+                error:
+                  graphHostError instanceof Error
+                    ? graphHostError.message
+                    : String(graphHostError)
+              }
+            )
           : window.RMLI18n.t("ui.literal.f37b3c4570a4"),
         graphHostError ? "error" : ""
       );
@@ -15777,6 +15809,7 @@ function synchronizePackedSnapshot(
     ) {
       packedSnapshotSourceRevision =
         sourceRevision;
+      updateSourceBadge();
       return false;
     }
 
@@ -16420,7 +16453,7 @@ function restoreGraphPaletteScroll(
 
 function setGraphPanelToggleIcon(button, iconName) {
   if (!button) return;
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${iconName}"></use></svg>`;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-${iconName}"></use></svg>`;
 }
 
 let graphPanelScrollPreservationSequence = 0;
@@ -17046,18 +17079,24 @@ function presentRuntimeGraphRestoreShell() {
     ) {
       return false;
     }
+    const startupRestoreRunsInPanel =
+      document.documentElement.dataset
+        .rmlStartupGraphPresentation ===
+          "pending";
     const workSession =
-      beginGraphTransitionWork({
-        kicker: window.RMLI18n.t("index.aria_label.755f023e2cc7"),
-        title:
-          window.RMLI18n.t("ui.auto.95296e3bae6d"),
-        message:
-          window.RMLI18n.t("ui.auto.3d4f452a5761"),
-        detail:
-          graphCatalogReadinessMessage ||
-          window.RMLI18n.t("ui.literal.356c9e23044a"),
-        progress: 38
-      });
+      startupRestoreRunsInPanel
+        ? 0
+        : beginGraphTransitionWork({
+            kicker: window.RMLI18n.t("index.aria_label.755f023e2cc7"),
+            title:
+              window.RMLI18n.t("ui.auto.95296e3bae6d"),
+            message:
+              window.RMLI18n.t("ui.auto.3d4f452a5761"),
+            detail:
+              graphCatalogReadinessMessage ||
+              window.RMLI18n.t("ui.literal.356c9e23044a"),
+            progress: 38
+          });
     bindGraphTransitionWorkTarget();
     const existing = dom.root;
     if (
@@ -17530,7 +17569,7 @@ function createPaletteItem(
 
     const add =
       document.createElement("small");
-    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
 
     button.append(
       symbol,
@@ -17832,7 +17871,7 @@ function refreshGraphPaletteConfigurationAvailability() {
     );
     const marker = button.querySelector("small");
     if (marker) {
-      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
     }
   }
 
@@ -20450,7 +20489,14 @@ function renderGraphPalette(
             MAX_SEARCH_RESULTS
         ) {
           appendMessage(
-            `Showing the first ${MAX_SEARCH_RESULTS} matches. Refine the search to narrow the live API catalog.`
+            window.RMLI18n.format(
+              "graph.palette.search_truncated",
+              {
+                count: MAX_SEARCH_RESULTS.toLocaleString(
+                  window.RMLI18n?.language || undefined
+                )
+              }
+            )
           );
         }
 
@@ -22030,7 +22076,10 @@ function createAutomaticSourceForInput(
 
       if (!node) {
         lastReason =
-          `The suggested ${typeLabel(valueType)} source node is unavailable.`;
+          window.RMLI18n.format(
+            "graph.auto_source.unavailable",
+            { type: typeLabel(valueType) }
+          );
         continue;
       }
 
@@ -22048,7 +22097,14 @@ function createAutomaticSourceForInput(
           previousSequence
         );
         lastReason =
-          `${definition?.title || window.RMLI18n.t("ui.literal.c9ff2f77ec00")} is not a self-contained source and was not created automatically.`;
+          window.RMLI18n.format(
+            "graph.auto_source.not_self_contained",
+            {
+              node:
+                definition?.title ||
+                window.RMLI18n.t("ui.literal.c9ff2f77ec00")
+            }
+          );
         continue;
       }
 
@@ -22108,8 +22164,17 @@ function createAutomaticSourceForInput(
         message:
           node.operatorId ===
             "constant.typedDefault"
-            ? `Safe typed default created for ${typeLabel(valueType)}. Replace it with an explicit runtime source when needed.`
-            : `${definition.title} created for ${typeLabel(valueType)}.`
+            ? window.RMLI18n.format(
+                "graph.auto_source.typed_default_created",
+                { type: typeLabel(valueType) }
+              )
+            : window.RMLI18n.format(
+                "graph.auto_node.created_for_type",
+                {
+                  node: definition.title,
+                  type: typeLabel(valueType)
+                }
+              )
       };
     }
 
@@ -22118,7 +22183,10 @@ function createAutomaticSourceForInput(
       connected: false,
       reason:
         lastReason ||
-        `No safe automatic source could be created for ${typeLabel(valueType)}.`
+        window.RMLI18n.format(
+          "graph.auto_source.none_available",
+          { type: typeLabel(valueType) }
+        )
     };
   }
 
@@ -22178,7 +22246,10 @@ function createAutomaticMonitorForOutput(
         attempted: true,
         connected: false,
         reason:
-          `The ${typeLabel(valueType)} monitor node is unavailable.`
+          window.RMLI18n.format(
+            "graph.auto_monitor.unavailable",
+            { type: typeLabel(valueType) }
+          )
       };
     }
 
@@ -22237,7 +22308,13 @@ function createAutomaticMonitorForOutput(
       autoVectorNodeIds,
       reason: "",
       message:
-        `${nodeDefinition(node).title} created for ${typeLabel(valueType)}.`
+        window.RMLI18n.format(
+          "graph.auto_node.created_for_type",
+          {
+            node: nodeDefinition(node).title,
+            type: typeLabel(valueType)
+          }
+        )
     };
   }
 
@@ -22458,20 +22535,20 @@ function createToolbarButton(
 const GRAPH_TOOLBAR_ICONS =
     Object.freeze({
       center: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-center"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-center"></use></svg>`,
       clear: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-delete"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-delete"></use></svg>`,
       zoomOut: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-zoom-out"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-zoom-out"></use></svg>`,
       zoomIn: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-zoom-in"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-zoom-in"></use></svg>`,
       editMode: `
-        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-expand"></use></svg>
-        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-collapse"></use></svg>`,
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-expand"></use></svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-collapse"></use></svg>`,
       search: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-search"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-search"></use></svg>`,
       next: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-next"></use></svg>`
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-next"></use></svg>`
     });
 
 function createToolbarIconButton(
@@ -22653,7 +22730,22 @@ function focusGraphNodeSearch(query, direction = 1) {
     }
 
     showGraphMessage(
-      `Node ${graphNodeSearchIndex + 1} of ${matches.length}: ${node.label || nodeDefinition(node).title}`,
+      window.RMLI18n.format(
+        "graph.search.node_match",
+        {
+          current: (
+            graphNodeSearchIndex + 1
+          ).toLocaleString(
+            window.RMLI18n?.language || undefined
+          ),
+          total: matches.length.toLocaleString(
+            window.RMLI18n?.language || undefined
+          ),
+          label:
+            node.label ||
+            nodeDefinition(node).title
+        }
+      ),
       "success"
     );
     return matches.length;
@@ -22954,7 +23046,7 @@ function renderGraphCanvas() {
       <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="{{i18n:js.presentation.f0d095db4021}}">
         <div class="rml-graph-search-overlay-head">
           <strong>{{i18n:js.presentation.f0d095db4021}}</strong>
-          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-close"></use></svg></button>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-close"></use></svg></button>
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="{{i18n:js.presentation.a00d3271edfc}}" aria-label="{{i18n:js.presentation.f0d095db4021}}" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
@@ -29162,7 +29254,7 @@ function createGraphNodeElementRmlOriginal(
       flip.className =
         "rml-graph-node-flip";
       flip.type = "button";
-      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-node-swap"></use></svg>`;
+      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-node-swap"></use></svg>`;
       flip.title = mirrored
         ? window.RMLI18n.t("ui.literal.9114b1bfc765")
         : window.RMLI18n.t("ui.literal.c8b7ca53198e");
@@ -32620,7 +32712,9 @@ function quickWireBranchTargetState(
       targetType &&
       !connectionTypesCompatible(
         sourceType,
-        targetType
+        targetType,
+        sourcePort.spec,
+        targetPort.spec
       )
     ) {
       return "invalid";
@@ -33663,9 +33757,16 @@ function createWirePointHandle(
     handle.dataset.pointId =
       point.id;
     handle.title = junction
-      ? `Typed wire junction · ${branchCount} branch${
-          branchCount === 1 ? "" : "es"
-        } · click to select · drag to move · Delete or double-click to remove`
+      ? window.RMLI18n.format(
+          branchCount === 1
+            ? "graph.wire.junction_title.one"
+            : "graph.wire.junction_title.other",
+          {
+            count: branchCount.toLocaleString(
+              window.RMLI18n?.language || undefined
+            )
+          }
+        )
       : window.RMLI18n.t("ui.literal.d2ee2e22848c");
 
     handle.addEventListener(
@@ -37687,7 +37788,16 @@ function renderGraphInspector(options = {}) {
       const heading =
         document.createElement("h2");
       heading.textContent =
-        `${selectedNodes.length.toLocaleString(window.RMLI18n?.language || undefined)} nodes selected`;
+        window.RMLI18n.format(
+          selectedNodes.length === 1
+            ? "graph.selection.nodes_selected.one"
+            : "graph.selection.nodes_selected.other",
+          {
+            count: selectedNodes.length.toLocaleString(
+              window.RMLI18n?.language || undefined
+            )
+          }
+        );
       const copy =
         document.createElement("p");
       const selectionComplete =
@@ -37790,7 +37900,15 @@ function renderGraphInspector(options = {}) {
         unavailableReason
       );
       create.title = !canCreateComposite
-        ? `${extendsExistingComposite ? window.RMLI18n.t("ui.literal.281dd83602a2") : window.RMLI18n.t("ui.auto.35d0f97a80af")} Composite — ${unavailableReason}`
+        ? window.RMLI18n.format(
+            "graph.composite.action_unavailable",
+            {
+              action: extendsExistingComposite
+                ? window.RMLI18n.t("ui.literal.8edbdbc9cd33")
+                : window.RMLI18n.t("ui.literal.3a7c6a4bb0dd"),
+              reason: unavailableReason
+            }
+          )
         : extendsExistingComposite
           ? window.RMLI18n.t("ui.literal.eccf792ddb5c")
           : window.RMLI18n.t("ui.literal.afbf8e5ab8f0");
@@ -37817,7 +37935,7 @@ function renderGraphInspector(options = {}) {
       empty.className =
         "empty-inspector";
       empty.innerHTML =
-        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-lightning"></use></svg></span>
+        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-lightning"></use></svg></span>
          <h2>{{i18n:ui.text.e02d912b50bb}}</h2>
          <p>{{i18n:ui.text.d19bd2965c4f}}</p>`;
       dom.inspectorContent.appendChild(
@@ -38492,7 +38610,17 @@ function searchableSelectWrapper(
         remaining.className =
           "rml-graph-searchable-empty";
         remaining.textContent =
-          `Showing ${matches.length.toLocaleString()} of ${allMatches.length.toLocaleString()} entries. Type to narrow the search.`;
+          window.RMLI18n.format(
+            "graph.search.entries_truncated",
+            {
+              visible: matches.length.toLocaleString(
+                window.RMLI18n?.language || undefined
+              ),
+              total: allMatches.length.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+            }
+          );
         optionsHost.appendChild(
           remaining
         );
@@ -39701,11 +39829,15 @@ function manualReplacementPortTypeProof(
         : direction === "input"
           ? connectionTypesCompatible(
               oldType,
-              newType
+              newType,
+              oldPort,
+              newPort
             )
           : connectionTypesCompatible(
               newType,
-              oldType
+              oldType,
+              newPort,
+              oldPort
             );
     if (
       !graphCompatible
@@ -40839,15 +40971,6 @@ function compatibleImportReplacementCandidates(
         })
       );
 
-    /*
-     * Suggestions and manual search deliberately use different scopes.
-     *
-     * `candidates` above remains the conservative suggestion/auto-repair
-     * set. `searchCandidates` is a browse index over the complete current
-     * API registry. It is only used after the user types a search query.
-     * Entries that are not structurally compatible remain visible but are
-     * disabled and explain why they cannot be selected.
-     */
     const compatibleByOperatorId =
       new Map(
         candidates.map(candidate => [
@@ -41555,7 +41678,16 @@ function nodeInspectorCard(node) {
         setGraphButtonAvailability(
           minus,
           count > minimum,
-          `This node already has the minimum of ${minimum.toLocaleString(window.RMLI18n?.language || undefined)} ${direction}s.`
+          window.RMLI18n.format(
+            direction === "input"
+              ? "graph.variadic.minimum.input"
+              : "graph.variadic.minimum.output",
+            {
+              count: minimum.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+            }
+          )
         );
         const plus = inspectorButton("+", () => {
           const previousPortDefinition =
@@ -41600,7 +41732,16 @@ function nodeInspectorCard(node) {
         setGraphButtonAvailability(
           plus,
           count < maximum,
-          `This node already has the maximum of ${maximum.toLocaleString(window.RMLI18n?.language || undefined)} ${direction}s.`
+          window.RMLI18n.format(
+            direction === "input"
+              ? "graph.variadic.maximum.input"
+              : "graph.variadic.maximum.output",
+            {
+              count: maximum.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+            }
+          )
         );
         row.append(label, minus, plus);
         variadic.appendChild(row);
@@ -43675,7 +43816,8 @@ function graphTypeListOptions(currentValue = "") {
 
 function graphTypeListControl(
     control,
-    specification
+    specification,
+    node
   ) {
     const editor = document.createElement("div");
     editor.className = "rml-graph-type-list";
@@ -43690,15 +43832,46 @@ function graphTypeListControl(
       "graph.type.list.add"
     );
 
-    let values = graphTypeListValues(
-      control.value
-    );
+    const structuralRegistry =
+      window.RMLModNodeRegistry;
+    const structuralContract =
+      structuralRegistry
+        ?.structuralListContract?.(
+          specification
+        ) || null;
+    let entries = structuralContract
+      ? structuralRegistry
+          .structuralListEntries(
+            node?.parameters || {},
+            specification
+          )
+          .map(entry => ({
+            id: String(entry.id || ""),
+            type: String(entry.type || "")
+          }))
+      : null;
+    let values = structuralContract
+      ? entries.map(entry => entry.type)
+      : graphTypeListValues(
+          control.value
+        );
     let draftPending = false;
 
-    const commit = () => {
+    const commit = mutation => {
       const serialized = values.join("\n");
       draftPending = false;
-      if (control.value === serialized) {
+      if (
+        structuralContract &&
+        Array.isArray(entries)
+      ) {
+        control.__rmlStructuralListEntries =
+          entries.map(entry => ({
+            id: entry.id,
+            type: entry.type
+          }));
+        control.__rmlStructuralListMutation =
+          mutation || { kind: "replace" };
+      } else if (control.value === serialized) {
         renderRows();
         return;
       }
@@ -43712,9 +43885,12 @@ function graphTypeListControl(
 
     const renderRows = () => {
       rows.replaceChildren();
-      const renderedValues = draftPending
-        ? [...values, ""]
-        : values;
+      const renderedValues =
+        structuralContract
+          ? entries.map(entry => entry.type)
+          : draftPending
+            ? [...values, ""]
+            : values;
 
       if (renderedValues.length === 0) {
         const empty = document.createElement("small");
@@ -43739,9 +43915,13 @@ function graphTypeListControl(
         if (!value) {
           options.unshift({
             value: "",
-            text: window.RMLI18n.t(
-              "graph.type.list.choose"
-            )
+            text: structuralContract
+              ? window.RMLI18n.t(
+                  "graph.type.automatic"
+                )
+              : window.RMLI18n.t(
+                  "graph.type.list.choose"
+                )
           });
         }
 
@@ -43755,15 +43935,24 @@ function graphTypeListControl(
 
         select.addEventListener("change", () => {
           const selected = String(select.value || "").trim();
-          if (!selected) {
+          if (!selected && !structuralContract) {
             return;
           }
-          if (index < values.length) {
+          if (structuralContract) {
+            entries[index].type = selected;
+            values = entries.map(entry => entry.type);
+            commit({
+              kind: "update",
+              index,
+              id: entries[index].id
+            });
+          } else if (index < values.length) {
             values[index] = selected;
+            commit({ kind: "update", index });
           } else {
             values.push(selected);
+            commit({ kind: "add", index });
           }
-          commit();
         });
 
         const remove = visualFunctionParameterButton(
@@ -43772,9 +43961,27 @@ function graphTypeListControl(
             .t("graph.type.list.remove")
             .replace("{index}", String(index + 1)),
           () => {
-            if (index < values.length) {
+            if (
+              structuralContract &&
+              entries.length >
+                structuralContract.minimum
+            ) {
+              const [removed] = entries.splice(
+                index,
+                1
+              );
+              values = entries.map(entry => entry.type);
+              commit({
+                kind: "remove",
+                index,
+                id: removed?.id || ""
+              });
+            } else if (
+              !structuralContract &&
+              index < values.length
+            ) {
               values.splice(index, 1);
-              commit();
+              commit({ kind: "remove", index });
             } else {
               draftPending = false;
               renderRows();
@@ -43784,6 +43991,25 @@ function graphTypeListControl(
         remove.classList.add(
           "rml-graph-type-list-remove"
         );
+        if (
+          structuralContract &&
+          entries.length <=
+            structuralContract.minimum
+        ) {
+          remove.disabled = true;
+          remove.title =
+            window.RMLI18n.format(
+              structuralContract.minimum === 1
+                ? "graph.type_list.minimum.one"
+                : "graph.type_list.minimum.other",
+              {
+                count:
+                  structuralContract.minimum.toLocaleString(
+                    window.RMLI18n?.language || undefined
+                  )
+              }
+            );
+        }
 
         row.append(
           itemLabel,
@@ -43804,7 +44030,10 @@ function graphTypeListControl(
         rows.appendChild(row);
       });
 
-      add.disabled = draftPending;
+      add.disabled = structuralContract
+        ? entries.length >=
+            structuralContract.maximum
+        : draftPending;
     };
 
     add.addEventListener("click", event => {
@@ -43813,8 +44042,23 @@ function graphTypeListControl(
       if (draftPending) {
         return;
       }
-      draftPending = true;
-      renderRows();
+      if (structuralContract) {
+        const id = structuralRegistry
+          .structuralListNextId(
+            entries,
+            specification
+          );
+        entries.push({ id, type: "" });
+        values = entries.map(entry => entry.type);
+        commit({
+          kind: "add",
+          index: entries.length - 1,
+          id
+        });
+      } else {
+        draftPending = true;
+        renderRows();
+      }
       requestAnimationFrame(() => {
         const triggers = editor.querySelectorAll(
           ".rml-graph-searchable-trigger"
@@ -43985,6 +44229,20 @@ function appendParameterControl(
 
     for (const specification of specifications) {
       if (specification.inspectorHidden === true) {
+        continue;
+      }
+      if (
+        (
+          specification.key ===
+            "variadicInputCount" &&
+          definition.variadicInputs
+        ) ||
+        (
+          specification.key ===
+            "variadicOutputCount" &&
+          definition.variadicOutputs
+        )
+      ) {
         continue;
       }
       const kind =
@@ -44440,6 +44698,17 @@ function appendParameterControl(
       const update = () => {
 
         let value;
+        const structuralListEntries =
+          graphTypeList &&
+          Array.isArray(
+            control.__rmlStructuralListEntries
+          )
+            ? control.__rmlStructuralListEntries
+                .map(entry => ({
+                  id: String(entry?.id || ""),
+                  type: String(entry?.type || "")
+                }))
+            : null;
         const dropdownChange =
           kind === "bool" ||
           kind === "select" ||
@@ -44494,7 +44763,8 @@ function appendParameterControl(
               specification.key
             ],
             value
-          )
+          ) &&
+          !structuralListEntries
         ) {
           return false;
         }
@@ -44539,6 +44809,17 @@ function appendParameterControl(
           for (const connectionId of removedConnectionIds) {
             affectedConnectionIds?.add(connectionId);
           }
+        } else if (structuralListEntries) {
+          window.RMLModNodeRegistry
+            ?.writeStructuralListEntries?.(
+              node.parameters,
+              specification,
+              structuralListEntries
+            );
+          delete control
+            .__rmlStructuralListEntries;
+          delete control
+            .__rmlStructuralListMutation;
         } else {
           node.parameters[
             specification.key
@@ -44578,7 +44859,14 @@ function appendParameterControl(
               true
           ) {
             showGraphMessage(
-              `Incompatible connections were removed because ${specification.label || specification.key} changed the node's port contract.`,
+              window.RMLI18n.format(
+                "graph.parameter.connections_removed",
+                {
+                  parameter:
+                    specification.label ||
+                    specification.key
+                }
+              ),
               "warning"
             );
           }
@@ -44673,7 +44961,8 @@ function appendParameterControl(
         label.appendChild(
           graphTypeListControl(
             control,
-            specification
+            specification,
+            node
           )
         );
       } else if (
@@ -44805,7 +45094,7 @@ const INSPECTOR_ACTION_PRESENTATION = Object.freeze({
 
   function inspectorButtonIconMarkup(actionId) {
     const iconName = INSPECTOR_ACTION_PRESENTATION[actionId]?.[0] || "more";
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-${iconName}"></use></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-${iconName}"></use></svg>`;
   }
 
   function inspectorButtonTone(actionId) {
@@ -44871,7 +45160,7 @@ function visualFunctionParameterButton(action, label, handler) {
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("aria-hidden", "true");
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    use.setAttribute("href", `assets/rml-icons.svg?v=1.24.90-reliable-folder-direct-dll-build#icon-visual-function-parameter-${action}`);
+    use.setAttribute("href", `assets/rml-icons.svg?v=1.25.00-canonical-type-reconciliation-startup-recovery#icon-visual-function-parameter-${action}`);
     svg.appendChild(use);
     button.appendChild(svg);
     button.addEventListener("click", event => {
@@ -45289,7 +45578,16 @@ function removeWirePoint(
 
     showGraphMessage(
       detached > 0
-        ? `Junction removed. ${detached} branch${detached === 1 ? "" : "es"} now start directly at the original output.`
+        ? window.RMLI18n.format(
+            detached === 1
+              ? "graph.wire.junction_removed.one"
+              : "graph.wire.junction_removed.other",
+            {
+              count: detached.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+            }
+          )
         : window.RMLI18n.t("ui.literal.cf01603f81be"),
       "success"
     );
@@ -45345,7 +45643,16 @@ function straightenWire(
 
     showGraphMessage(
       detached > 0
-        ? `Wire straightened. ${detached} branch${detached === 1 ? "" : "es"} were detached from their junctions but remain connected.`
+        ? window.RMLI18n.format(
+            detached === 1
+              ? "graph.wire.straightened.one"
+              : "graph.wire.straightened.other",
+            {
+              count: detached.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+            }
+          )
         : window.RMLI18n.t("ui.literal.f0fb8db2d79b"),
       "success"
     );
@@ -46087,7 +46394,16 @@ function detachWirePointBranches(
 
     showGraphMessage(
       detached > 0
-        ? `${detached} branch${detached === 1 ? "" : "es"} detached. The manual route point remains.`
+        ? window.RMLI18n.format(
+            detached === 1
+              ? "graph.wire.branches_detached.one"
+              : "graph.wire.branches_detached.other",
+            {
+              count: detached.toLocaleString(
+                window.RMLI18n?.language || undefined
+              )
+            }
+          )
         : window.RMLI18n.t("ui.literal.5b75647f1150"),
       detached > 0
         ? "success"
@@ -46161,16 +46477,41 @@ function wirePointInspectorCard(
     const type =
       document.createElement("p");
     type.textContent =
-      `Type: ${typeLabel(concrete)}`;
+      window.RMLI18n.format(
+        "graph.inspector.type",
+        { type: typeLabel(concrete) }
+      );
 
     const coordinates =
       document.createElement("p");
-    coordinates.textContent =
-      `Position: X ${Math.round(point.x)} · Y ${Math.round(point.y)}${
-        junction
-          ? ` · ${branchCount} attached branch${branchCount === 1 ? "" : "es"}`
-          : ""
-      }`;
+    coordinates.textContent = junction
+      ? window.RMLI18n.format(
+          branchCount === 1
+            ? "graph.inspector.position_with_branches.one"
+            : "graph.inspector.position_with_branches.other",
+          {
+            x: Math.round(point.x).toLocaleString(
+              window.RMLI18n?.language || undefined
+            ),
+            y: Math.round(point.y).toLocaleString(
+              window.RMLI18n?.language || undefined
+            ),
+            count: branchCount.toLocaleString(
+              window.RMLI18n?.language || undefined
+            )
+          }
+        )
+      : window.RMLI18n.format(
+          "graph.inspector.position",
+          {
+            x: Math.round(point.x).toLocaleString(
+              window.RMLI18n?.language || undefined
+            ),
+            y: Math.round(point.y).toLocaleString(
+              window.RMLI18n?.language || undefined
+            )
+          }
+        );
 
     const help =
       document.createElement("p");
@@ -46293,7 +46634,10 @@ function connectionInspectorCard(
     const type =
       document.createElement("p");
     type.textContent =
-      `Type: ${typeLabel(concrete)}`;
+      window.RMLI18n.format(
+        "graph.inspector.type",
+        { type: typeLabel(concrete) }
+      );
 
     const routing =
       document.createElement("p");
@@ -46304,20 +46648,35 @@ function connectionInspectorCard(
             ?.connectionId ===
             connection.id
       ).length;
-    routing.textContent =
-      `${(connection.points || []).length} manual bend${
-        (connection.points || []).length === 1
-          ? ""
-          : "s"
-      } · ${branchCount} attached branch${
+    const bendCount =
+      (connection.points || []).length;
+    routing.textContent = [
+      window.RMLI18n.format(
+        bendCount === 1
+          ? "graph.wire.manual_bends.one"
+          : "graph.wire.manual_bends.other",
+        {
+          count: bendCount.toLocaleString(
+            window.RMLI18n?.language || undefined
+          )
+        }
+      ),
+      window.RMLI18n.format(
         branchCount === 1
-          ? ""
-          : "es"
-      }${
-        connection.branchFrom
-          ? " · starts at a draggable junction"
-          : ""
-      }`;
+          ? "graph.wire.attached_branches.one"
+          : "graph.wire.attached_branches.other",
+        {
+          count: branchCount.toLocaleString(
+            window.RMLI18n?.language || undefined
+          )
+        }
+      ),
+      connection.branchFrom
+        ? window.RMLI18n.t(
+            "graph.wire.starts_at_junction"
+          )
+        : ""
+    ].filter(Boolean).join(" · ");
 
     const help =
       document.createElement("p");
@@ -47758,7 +48117,9 @@ function quickConnectionTargetState(
       targetType &&
       !connectionTypesCompatible(
         sourceType,
-        targetType
+        targetType,
+        sourcePort.spec,
+        targetPort.spec
       )
     ) {
       return "invalid";
@@ -48894,7 +49255,14 @@ function finishPaletteDrag(
           paletteClickSuppression.committed =
             true;
           showGraphMessage(
-            `${interaction.definition?.title || window.RMLI18n.t("ui.literal.260f7a8cd4f6")} inserted into the active C# editor.`,
+            window.RMLI18n.format(
+              "graph.csharp.inserted_active",
+              {
+                node:
+                  interaction.definition?.title ||
+                  window.RMLI18n.t("ui.literal.260f7a8cd4f6")
+              }
+            ),
             "success"
           );
           return;
@@ -48970,7 +49338,14 @@ function finishPaletteDrag(
           };
         }
         showGraphMessage(
-          `${interaction.definition?.title || window.RMLI18n.t("ui.literal.260f7a8cd4f6")} inserted into the C# editor.`,
+          window.RMLI18n.format(
+            "graph.csharp.inserted",
+            {
+              node:
+                interaction.definition?.title ||
+                window.RMLI18n.t("ui.literal.260f7a8cd4f6")
+            }
+          ),
           "success"
         );
         return;
@@ -49715,7 +50090,15 @@ function finishGraphInteractionPointerUp(event) {
           );
           renderGraphInspector();
           showGraphMessage(
-            `${node.label || definition?.title || window.RMLI18n.t("ui.literal.260f7a8cd4f6")} inserted into the C# editor.`,
+            window.RMLI18n.format(
+              "graph.csharp.inserted",
+              {
+                node:
+                  node.label ||
+                  definition?.title ||
+                  window.RMLI18n.t("ui.literal.260f7a8cd4f6")
+              }
+            ),
             "success"
           );
           return;
@@ -50751,6 +51134,11 @@ function initializeNodeGraphHost() {
     bridge
       .requestGeneratedOutputRefresh
       ?.();
+
+    completeGraphHostReady();
+    document.dispatchEvent(
+      new CustomEvent("rml-graph:host-ready")
+    );
 
     return true;
   }
@@ -53089,7 +53477,7 @@ async function reconcileOpenGraphForCatalog(
         analysisChanged: false,
         contentChanged: false,
         documentChanged: true,
-        refreshGeneratedOutput: false,
+        refreshGeneratedOutput: true,
         refreshCompositeActions: false
       });
       return {
@@ -53803,13 +54191,33 @@ function updateGraphCatalogReadiness(
 
     graphCatalogReadiness = "failed";
     graphCatalogReadinessMessage = error
-      ? `The API node factory failed: ${
-          error instanceof Error
-            ? error.message
-            : String(error)
-        }`
+      ? window.RMLI18n.format(
+          "graph.catalog.factory_failed",
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : String(error)
+          }
+        )
       : missing.length > 0
-        ? `The available API catalog does not provide ${missing.length} required Runtime Graph operator${missing.length === 1 ? "" : "s"}: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? ", …" : ""}`
+        ? window.RMLI18n.format(
+            missing.length === 1
+              ? "graph.catalog.required_operators_missing.one"
+              : "graph.catalog.required_operators_missing.other",
+            {
+              count: missing.length.toLocaleString(
+                window.RMLI18n?.language || undefined
+              ),
+              operators: `${missing
+                .slice(0, 4)
+                .join(", ")}${
+                missing.length > 4
+                  ? ", …"
+                  : ""
+              }`
+            }
+          )
         : window.RMLI18n.t("ui.literal.7b06d0c13ba4");
     updatePackButton();
     if (
@@ -54074,16 +54482,25 @@ async function initializeImmediately() {
           return;
         }
 
-        if (initializeNodeGraphHost()) {
-          document.removeEventListener(
-            "rml-builder:bridge-ready",
-            initializeFromBridgeEvent
+        try {
+          if (initializeNodeGraphHost()) {
+            document.removeEventListener(
+              "rml-builder:bridge-ready",
+              initializeFromBridgeEvent
+            );
+            document.removeEventListener(
+              "rml-builder:ready",
+              initializeFromBridgeEvent
+            );
+          } else {
+            updatePackButton();
+          }
+        } catch (error) {
+          failGraphHostReady(error);
+          console.error(
+            "The Runtime Graph host could not be initialized.",
+            error
           );
-          document.removeEventListener(
-            "rml-builder:ready",
-            initializeFromBridgeEvent
-          );
-        } else {
           updatePackButton();
         }
       };
@@ -54098,15 +54515,23 @@ async function initializeImmediately() {
     );
 
     try {
-      await Promise.resolve(
-        window.RMLBaseModNodesReady ||
-        window.RMLModNodesReady
-      );
+      const completeNodeRegistryReady =
+        window.RMLModNodesReady;
+      if (
+        !completeNodeRegistryReady ||
+        typeof completeNodeRegistryReady.then !==
+          "function"
+      ) {
+        throw new Error(
+          "The complete node registry readiness contract is unavailable."
+        );
+      }
+      await completeNodeRegistryReady;
 
       graphBaseModulesReady = true;
 
     } catch (error) {
-      graphHostError = error;
+      failGraphHostReady(error);
       console.error(
         window.RMLI18n.t("ui.literal.ec496d8c7914"),
         error
@@ -54212,7 +54637,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.24.90-reliable-folder-direct-dll-build",
+      "1.25.00-canonical-type-reconciliation-startup-recovery",
     writable: false,
     enumerable: true,
     configurable: true
