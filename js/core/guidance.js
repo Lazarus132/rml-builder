@@ -9,8 +9,7 @@
   const workers = new WeakSet();
   let outputPending = null;
   const packsFor = state => state?.metadata?.includeGuide !== true ? [] :
-    state.extensions?.typedNodeGraph?.configSnapshot &&
-    Array.isArray(state.extensions.typedNodeGraph.configSnapshot.nodes)
+    state.extensions?.typedNodeGraph?.active === true
       ? ["configuration", "runtime"] : ["configuration"];
 
   function install(name, pack) {

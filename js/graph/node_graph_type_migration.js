@@ -378,6 +378,128 @@
     });
   }
 
+  function installLanguageExactTypeContracts(
+    documentValue,
+    registry
+  ) {
+    const normalized = normalizedTypeContracts(
+      documentValue?.portableTypeContracts
+    );
+    if (normalized.conflicts.length > 0) {
+      throw new Error(normalized.conflicts[0]);
+    }
+    if (
+      typeof registry?.registerType !== "function" ||
+      typeof registry?.getTypeDefinitions !== "function"
+    ) {
+      throw new Error(
+        "The graph type registry cannot install portable language type contracts."
+      );
+    }
+
+    const definitions = registry.getTypeDefinitions();
+    const pending = [];
+    for (const contract of normalized.contracts) {
+      if (contract.typeAuthority !== "language-exact") {
+        continue;
+      }
+      const existing = definitions[contract.graphType];
+      if (existing) {
+        const compatibility = typeContractCompatibility(
+          contract,
+          existing
+        );
+        if (
+          !compatibility.identityMatches ||
+          !compatibility.referenceKindMatches
+        ) {
+          throw new Error(
+            `Portable graph type '${contract.graphType}' conflicts with the installed C# type identity.`
+          );
+        }
+        continue;
+      }
+      pending.push(contract);
+    }
+
+    const graphTypesByCsType = () => {
+      const result = new Map();
+      for (const [graphType, information] of
+        Object.entries(definitions)) {
+        const csType = normalizeCsType(
+          information?.csType || ""
+        );
+        if (!safeClosedCsType(csType)) {
+          continue;
+        }
+        const list = result.get(csType) || [];
+        list.push(graphType);
+        result.set(csType, list);
+      }
+      return result;
+    };
+
+    let installed = 0;
+    for (const contract of pending) {
+      const byCsType = graphTypesByCsType();
+      const assignableTo = [
+        ...new Set(
+          contract.assignableToCsTypes.flatMap(
+            csType => byCsType.get(csType) || []
+          )
+        )
+      ];
+      registry.registerType(
+        contract.graphType,
+        {
+          label: shortTypeName(contract.csType),
+          short: "T",
+          color: "#91b9dd",
+          csType: contract.csType,
+          defaultCs:
+            contract.referenceType === true
+              ? "null!"
+              : `default(${contract.csType})`,
+          referenceType:
+            contract.referenceType === true,
+          valueType:
+            contract.valueType === true,
+          globalGenericCandidate: false,
+          languageExactType: true,
+          ...(contract.graphType.startsWith(
+            "normalExact:"
+          )
+            ? { normalExactType: true }
+            : {}),
+          ...(contract.graphType.startsWith(
+            "csharpExact:"
+          )
+            ? { csharpExactType: true }
+            : {}),
+          assignableTo,
+          constraints:
+            contract.referenceType === true
+              ? ["reference", "serializable"]
+              : ["serializable"],
+          assemblies: [
+            ...new Set(
+              contract.assemblyReferences.map(
+                reference => reference.include
+              )
+            )
+          ],
+          assemblyReferences:
+            contract.assemblyReferences.map(
+              reference => ({ ...reference })
+            )
+        }
+      );
+      installed += 1;
+    }
+
+    return Object.freeze({ installed });
+  }
+
   function typeContractFromRegistry(
     graphType,
     registry
@@ -950,6 +1072,11 @@
     documentValue,
     registry
   ) {
+    const installedLanguageTypes =
+      installLanguageExactTypeContracts(
+        documentValue,
+        registry
+      );
     const plan = aliasPlan(
       documentValue,
       registry
@@ -1192,6 +1319,8 @@
       boundaryCount,
       contractPortCount,
       typeContractCount,
+      installedLanguageTypeCount:
+        installedLanguageTypes.installed,
       ambiguous: plan.ambiguous,
       missing: plan.missing
     });
@@ -1204,6 +1333,7 @@
     normalizedTypeContracts,
     typeContractCompatibility,
     typeContractFromRegistry,
+    installLanguageExactTypeContracts,
     legacyApiGraphTypeId,
     aliasPlan,
     migrate

@@ -7249,14 +7249,8 @@ function refreshVisibleInspectorActionControls() {
 
 function hasPackedRuntimeProgram() {
     return Boolean(
-      graph?.configSnapshot &&
-      Array.isArray(
-        graph.configSnapshot.nodes
-      ) &&
+      graph?.active === true &&
       Array.isArray(graph.nodes) &&
-      graph.nodes.some(node =>
-        node?.kind === "configuration"
-      ) &&
       Array.isArray(graph.connections)
     );
   }
@@ -12369,7 +12363,10 @@ function previewContext() {
       );
     const configurationEntries =
       flattenConfiguration(
-        graph.configSnapshot?.nodes || []
+        (
+          graph.configSnapshot ||
+          snapshotFromBuilder()
+        ).nodes || []
       );
 
     const incomingByPort = new Map();
@@ -14530,7 +14527,10 @@ function runtimeBridgeExpectedBindings() {
       typeof flattenConfiguration ===
         "function"
         ? flattenConfiguration(
-            graph?.configSnapshot?.nodes || []
+            (
+              graph?.configSnapshot ||
+              snapshotFromBuilder()
+            ).nodes || []
           )
         : [];
     const configurationBindings =
@@ -15332,9 +15332,7 @@ function updatePackButton() {
           ? `${graphOutlineToggleMarkup()}<span class="top-action-label">{{i18n:ui.text.449bdeb9f027}}</span>`
           : catalogFailed
           ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">${hostFailed ? window.RMLI18n.t("ui.literal.8011c1538e18") : window.RMLI18n.t("ui.literal.45ff5176f7ae")}</span>`
-          : graph?.active
-            ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">{{i18n:ui.text.5d3e2ebd8107}}</span>`
-            : `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">{{i18n:index.text.f8d155daf28b}}</span>`;
+          : `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">{{i18n:ui.text.5d3e2ebd8107}}</span>`;
     }
 
     dom.packButton.setAttribute(
@@ -15349,9 +15347,7 @@ function updatePackButton() {
           ? hostFailed
             ? window.RMLI18n.t("ui.literal.5b228dd55952")
             : window.RMLI18n.t("ui.literal.d1461853c0d9")
-          : graph?.active
-            ? window.RMLI18n.t("ui.text.5d3e2ebd8107")
-            : window.RMLI18n.t("index.text.f8d155daf28b")
+          : window.RMLI18n.t("ui.text.5d3e2ebd8107")
     );
 
     if (
@@ -15386,28 +15382,10 @@ function updatePackButton() {
       Boolean(graph?.active)
     );
 
-    const liveSourceNodeCount = Number(
-      bridge?.getConfigurationNodeCount?.()
-    );
-    const sourceNodeCount = Number.isFinite(
-      liveSourceNodeCount
-    )
-      ? Math.max(0, liveSourceNodeCount)
-      : Array.isArray(
-          graph?.configSnapshot?.nodes
-        )
-        ? graph.configSnapshot.nodes.length
-        : 0;
-
     setGraphButtonAvailability(
       dom.packButton,
-      graphVisible || !(
-        !hostLoading &&
-        !hostFailed &&
-        sourceNodeCount === 0 &&
-        !graph?.active
-      ),
-      window.RMLI18n.t("ui.literal.55fc652ce7e2")
+      true,
+      ""
     );
 
     dom.packButton.dataset.help =
@@ -15446,9 +15424,7 @@ function updatePackButton() {
             window.RMLI18n.t("ui.literal.5f57111e3e7f")
         : graph?.active
           ? window.RMLI18n.t("ui.literal.85d88668948a")
-        : sourceNodeCount === 0
-          ? window.RMLI18n.t("ui.literal.601f4795ef08")
-          : window.RMLI18n.t("ui.literal.82cd79a6be3a");
+          : window.RMLI18n.t("ui.literal.0af0a758e5bc");
     dom.packButton.removeAttribute("title");
   }
 
@@ -15628,6 +15604,21 @@ function ensureConfigurationNode() {
       graph.nodes
     );
     return node;
+  }
+
+function removeConfigurationNodes() {
+    const configurationNodeIds =
+      graph.nodes
+        .filter(node =>
+          node?.kind === "configuration"
+        )
+        .map(node => node.id);
+
+    for (const nodeId of configurationNodeIds) {
+      deleteGraphNode(nodeId);
+    }
+
+    return configurationNodeIds.length;
   }
 
 async function togglePackedNodeMode() {
@@ -15818,7 +15809,11 @@ function synchronizePackedSnapshot(
       signature;
     packedSnapshotSourceRevision =
       sourceRevision;
-    ensureConfigurationNode();
+    if (snapshot.nodes.length > 0) {
+      ensureConfigurationNode();
+    } else {
+      removeConfigurationNodes();
+    }
     pruneConnections();
     if (render) {
       renderGraphNodesAndWires();
@@ -15876,17 +15871,6 @@ function packIntoNode() {
     const snapshot =
       snapshotFromBuilder();
 
-    if (
-      !Array.isArray(snapshot.nodes) ||
-      snapshot.nodes.length === 0
-    ) {
-      showGraphMessage(
-        window.RMLI18n.t("ui.literal.ba1a2ae5d3e8"),
-        "error"
-      );
-      return;
-    }
-
     graph.active = true;
     commitPresentationPage(
       "runtime-graph",
@@ -15901,13 +15885,18 @@ function packIntoNode() {
       builderSourceRevision;
 
     const configNode =
-      ensureConfigurationNode();
+      snapshot.nodes.length > 0
+        ? ensureConfigurationNode()
+        : null;
+    if (!configNode) {
+      removeConfigurationNodes();
+    }
 
     graph.selectedNodeId =
-      configNode.id;
-    graph.selectedNodeIds = [
-      configNode.id
-    ];
+      configNode?.id || null;
+    graph.selectedNodeIds = configNode
+      ? [configNode.id]
+      : [];
     graph.selectedConnectionId =
       null;
     clearSelectedWirePoint();

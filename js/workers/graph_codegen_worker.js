@@ -774,7 +774,7 @@ async function ensureRuntime(
       "../graph/node_graph_registry.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&portable-types=1&i18n-rev=1"
     );
     importScripts(
-      "../graph/node_graph_type_migration.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&type-contract=3"
+      "../graph/node_graph_type_migration.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&type-contract=4"
     );
     importScripts(
       "../catalog/mod_nodes.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&null-fallback=3&portable-types=1&i18n-rev=1"
@@ -789,7 +789,7 @@ async function ensureRuntime(
       "../compiler/visual_csharp.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&i18n-rev=2"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&factory=41&schema=4&portable-types=1&specializations=2&inherited-demand=1&i18n-rev=1"
+      "../catalog/api_nodes.js?v=1.25.04-export-folder-events&factory=49&schema=4&portable-types=1&specializations=2&inherited-demand=1&i18n-rev=1&stable-contract-index=1&integrity-certificate=1"
     );
 
     if (
@@ -814,7 +814,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&portable-types=1&specializations=1"
+      "../graph/node_graph_codegen.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&portable-types=1&specializations=1&outline-optional=1&type-identity=2&language-type-adapter=7"
     );
 
     if (
@@ -868,12 +868,25 @@ async function ensureRuntime(
   return runtimeReady;
 }
 
+function isScannerMemberRequirement(requirement) {
+  return Boolean(
+    String(
+      requirement?.operatorId || ""
+    ).startsWith("api.") &&
+    String(
+      requirement?.apiContract?.kind || ""
+    ) !== "type"
+  );
+}
+
 function streamedProjectionKey(support) {
   const catalog = support?.catalog;
   const requirements = Array.isArray(
     support?.requirements
   )
-    ? support.requirements
+    ? support.requirements.filter(
+        isScannerMemberRequirement
+      )
     : [];
   return [
     support?.contractSnapshot?.fingerprint ||
@@ -958,6 +971,37 @@ function portableContractType(value) {
         `${prefix}${aliases[alias]}`
     )
     .replace(/\?(?=$|[>,\]\[])/g, "");
+}
+
+function portableCsTypeIdentity(value) {
+  const type = portableContractType(value);
+  if (!type) return "";
+  try {
+    const identity =
+      self.RMLCSharpContracts
+        ?.canonicalTypeIdentity?.(
+          type,
+          { allowOpen: true }
+        );
+    if (identity) return String(identity);
+  } catch {}
+  return type;
+}
+
+function portablePortCsTypeIdentity(
+  port,
+  definitions
+) {
+  const explicit = portableCsTypeIdentity(
+    port?.apiCsType || port?.csType || ""
+  );
+  if (explicit) return explicit;
+  const graphType = String(
+    port?.type || ""
+  ).trim();
+  return portableCsTypeIdentity(
+    definitions?.[graphType]?.csType || ""
+  );
 }
 
 function portableCanonicalValue(value) {
@@ -1244,7 +1288,10 @@ function portableContractSemanticKey(contract) {
     ).trim(),
     generic: port?.generic === true,
     optional: port?.optional === true
-  }));
+  })).sort((left, right) =>
+    left.id.localeCompare(right.id) ||
+    left.role.localeCompare(right.role)
+  );
   return JSON.stringify({
     schemaVersion: Math.max(
       0,
@@ -1840,7 +1887,10 @@ function portableVerifiedContractAdmissionKey(
     ).trim(),
     generic: port?.generic === true,
     optional: port?.optional === true
-  }));
+  })).sort((left, right) =>
+    left.id.localeCompare(right.id) ||
+    left.role.localeCompare(right.role)
+  );
   const genericArity = Math.max(
     0,
     Number(contract.genericArity) || 0
@@ -1972,64 +2022,14 @@ function portableVerifiedMemberLocatorKey(
   });
 }
 
-function portableRequiredPortRolesMatch(
+function portableVerifiedPortsMatch(
   contract,
   available
 ) {
-  const requiredPortsExist = (
-    direction,
-    key
-  ) => {
-    const required = Array.isArray(
-      contract?.[key]
-    )
-      ? contract[key]
-      : [];
-    const installed = Array.isArray(
-      available?.[key]
-    )
-      ? available[key]
-      : [];
-    return required.every(port => {
-      const id = String(
-        port?.id || ""
-      ).trim();
-      const role = portableContractPortRole(
-        contract,
-        direction,
-        port
-      );
-      return Boolean(
-        id &&
-        installed.some(candidate =>
-          String(candidate?.id || "").trim() ===
-            id &&
-          portableContractPortRole(
-            available,
-            direction,
-            candidate
-          ) === role
-        )
-      );
-    });
-  };
-  return Boolean(
-    requiredPortsExist(
-      "input",
-      "inputPorts"
-    ) &&
-    requiredPortsExist(
-      "output",
-      "outputPorts"
-    )
-  );
-}
-
-function portableVerifiedPortCsTypesMatch(
-  contract,
-  available
-) {
-  const portsMatch = key => {
+  const definitions =
+    self.RMLModNodeRegistry
+      ?.getTypeDefinitions?.() || {};
+  const portsMatch = (direction, key) => {
     const expectedPorts = Array.isArray(
       contract?.[key]
     )
@@ -2046,34 +2046,65 @@ function portableVerifiedPortCsTypesMatch(
     ) {
       return false;
     }
-    return expectedPorts.every(
-      (expectedPort, index) => {
-        const expectedCsType =
-          portableContractType(
-            expectedPort?.csType || ""
-          );
-        if (!expectedCsType) return true;
-        const graphType =
-          portableContractType(
-            expectedPort?.type || ""
-          );
-        if (
-          graphType &&
-          expectedCsType === graphType
-        ) {
-          return true;
-        }
-        return expectedCsType ===
-          portableContractType(
-            availablePorts[index]
-              ?.csType || ""
-          );
+    const availableByPort = new Map();
+    for (const port of availablePorts) {
+      const id = String(
+        port?.id || ""
+      ).trim();
+      const role = portableContractPortRole(
+        available,
+        direction,
+        port
+      );
+      const portKey = `${id}\u0000${role}`;
+      if (
+        !id ||
+        !role ||
+        availableByPort.has(portKey)
+      ) {
+        return false;
       }
-    );
+      availableByPort.set(portKey, port);
+    }
+    const expectedKeys = new Set();
+    return expectedPorts.every(expectedPort => {
+      const id = String(
+        expectedPort?.id || ""
+      ).trim();
+      const role = portableContractPortRole(
+        contract,
+        direction,
+        expectedPort
+      );
+      const portKey = `${id}\u0000${role}`;
+      if (
+        !id ||
+        !role ||
+        expectedKeys.has(portKey)
+      ) {
+        return false;
+      }
+      expectedKeys.add(portKey);
+      const installedPort =
+        availableByPort.get(portKey);
+      if (!installedPort) return false;
+      const expectedIdentity =
+        portablePortCsTypeIdentity(
+          expectedPort,
+          definitions
+        );
+      const installedIdentity =
+        portablePortCsTypeIdentity(
+          installedPort,
+          definitions
+        );
+      return expectedIdentity ===
+        installedIdentity;
+    });
   };
   return Boolean(
-    portsMatch("inputPorts") &&
-    portsMatch("outputPorts")
+    portsMatch("input", "inputPorts") &&
+    portsMatch("output", "outputPorts")
   );
 }
 
@@ -2133,15 +2164,19 @@ function portableVerifiedContractForDefinition(
   if (!available) {
     return null;
   }
+  if (
+    !portableVerifiedPortsMatch(
+      contract,
+      available
+    )
+  ) {
+    return null;
+  }
   if (exactOperator === true) {
     if (
       portableVerifiedMemberLocatorKey(
         contract
       ) !== portableVerifiedMemberLocatorKey(
-        available
-      ) ||
-      !portableRequiredPortRolesMatch(
-        contract,
         available
       )
     ) {
@@ -2160,14 +2195,6 @@ function portableVerifiedContractForDefinition(
   }
   if (
     !portableStableContractIdsIntersect(
-      contract,
-      available
-    )
-  ) {
-    return null;
-  }
-  if (
-    !portableVerifiedPortCsTypesMatch(
       contract,
       available
     )
@@ -2492,77 +2519,78 @@ function installPortableTypeContracts(
     );
     installed += 1;
   }
-  const idsByCsType = new Map();
+  const idsByCsTypeIdentity = new Map();
   for (const [graphType, information] of
     Object.entries(definitions)) {
-    const csType = normalize(
+    const identity = portableCsTypeIdentity(
       information?.csType || ""
     );
-    if (!csType) continue;
-    const ids = idsByCsType.get(csType) || [];
+    if (!identity) continue;
+    const ids =
+      idsByCsTypeIdentity.get(identity) || [];
     ids.push(graphType);
-    idsByCsType.set(csType, ids);
+    idsByCsTypeIdentity.set(identity, ids);
   }
-  const graphTypeForCsType = csType => {
+  const graphTypesForCsType = csType => {
     const normalizedCsType = normalize(csType);
-    const contractMatches = contracts
-      .filter(contract =>
-        normalize(contract.csType) ===
-          normalizedCsType
-      )
-      .map(contract =>
-        String(contract.graphType)
-      );
-    if (
-      contractMatches.length === 1 &&
-      definitions[contractMatches[0]]
-    ) {
-      return contractMatches[0];
-    }
+    const identity =
+      portableCsTypeIdentity(normalizedCsType);
     const candidates = [
-      ...new Set([
-        ...contractMatches,
-        ...(idsByCsType.get(
-          normalizedCsType
-        ) || [])
-      ])
+      ...new Set(
+        idsByCsTypeIdentity.get(identity) || []
+      )
     ].filter(id => definitions[id]);
-    if (candidates.length === 1) {
-      return candidates[0];
+    if (candidates.length > 0) {
+      return candidates;
     }
-    const conventional = candidates.find(
-      id =>
-        id === "object" &&
-        normalizedCsType === "System.Object"
-    );
-    if (conventional) return conventional;
     throw new Error(
-      `Portable C# type '${normalizedCsType}' does not identify one graph type in the worker registry.`
+      `Portable C# type '${normalizedCsType}' does not identify a graph type in the worker registry.`
     );
   };
+  const graphTypeIdentity = graphType =>
+    portableCsTypeIdentity(
+      definitions[String(graphType || "")]
+        ?.csType || ""
+    );
   for (const contract of contracts) {
     const graphType = String(
       contract.graphType
     );
     const information = definitions[graphType];
+    const storedTargetIdentities = [
+      ...new Set(
+        (Array.isArray(
+          contract.assignableToCsTypes
+        )
+          ? contract.assignableToCsTypes
+          : [])
+          .map(portableCsTypeIdentity)
+          .filter(Boolean)
+      )
+    ];
     const storedTargets =
       (Array.isArray(
         contract.assignableToCsTypes
       )
         ? contract.assignableToCsTypes
-        : []).map(graphTypeForCsType);
+        : []).flatMap(graphTypesForCsType);
     const actualTargets = new Set(
       Array.isArray(information?.assignableTo)
         ? information.assignableTo
         : []
+    );
+    const actualTargetIdentities = new Set(
+      [...actualTargets]
+        .map(graphTypeIdentity)
+        .filter(Boolean)
     );
     if (
       liveVerified &&
       !portableInstalledTypeIds.has(
         graphType
       ) &&
-      storedTargets.some(target =>
-        !actualTargets.has(target)
+      storedTargetIdentities.some(identity =>
+        !actualTargetIdentities.has(identity)
       )
     ) {
       throw new Error(
@@ -2711,7 +2739,9 @@ async function installStreamedApiRequirements(support) {
   const requirements = Array.isArray(
     support?.requirements
   )
-    ? support.requirements
+    ? support.requirements.filter(
+        isScannerMemberRequirement
+      )
     : [];
   const typeContracts = Array.isArray(
     support?.portableTypeContracts
@@ -3196,7 +3226,7 @@ async function executeWorkerRequest(
 
   if (!self.RMLCodeTemplates) {
     importScripts(
-      "../core/code_templates.js?v=797-readable-visual-functions-node-index"
+      "../core/code_templates.js?v=797-readable-visual-functions-node-index&outline-optional=1"
     );
   }
   for (const pack of request.templates || []) {
@@ -3216,7 +3246,7 @@ async function executeWorkerRequest(
       ?.configSnapshot?.metadata || {};
   if (metadata.includeGuide === true) {
     if (!self.RMLGuidance) {
-      importScripts("../core/guidance.js?v=793");
+      importScripts("../core/guidance.js?v=793&outline-optional=1");
     }
     if (request.guidance) {
       self.RMLGuidance.install(

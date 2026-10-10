@@ -294,6 +294,7 @@
   let activeReloadSafetyContractCompatible = false;
   let factoryReadySettled = false;
   let factoryRegistryIntegrityCache = null;
+  let factoryRegistryLegacyIntegrityAudit = null;
   let resolveFactoryReady;
   const catalogProjectionIndexByReport =
     new WeakMap();
@@ -529,6 +530,155 @@
     });
   }
 
+  function rememberCatalogProjectionOperator(
+    map,
+    stableContractId,
+    operatorId
+  ) {
+    const contractId = String(
+      stableContractId || ""
+    ).trim();
+    const id = String(operatorId || "").trim();
+    if (!contractId || !id) return;
+
+    const current = map.get(contractId);
+    if (!current) {
+      map.set(contractId, id);
+      return;
+    }
+    if (Array.isArray(current)) {
+      if (!current.includes(id)) {
+        current.push(id);
+      }
+      return;
+    }
+    if (current !== id) {
+      map.set(contractId, [current, id]);
+    }
+  }
+
+  function catalogProjectionMultiLookup(map) {
+    for (const [key, value] of map) {
+      if (
+        Array.isArray(value) &&
+        !Object.isFrozen(value)
+      ) {
+        map.set(key, Object.freeze([...value]));
+      }
+    }
+    return Object.freeze({
+      has(key) {
+        return map.has(key);
+      },
+      get(key) {
+        const value = map.get(key);
+        if (!value) return undefined;
+        return Array.isArray(value)
+          ? value
+          : Object.freeze([value]);
+      }
+    });
+  }
+
+  function catalogProjectionSetLookup(values) {
+    const set = new Set(values || []);
+    const entries = Object.freeze([...set]);
+    return Object.freeze({
+      size: set.size,
+      values: entries,
+      has(key) {
+        return set.has(key);
+      }
+    });
+  }
+
+  function factoryIntegrityCooperativeYield() {
+    if (
+      globalThis.scheduler &&
+      typeof globalThis.scheduler.yield ===
+        "function"
+    ) {
+      return globalThis.scheduler.yield();
+    }
+    if (typeof MessageChannel === "function") {
+      return new Promise(resolve => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = () => {
+          channel.port1.close();
+          channel.port2.close();
+          resolve();
+        };
+        channel.port2.postMessage(0);
+      });
+    }
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState === "visible" &&
+      typeof requestAnimationFrame === "function"
+    ) {
+      return new Promise(resolve => {
+        requestAnimationFrame(() => resolve());
+      });
+    }
+    return Promise.resolve();
+  }
+
+  function catalogProjectionIntegrityCertificate(
+    baseIndex,
+    registry,
+    definitions,
+    definitionRevision
+  ) {
+    const generatedOperatorIds =
+      baseIndex?.generatedOperatorIds;
+    const availableOperatorIds =
+      baseIndex?.availableOperatorIds;
+    const report = baseIndex?.report;
+    if (
+      !registry ||
+      !definitions ||
+      typeof definitions !== "object" ||
+      Array.isArray(definitions) ||
+      !generatedOperatorIds ||
+      typeof generatedOperatorIds.has !==
+        "function" ||
+      !availableOperatorIds ||
+      typeof availableOperatorIds.has !==
+        "function" ||
+      !Number.isInteger(
+        Number(generatedOperatorIds.size)
+      ) ||
+      !report
+    ) {
+      return null;
+    }
+    return Object.freeze({
+      version: 1,
+      registry,
+      definitions,
+      catalog: baseIndex.catalog,
+      report,
+      catalogFingerprint: String(
+        baseIndex.catalogFingerprint || ""
+      ),
+      engineVersion: String(
+        baseIndex.engineVersion || ""
+      ),
+      projectionRevision: Math.max(
+        0,
+        Number(baseIndex.revision) || 0
+      ),
+      definitionRevision: Math.max(
+        0,
+        Number(definitionRevision) || 0
+      ),
+      totalGeneratedNodes:
+        generatedOperatorIds.size,
+      generatedOperatorIds,
+      availableOperatorIds
+    });
+  }
+
   function customCSharpCatalogShortType(value) {
     let type = String(value || "")
       .replace(/global::/g, "")
@@ -725,9 +875,12 @@
   function completeCatalogProjectionIndex(
     baseIndex,
     state,
-    definitionRevision
+    definitionRevision,
+    registry = null,
+    definitions = null,
+    customCSharpByIdentifier = null
   ) {
-    const index = Object.freeze({
+    const indexBase = {
       ...baseIndex,
       definitionRevision:
         Math.max(
@@ -735,7 +888,19 @@
           Number(definitionRevision) || 0
         ),
       customCSharpByIdentifier:
+        customCSharpByIdentifier ||
         catalogProjectionCustomLookup(state)
+    };
+    const certificate =
+      catalogProjectionIntegrityCertificate(
+        indexBase,
+        registry,
+        definitions,
+        definitionRevision
+      );
+    const index = Object.freeze({
+      ...indexBase,
+      integrityCertificate: certificate
     });
     catalogProjectionCustomStateByIndex.set(
       index,
@@ -787,11 +952,29 @@
       );
     }
     const next = completeCatalogProjectionIndex(
-      current,
+      {
+        ...current,
+        availableOperatorIds:
+          catalogProjectionSetLookup([
+            ...(Array.isArray(
+              current.availableOperatorIds
+                ?.values
+            )
+              ? current.availableOperatorIds
+                  .values
+              : []),
+            ...definitionEntries.map(
+              ([operatorId]) => operatorId
+            )
+          ])
+      },
       nextState,
       Number(
         window.__RMLNodeDefinitionRevision
-      ) || 0
+      ) || 0,
+      window.RMLModNodeRegistry || null,
+      window.RMLModNodeRegistry
+        ?.getNodeDefinitions?.() || null
     );
     publishCatalogProjectionIndex(next);
     catalogProjectionIndexByReport.set(
@@ -850,10 +1033,21 @@
       return false;
     }
 
-    const nextIndex = Object.freeze({
-      ...current,
-      report: nextReport
-    });
+    const nextIndex =
+      completeCatalogProjectionIndex(
+        {
+          ...current,
+          report: nextReport
+        },
+        state,
+        Number(
+          window.__RMLNodeDefinitionRevision
+        ) || 0,
+        window.RMLModNodeRegistry || null,
+        window.RMLModNodeRegistry
+          ?.getNodeDefinitions?.() || null,
+        current.customCSharpByIdentifier
+      );
     catalogProjectionCustomStateByIndex.set(
       nextIndex,
       state
@@ -2650,6 +2844,206 @@
     return [...mismatches];
   }
 
+  function matchingFactoryIntegrityCertificate(
+    catalog,
+    report,
+    registry,
+    definitions,
+    definitionRevision
+  ) {
+    const index =
+      catalogProjectionIndexByReport.get(report) ||
+      window.RMLApiCatalogProjectionIndex ||
+      null;
+    const certificate =
+      index?.integrityCertificate;
+    const expectedGenerated = Math.max(
+      0,
+      Number(report?.totalGeneratedNodes) || 0
+    );
+    if (
+      Number(index?.version) !==
+        CATALOG_PROJECTION_INDEX_VERSION ||
+      index?.catalog !== catalog ||
+      index?.report !== report ||
+      String(index?.catalogFingerprint || "") !==
+        String(catalog?.catalogFingerprint || "") ||
+      String(index?.engineVersion || "") !==
+        String(catalog?.engineVersion || "") ||
+      Number(index?.revision) !==
+        Number(report?.catalogProjectionRevision) ||
+      Number(index?.definitionRevision) !==
+        definitionRevision ||
+      !certificate ||
+      Number(certificate.version) !== 1 ||
+      certificate.registry !== registry ||
+      certificate.definitions !== definitions ||
+      certificate.catalog !== catalog ||
+      certificate.report !== report ||
+      String(
+        certificate.catalogFingerprint || ""
+      ) !==
+        String(catalog?.catalogFingerprint || "") ||
+      String(certificate.engineVersion || "") !==
+        String(catalog?.engineVersion || "") ||
+      Number(certificate.projectionRevision) !==
+        Number(report?.catalogProjectionRevision) ||
+      Number(certificate.definitionRevision) !==
+        definitionRevision ||
+      Number(certificate.totalGeneratedNodes) !==
+        expectedGenerated ||
+      certificate.generatedOperatorIds !==
+        index.generatedOperatorIds ||
+      certificate.availableOperatorIds !==
+        index.availableOperatorIds ||
+      Number(
+        certificate.generatedOperatorIds?.size
+      ) !== expectedGenerated ||
+      typeof certificate.generatedOperatorIds?.has !==
+        "function" ||
+      typeof certificate.availableOperatorIds?.has !==
+        "function"
+    ) {
+      return null;
+    }
+    return certificate;
+  }
+
+  function scheduleLegacyFactoryIntegrityAudit({
+    catalog,
+    report,
+    registry,
+    definitions,
+    definitionRevision,
+    catalogFingerprint,
+    engineVersion,
+    metadataValid
+  }) {
+    if (
+      factoryRegistryLegacyIntegrityAudit &&
+      factoryRegistryLegacyIntegrityAudit.registry ===
+        registry &&
+      factoryRegistryLegacyIntegrityAudit.definitions ===
+        definitions &&
+      factoryRegistryLegacyIntegrityAudit.report ===
+        report &&
+      factoryRegistryLegacyIntegrityAudit.catalog ===
+        catalog &&
+      factoryRegistryLegacyIntegrityAudit.definitionRevision ===
+        definitionRevision
+    ) {
+      return;
+    }
+
+    const audit = {
+      registry,
+      definitions,
+      report,
+      catalog,
+      definitionRevision,
+      publicationValid: metadataValid,
+      generatedDefinitions: 0
+    };
+    factoryRegistryLegacyIntegrityAudit = audit;
+    factoryRegistryIntegrityCache = {
+      ...audit,
+      catalogIdentity: apiCatalogIdentity(catalog)
+    };
+
+    const entries = (function* () {
+      for (const id in definitions || {}) {
+        if (
+          Object.prototype.hasOwnProperty.call(
+            definitions,
+            id
+          )
+        ) {
+          yield [id, definitions[id]];
+        }
+      }
+    })();
+
+    void (async () => {
+      let complete = false;
+      while (!complete) {
+        if (
+          window.RMLModNodeRegistry !== registry ||
+          registry?.getNodeDefinitions?.() !==
+            definitions ||
+          (Number(
+            window.__RMLNodeDefinitionRevision
+          ) || 0) !== definitionRevision
+        ) {
+          return;
+        }
+        for (let index = 0; index < 512; index += 1) {
+          const next = entries.next();
+          if (next.done) {
+            complete = true;
+            break;
+          }
+          const [id, definition] = next.value;
+          if (
+            definition?.catalogGenerated !== true ||
+            definition?.legacyCatalogAlias === true
+          ) {
+            continue;
+          }
+          audit.generatedDefinitions += 1;
+          const contract = definition.apiVerification;
+          if (
+            definition.unavailableApiContract === true ||
+            !contract ||
+            typeof contract !== "object" ||
+            Number(contract.schemaVersion) !==
+              API_VERIFICATION_SCHEMA_VERSION ||
+            String(contract.nodeId || "") !== id ||
+            String(
+              contract.catalogFingerprint || ""
+            ) !== catalogFingerprint ||
+            String(contract.engineVersion || "") !==
+              engineVersion ||
+            !String(
+              contract.contractFingerprint || ""
+            ).trim()
+          ) {
+            audit.publicationValid = false;
+          }
+        }
+        if (!complete) {
+          await factoryIntegrityCooperativeYield();
+        }
+      }
+      if (
+        audit.generatedDefinitions !==
+          Number(report?.totalGeneratedNodes)
+      ) {
+        audit.publicationValid = false;
+      }
+      if (
+        factoryRegistryLegacyIntegrityAudit === audit &&
+        window.RMLModNodeRegistry === registry &&
+        registry?.getNodeDefinitions?.() ===
+          definitions &&
+        (Number(
+          window.__RMLNodeDefinitionRevision
+        ) || 0) === definitionRevision
+      ) {
+        factoryRegistryIntegrityCache = {
+          ...audit,
+          catalogIdentity:
+            apiCatalogIdentity(catalog)
+        };
+      }
+    })().finally(() => {
+      if (
+        factoryRegistryLegacyIntegrityAudit === audit
+      ) {
+        factoryRegistryLegacyIntegrityAudit = null;
+      }
+    });
+  }
+
   function factoryRegistryIntegrity(
     catalog,
     report,
@@ -2707,68 +3101,28 @@
         definitionRevision
     );
 
-    let publicationValid = false;
-    let generatedDefinitions = 0;
-    if (cacheMatches) {
+    const certificate =
+      metadataValid
+        ? matchingFactoryIntegrityCertificate(
+            catalog,
+            report,
+            registry,
+            definitions,
+            definitionRevision
+          )
+        : null;
+    let publicationValid = Boolean(certificate);
+    let generatedDefinitions = certificate
+      ? certificate.totalGeneratedNodes
+      : 0;
+    if (!certificate && cacheMatches) {
       publicationValid =
         factoryRegistryIntegrityCache
           .publicationValid;
       generatedDefinitions =
         factoryRegistryIntegrityCache
           .generatedDefinitions;
-    } else {
-      publicationValid = metadataValid;
-      if (metadataValid) {
-        for (const id in definitions) {
-          if (!Object.prototype.hasOwnProperty.call(
-            definitions,
-            id
-          )) {
-            continue;
-          }
-          const definition = definitions[id];
-          if (
-            definition?.catalogGenerated !==
-              true ||
-            definition?.legacyCatalogAlias ===
-              true
-          ) {
-            continue;
-          }
-          generatedDefinitions += 1;
-          const contract =
-            definition.apiVerification;
-          if (
-            definition.unavailableApiContract ===
-              true ||
-            !contract ||
-            typeof contract !== "object" ||
-            Number(contract.schemaVersion) !==
-              API_VERIFICATION_SCHEMA_VERSION ||
-            String(contract.nodeId || "") !==
-              id ||
-            String(
-              contract.catalogFingerprint || ""
-            ) !== catalogFingerprint ||
-            String(
-              contract.engineVersion || ""
-            ) !== engineVersion ||
-            !String(
-              contract.contractFingerprint || ""
-            ).trim()
-          ) {
-            publicationValid = false;
-          }
-        }
-        if (
-          generatedDefinitions !==
-            Number(
-              report.totalGeneratedNodes
-            )
-        ) {
-          publicationValid = false;
-        }
-      }
+    } else if (!certificate) {
       factoryRegistryIntegrityCache = {
         registry,
         definitions,
@@ -2779,6 +3133,31 @@
         definitionRevision,
         publicationValid,
         generatedDefinitions
+      };
+      if (metadataValid) {
+        scheduleLegacyFactoryIntegrityAudit({
+          catalog,
+          report,
+          registry,
+          definitions,
+          definitionRevision,
+          catalogFingerprint,
+          engineVersion,
+          metadataValid
+        });
+      }
+    } else {
+      factoryRegistryIntegrityCache = {
+        registry,
+        definitions,
+        report,
+        catalog,
+        catalogIdentity:
+          apiCatalogIdentity(catalog),
+        definitionRevision,
+        publicationValid,
+        generatedDefinitions,
+        certificate
       };
     }
 
@@ -2838,6 +3217,11 @@
               resolvedPorts.outputs
             );
       if (
+        (
+          certificate &&
+          !certificate.availableOperatorIds
+            .has(operatorId)
+        ) ||
         definition?.catalogGenerated !==
           true ||
         definition.unavailableApiContract ===
@@ -3428,9 +3812,12 @@
   }
 
   function projectStoredContractMayExecute(
-    _operatorId
+    _operatorId,
+    contract
   ) {
-    return false;
+    return String(
+      contract?.kind || ""
+    ) === "type";
   }
 
   function catalogOwnedProvisionalTypeInformation(
@@ -4664,13 +5051,12 @@
         return true;
       };
 
-    const portableDirectSpecialization = (
+    const verifiedPortableDirectSpecialization = (
       contract,
       available = contract
     ) => {
       if (
         Number(contract?.schemaVersion) !== 4 ||
-        contract?.directExecutable !== true ||
         !portableDirectKinds.has(
           String(contract?.kind || "")
         ) ||
@@ -4779,6 +5165,66 @@
       }
       return Object.freeze({
         ...specialization,
+        requiredAssemblyReferences:
+          Object.freeze(
+            normalizedPortableAssemblyReferences(
+              contract.requiredAssemblyReferences
+            ).map(reference =>
+              Object.freeze(reference)
+            )
+          )
+      });
+    };
+
+    const portableDirectSpecialization = (
+      contract,
+      available = contract
+    ) => {
+      const verified =
+        verifiedPortableDirectSpecialization(
+          contract,
+          available
+        );
+      if (verified) return verified;
+      const ownerType =
+        normalizedPortableCsType(
+          contract?.ownerType
+        );
+      const outputPorts = Array.isArray(
+        contract?.outputPorts
+      ) ? contract.outputPorts : [];
+      if (
+        Number(contract?.schemaVersion) !== 4 ||
+        contract?.directExecutable !== true ||
+        String(contract?.kind || "") !== "type" ||
+        String(available?.kind || "") !== "type" ||
+        exactApiSemanticContractKey(contract) !==
+          exactApiSemanticContractKey(available) ||
+        !isSafeCSharpTypeExpression(ownerType) ||
+        isOpenTypeExpression(ownerType) ||
+        (Array.isArray(contract?.parameters)
+          ? contract.parameters.length
+          : 0) !== 0 ||
+        (Array.isArray(contract?.inputPorts)
+          ? contract.inputPorts.length
+          : 0) !== 0 ||
+        outputPorts.length !== 1 ||
+        String(outputPorts[0]?.id || "") !== "value" ||
+        !portableCsTypesEqual(
+          outputPorts[0]?.csType,
+          "System.Type"
+        )
+      ) {
+        return null;
+      }
+      return Object.freeze({
+        genericBindings: Object.freeze({}),
+        ownerType,
+        returnType: "System.Type",
+        parameters: Object.freeze([]),
+        ownerSubstitutions: new Map(),
+        methodSubstitutions: new Map(),
+        substitutions: new Map(),
         requiredAssemblyReferences:
           Object.freeze(
             normalizedPortableAssemblyReferences(
@@ -5599,7 +6045,8 @@
       }
       const projectContractMayExecute =
         projectStoredContractMayExecute(
-          operatorId
+          operatorId,
+          contract
         );
       const executablePortableHook =
         projectContractMayExecute &&
@@ -6518,7 +6965,9 @@
         completeCatalogProjectionIndex(
           stagedCatalogProjectionIndex,
           stagedCatalogProjectionCustomState,
-          stagedCatalogProjectionRevision
+          stagedCatalogProjectionRevision,
+          stagingRegistry,
+          stagedDefinitions
         );
       catalogProjectionIndexByReport.set(
         report,
@@ -6737,6 +7186,20 @@
         );
       }
 
+      stagedCatalogProjectionIndex =
+        completeCatalogProjectionIndex(
+          stagedCatalogProjectionIndex,
+          stagedCatalogProjectionCustomState,
+          Number(
+            window.__RMLNodeDefinitionRevision
+          ) || 0,
+          registry,
+          definitions
+        );
+      catalogProjectionIndexByReport.set(
+        report,
+        stagedCatalogProjectionIndex
+      );
       publishCatalogProjectionIndex(
         stagedCatalogProjectionIndex
       );
@@ -6960,6 +7423,13 @@
         },
         ensureUnavailableOperator(operatorId, apiContract, required) {
           if (activeFactoryOperationLease) {
+            return "";
+          }
+          if (
+            String(
+              apiContract?.kind || ""
+            ) === "type"
+          ) {
             return "";
           }
           return registerUnavailableApiOperator(operatorId, apiContract, required);
@@ -7202,6 +7672,8 @@
       new Map();
     const projectionEnumByName = new Map();
     const projectionAssemblyByName =
+      new Map();
+    const projectionOperatorsByStableContractId =
       new Map();
     const graphTypeByCs = new Map();
     const graphTypeByNormalizedCs = new Map();
@@ -8536,8 +9008,7 @@
               {
                 ...method,
                 stableContractId:
-                  `contract.hook.method.${method.id}`,
-                visibility: "public"
+                  `contract.hook.method.${method.id}`
               },
               hookTemplate
             );
@@ -8991,7 +9462,11 @@
               if (
                 oldRow.type && replacement.type &&
                 oldRow.type !== "object" && replacement.type !== "object" &&
-                oldRow.type !== replacement.type
+                oldRow.type !== replacement.type &&
+                !portableCsTypesEqual(
+                  oldRow.csType,
+                  replacement.csType
+                )
               ) {
                 return null;
               }
@@ -9074,9 +9549,13 @@
           };
         const semanticKeyById =
           new Map();
+        const stableContractIdsByRequiredId =
+          new Map();
         const requestedSemanticKeys =
           new Set();
         const requestedSemanticDiscriminators =
+          new Set();
+        const requestedStableContractIds =
           new Set();
 
         for (const requirement of
@@ -9095,6 +9574,11 @@
           }
           const contract =
             requirement?.apiContract;
+          const stableIds =
+            stableContractAliasValues(
+              contract?.stableContractId,
+              contract?.stableContractIds
+            );
           const key =
             semanticContractKey(contract);
           const discriminator =
@@ -9105,6 +9589,15 @@
             continue;
           }
           semanticKeyById.set(id, key);
+          stableContractIdsByRequiredId.set(
+            id,
+            stableIds
+          );
+          for (const stableId of stableIds) {
+            requestedStableContractIds.add(
+              stableId
+            );
+          }
           requestedSemanticKeys.add(key);
           requestedSemanticDiscriminators
             .add(discriminator);
@@ -9115,9 +9608,70 @@
             [...requestedSemanticKeys]
               .map(key => [key, []])
           );
+        const stableCandidatesByContractId =
+          new Map(
+            [...requestedStableContractIds]
+              .map(id => [id, []])
+          );
+        const projectionIndex =
+          catalogProjectionIndexByReport.get(
+            report
+          ) ||
+          window.RMLApiCatalogProjectionIndex ||
+          null;
+        const indexedStableOperators =
+          projectionIndex
+            ?.operatorIdsByStableContractId;
         if (
-          requestedSemanticKeys.size > 0
+          typeof indexedStableOperators?.get ===
+            "function"
         ) {
+          for (const stableId of
+            requestedStableContractIds) {
+            const stableMatches =
+              stableCandidatesByContractId.get(
+                stableId
+              );
+            for (const candidateId of
+              indexedStableOperators.get(
+                stableId
+              ) || []) {
+              const normalizedId = String(
+                candidateId || ""
+              ).trim();
+              if (
+                normalizedId &&
+                resolutionDefinitions[
+                  normalizedId
+                ] &&
+                !stableMatches.includes(
+                  normalizedId
+                )
+              ) {
+                stableMatches.push(
+                  normalizedId
+                );
+              }
+            }
+          }
+        }
+        const semanticFallbackRequired =
+          [...semanticKeyById.keys()]
+            .some(requiredId => {
+              const stableIds =
+                stableContractIdsByRequiredId
+                  .get(requiredId) || [];
+              return (
+                stableIds.length === 0 ||
+                !stableIds.some(stableId =>
+                  (
+                    stableCandidatesByContractId
+                      .get(stableId) || []
+                  ).length > 0
+                )
+              );
+            });
+        if (semanticFallbackRequired) {
           let scannedDefinitions = 0;
           for (const id in
             resolutionDefinitions) {
@@ -9132,7 +9686,7 @@
             }
             scannedDefinitions += 1;
             if (
-              scannedDefinitions % 4096 ===
+              scannedDefinitions % 512 ===
                 0
             ) {
               await yieldToBrowser();
@@ -9163,6 +9717,22 @@
               );
             if (matches) {
               matches.push(id);
+            }
+            for (const stableId of
+              stableContractAliasValues(
+                definition?.apiStableContractId,
+                definition?.apiStableContractIds,
+                definition?.apiVerification
+                  ?.stableContractId,
+                definition?.apiVerification
+                  ?.stableContractIds
+              )) {
+              const stableMatches =
+                stableCandidatesByContractId
+                  .get(stableId);
+              if (stableMatches) {
+                stableMatches.push(id);
+              }
             }
           }
         }
@@ -9368,8 +9938,23 @@
             ? semanticCandidatesByKey
                 .get(key) || []
             : [];
-          const candidates =
-            exactCandidates;
+          const stableCandidates = [
+            ...new Set(
+              (
+                stableContractIdsByRequiredId
+                  .get(oldId) || []
+              ).flatMap(stableId =>
+                stableCandidatesByContractId
+                  .get(stableId) || []
+              )
+            )
+          ];
+          const candidates = [
+            ...new Set([
+              ...exactCandidates,
+              ...stableCandidates
+            ])
+          ];
           const inputPorts = new Set(
             Array.isArray(requirement?.inputPorts)
               ? requirement.inputPorts.map(String)
@@ -9687,7 +10272,20 @@
         assemblyByName:
           catalogProjectionLookup(
             projectionAssemblyByName
-          )
+          ),
+        operatorIdsByStableContractId:
+          catalogProjectionMultiLookup(
+            projectionOperatorsByStableContractId
+          ),
+        generatedOperatorIds:
+          catalogProjectionSetLookup(
+            generatedNodeIds
+          ),
+        availableOperatorIds:
+          catalogProjectionSetLookup([
+            ...generatedNodeIds,
+            ...legacyAliasIds
+          ])
       });
     catalogProjectionIndexByReport.set(
       report,
@@ -9713,7 +10311,9 @@
         completeCatalogProjectionIndex(
           catalogProjectionIndex,
           publishedCustomState,
-          publishedDefinitionRevision
+          publishedDefinitionRevision,
+          registry,
+          definitions
         );
       catalogProjectionIndexByReport.set(
         report,
@@ -10154,6 +10754,19 @@
         );
 
         if (identical) {
+          for (const stableId of
+            stableContractAliasValues(
+              existingContract
+                ?.stableContractId,
+              existingContract
+                ?.stableContractIds
+            )) {
+            rememberCatalogProjectionOperator(
+              projectionOperatorsByStableContractId,
+              stableId,
+              id
+            );
+          }
           generatedNodeIds.add(id);
           return true;
         }
@@ -10192,6 +10805,19 @@
           `API node '${catalogDefinitionDisplayName(definition, id)}' was rejected by the central graph registry.`
         );
         return false;
+      }
+      for (const stableId of
+        stableContractAliasValues(
+          verification.contract
+            ?.stableContractId,
+          verification.contract
+            ?.stableContractIds
+        )) {
+        rememberCatalogProjectionOperator(
+          projectionOperatorsByStableContractId,
+          stableId,
+          id
+        );
       }
       generatedNodeIds.add(id);
       return true;

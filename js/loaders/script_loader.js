@@ -153,14 +153,14 @@
     "code-templates": Object.freeze({
       dependencies: Object.freeze([]),
       files: Object.freeze([Object.freeze({
-        url: "../core/code_templates.js?v=797-readable-visual-functions-node-index",
+        url: "../core/code_templates.js?v=797-readable-visual-functions-node-index&outline-optional=1",
         ready: () => window.RMLCodeTemplates?.version === 797
       })])
     }),
     guidance: Object.freeze({
       dependencies: Object.freeze([]),
       files: Object.freeze([Object.freeze({
-        url: "../core/guidance.js?v=793",
+        url: "../core/guidance.js?v=793&outline-optional=1",
         ready: () => window.RMLGuidance?.version === 793
       })])
     }),
@@ -189,7 +189,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&status-catalog=7&portable-types=1&specializations=2&inherited-demand=1&readiness-rev=2&i18n-rev=2",
+          url: "../catalog/catalog_loader.js?v=1.25.04-export-folder-events&status-catalog=7&portable-types=1&specializations=2&inherited-demand=1&readiness-rev=2&i18n-rev=2&catalog-authority=14&integrity-certificate=1&demand-reuse=1",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -237,13 +237,13 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_type_migration.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&type-migration=3&portable-types=2",
+          url: "../graph/node_graph_type_migration.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&type-migration=4&portable-types=2",
           ready: () =>
             window.RMLGraphTypeImportMigrations
               ?.version === 1
         }),
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&portable-types=1&specializations=1",
+          url: "../graph/node_graph_codegen.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&portable-types=1&specializations=1&outline-optional=1&type-identity=2&language-type-adapter=7",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -275,7 +275,7 @@
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&worker-null-fallback=3&portable-types=1&specializations=1&i18n-rev=2",
+          url: "../graph/node_graph_custom_csharp.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&worker-null-fallback=3&portable-types=1&specializations=1&i18n-rev=2&factory=43",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -284,7 +284,7 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&status-readiness=5&schema=4&type-migration=1&portable-types=1&specializations=1&readiness-rev=4&i18n-rev=2",
+          url: "../graph/node_graph_view.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&status-readiness=5&schema=4&type-migration=1&portable-types=1&specializations=1&readiness-rev=4&i18n-rev=2&outline-optional=1",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -786,25 +786,10 @@
       status("graph-codegen").status === "failed" ||
       status("runtime-core").status === "failed" ||
       status("runtime-view").status === "failed";
-    const liveSourceNodeCount = Number(
-      bridge?.getConfigurationNodeCount?.()
-    );
-    const sourceNodeCount = Number.isFinite(
-      liveSourceNodeCount
-    )
-      ? Math.max(0, liveSourceNodeCount)
-      : Array.isArray(
-          graph?.configSnapshot?.nodes
-        )
-        ? graph.configSnapshot.nodes.length
-        : 0;
-    const available = Boolean(
-      bridge &&
-      (sourceNodeCount > 0 || graph?.active === true)
-    );
+    const available = Boolean(bridge);
 
     const unavailableReason =
-      window.RMLI18n.t("ui.literal.55fc652ce7e2");
+      window.RMLI18n.t("ui.literal.f37b3c4570a4");
     const sharedAvailability =
       window.RMLAlwaysClickableButtons?.set;
     if (typeof sharedAvailability === "function") {
@@ -844,10 +829,8 @@
       button.innerHTML =
         '<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">' +
         (failed
-          ? "Retry Runtime Graph"
-          : graph?.active === true
-            ? "Open Runtime Graph"
-            : "Pack into Node") +
+          ? window.RMLI18n.t("ui.literal.8011c1538e18")
+          : window.RMLI18n.t("ui.text.5d3e2ebd8107")) +
         "</span>";
     }
     button.dataset.help = failed

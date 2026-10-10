@@ -2428,7 +2428,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.25.00-canonical-type-reconciliation-startup-recovery",
+        "js/workers/graph_codegen_worker.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&outline-optional=1&factory=43",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }

@@ -14,9 +14,9 @@ const SAVED_API_COMPOSITE_IMPORT_SCHEMA =
   "rml-builder.saved-api-composites";
 const SAVED_API_COMPOSITE_IMPORT_MAX_BYTES =
   32 * 1024 * 1024;
-const PROJECT_FILE_MAX_BYTES = 512 * 1024 * 1024;
-const PROJECT_TREE_MAX_DEPTH = 32;
-const PROJECT_TREE_MAX_ITEMS = 1000000;
+const PROJECT_FILE_MAX_BYTES = Number.MAX_SAFE_INTEGER;
+const PROJECT_TREE_MAX_DEPTH = Number.MAX_SAFE_INTEGER;
+const PROJECT_TREE_MAX_ITEMS = Number.MAX_SAFE_INTEGER;
 const PROJECT_DRAFT_DATABASE_NAME =
   "rml-builder-project-drafts";
 const PROJECT_DRAFT_DATABASE_VERSION = 1;
@@ -174,21 +174,10 @@ document.addEventListener(
     if (!button) return;
     if (button.id === "pack-into-node") {
       const bridge = window.RMLBuilderBridge;
-      const graph =
-        bridge?.getExtensionStateReference?.(
-          "typedNodeGraph"
-        );
-      const nodeCount = Number(
-        bridge?.getConfigurationNodeCount?.()
-      );
       if (
-        button.getAttribute("aria-busy") ===
-          "true" ||
-        graph?.active === true ||
-        (
-          Number.isFinite(nodeCount) &&
-          nodeCount > 0
-        )
+        bridge &&
+        button.dataset.runtimeReadiness ===
+          "ready"
       ) {
         setAlwaysClickableButtonAvailability(
           button,
@@ -198,7 +187,6 @@ document.addEventListener(
       }
       if (
         !bridge ||
-        !Number.isFinite(nodeCount) ||
         button.dataset.runtimeReadiness !==
           "ready"
       ) {
@@ -1072,18 +1060,31 @@ function refreshUnifiedExportStatus() {
   if (!elements?.exportPreflightStatus) return;
 
   const dialogOpen = Boolean(elements.exportDialog?.open);
+  const compiledExportRequested = Boolean(
+    elements.exportIncludeCompiled?.checked
+  );
   const sourcePublicationAvailable = Boolean(
     currentValidatedGeneratedPublication()
   );
   const uiState = deriveExportUiState({
     readinessPhase: exportReadiness.phase,
     explicitStage: exportPreflightStage,
-    preflightActive: Boolean(exportPreflightRequest),
-    deliveryActive: exportDeliveryBusy,
+    preflightActive: Boolean(
+      compiledExportRequested &&
+      exportPreflightRequest
+    ),
+    deliveryActive:
+      exportDeliveryActiveForMode(
+        compiledExportRequested
+      ),
     referenceActive: Boolean(
+      compiledExportRequested &&
       browserCompilerReferenceSearchRunning
     ),
-    compilerActive: Boolean(browserCompilerBuilding),
+    compilerActive: Boolean(
+      compiledExportRequested &&
+      browserCompilerBuilding
+    ),
     generationPending: Boolean(
       generatedOutputRefreshPendingBeforeDom ||
       generatedOutputRefreshPendingForEditorEdits
@@ -1443,14 +1444,10 @@ function currentBlindGeneratedExportPublication() {
   const publication =
     currentValidatedGeneratedPublication();
   const catalog = publication?.catalog;
-  const runtimeGeneration =
-    catalog?.runtimeGraphGeneration;
   if (
     !publication ||
     !Array.isArray(catalog?.artifacts) ||
-    catalog.artifacts.length === 0 ||
-    (runtimeGeneration?.required === true &&
-      runtimeGeneration.complete !== true)
+    catalog.artifacts.length === 0
   ) {
     return null;
   }
@@ -2163,14 +2160,45 @@ function updateExportPreviewStatus(_artifacts, synchronousDiagnostics = []) {
 }
 
 function exportInputSnapshot() {
+  const exportOptions = state.exportOptions || {};
   return JSON.stringify({
     projectId: state.projectId,
     metadata: state.metadata,
-    resonitePath:
-      state.exportOptions?.resonitePath ||
-      "",
+    exportOptions: {
+      platform: String(
+        exportOptions.platform || ""
+      ),
+      resonitePath: String(
+        exportOptions.resonitePath || ""
+      ),
+      includeCs:
+        exportOptions.includeCs === true,
+      includeCsproj:
+        exportOptions.includeCsproj === true,
+      includeNodeIndex:
+        exportOptions.includeNodeIndex === true,
+      includeCompiled:
+        exportOptions.includeCompiled === true
+    },
     nodes: state.nodes,
     extensions: state.extensions
+  });
+}
+
+function currentExportOptionsSnapshot() {
+  const options = state.exportOptions || {};
+  return Object.freeze({
+    platform: String(options.platform || ""),
+    resonitePath: String(
+      options.resonitePath || ""
+    ),
+    includeCs: options.includeCs === true,
+    includeCsproj:
+      options.includeCsproj === true,
+    includeNodeIndex:
+      options.includeNodeIndex === true,
+    includeCompiled:
+      options.includeCompiled === true
   });
 }
 
@@ -2210,10 +2238,17 @@ function expectedExportCancellation(error) {
   ].includes(error?.code);
 }
 
-function beginExportDelivery() {
+function beginExportDelivery(
+  exportOptions = currentExportOptionsSnapshot()
+) {
   const job = {
     id: ++exportDeliverySequence,
     projectEpoch: projectApplicationEpoch,
+    mode:
+      exportOptions.includeCompiled === true
+        ? "compiled"
+        : "blind",
+    exportOptions,
     controller: new AbortController()
   };
   exportDeliveryJob = job;
@@ -2279,6 +2314,8 @@ function cancelExportDelivery(
       message
     );
   }
+  exportDeliveryJob = null;
+  exportDeliveryBusy = false;
   return true;
 }
 
@@ -2289,6 +2326,15 @@ function finishExportDelivery(job) {
   exportDeliveryJob = null;
   exportDeliveryBusy = false;
   return true;
+}
+
+function exportDeliveryActiveForMode(
+  includeCompiled
+) {
+  if (!exportDeliveryBusy) return false;
+  if (!exportDeliveryJob) return true;
+  return exportDeliveryJob.mode ===
+    (includeCompiled ? "compiled" : "blind");
 }
 
 function assertExportRequestCurrent(request, compareSnapshot = false) {
@@ -3317,6 +3363,7 @@ let graphCodegenWorkerCachedKey = "";
 let graphCodegenWorkerCachedResult = null;
 let graphCodegenWorkerLastError = null;
 let graphCodegenWorkerFailedKey = "";
+let graphCodegenWorkerWaitingCatalogBuild = null;
 let graphCodegenProjectionCacheKey = "";
 let graphCodegenProjectionCacheValue = null;
 let graphCodegenProjectionCachePromise = null;
@@ -3409,134 +3456,6 @@ function graphCodegenCatalogKey(catalog) {
   ].join("|");
 }
 
-function graphCodegenStoredCatalogStamp(
-  extensionState
-) {
-  const history = Array.isArray(
-    extensionState?.apiCompatibility?.history
-  )
-    ? extensionState.apiCompatibility.history
-    : [];
-  const verified = [...history]
-    .reverse()
-    .find(entry =>
-      entry &&
-      typeof entry === "object" &&
-      String(
-        entry.catalogFingerprint ||
-        entry.catalogRevision ||
-        ""
-      ).trim()
-    );
-  return Object.freeze({
-    catalogFingerprint: String(
-      verified?.catalogFingerprint ||
-      verified?.catalogRevision ||
-      "stored-contracts"
-    ),
-    catalogRevision: String(
-      verified?.catalogRevision ||
-      verified?.catalogFingerprint ||
-      "stored-contracts"
-    ),
-    engineVersion: String(
-      verified?.engineVersion || ""
-    ),
-    status: String(
-      verified?.status || "stored"
-    )
-  });
-}
-
-function graphCodegenContractSnapshotKey(
-  extensionState
-) {
-  return projectContentFingerprint({
-    schemaVersion: 1,
-    catalog:
-      graphCodegenStoredCatalogStamp(
-        extensionState
-      ),
-    graphVersion:
-      Number(extensionState?.version) || 0,
-    graphRevision:
-      Number(extensionState?.revision) || 0,
-    sourceSignature: String(
-      extensionState?.sourceSignature || ""
-    ),
-    portableTypeContracts:
-      Array.isArray(
-        extensionState?.portableTypeContracts
-      )
-        ? extensionState.portableTypeContracts
-        : []
-  });
-}
-
-function graphCodegenContractSupportSnapshot(
-  extensionState,
-  requirements,
-  portableTypeContracts
-) {
-  const normalizedRequirements =
-    (Array.isArray(requirements)
-      ? requirements
-      : []).map(requirement => {
-        const snapshot =
-          structuredClone(requirement);
-        snapshot.availability =
-          requirement?.confirmedUnavailable ===
-              true ||
-            requirement?.availability ===
-              "unavailable"
-            ? "unavailable"
-            : "snapshot";
-        return Object.freeze(snapshot);
-      });
-  const catalog =
-    graphCodegenStoredCatalogStamp(
-      extensionState
-    );
-  const fingerprint =
-    projectContentFingerprint({
-      schemaVersion: 1,
-      catalog,
-      requirements:
-        normalizedRequirements.map(
-          requirement => ({
-            operatorId: String(
-              requirement?.operatorId || ""
-            ),
-            availability: String(
-              requirement?.availability || ""
-            ),
-            apiContract:
-              requirement?.apiContract || null,
-            nodeParameters:
-              requirement?.nodeParameters || {}
-          })
-        ),
-      portableTypeContracts:
-        Array.isArray(portableTypeContracts)
-          ? portableTypeContracts
-          : []
-    });
-  return Object.freeze({
-    schemaVersion: 1,
-    mode: "verified-contract-snapshot",
-    fingerprint,
-    catalog,
-    requirements:
-      Object.freeze(normalizedRequirements),
-    portableTypeContracts:
-      Object.freeze(
-        Array.isArray(portableTypeContracts)
-          ? portableTypeContracts
-          : []
-      )
-  });
-}
-
 function largeGraphCodegenSourceKey(
   extensionState
 ) {
@@ -3559,8 +3478,55 @@ function largeGraphCodegenSourceKey(
       metadata.className || "",
     version:
       metadata.version || "",
-    includeGuide: metadata.includeGuide === true
+    includeGuide: metadata.includeGuide === true,
+    outlineFingerprint:
+      projectContentFingerprint(
+        graphCodegenOutlineFingerprintNodes(
+          state.nodes
+        )
+      )
   });
+}
+
+function graphCodegenOutlineFingerprintNodes(
+  nodes
+) {
+  return (Array.isArray(nodes) ? nodes : [])
+    .filter(node =>
+      !(
+        node?.kind === "setting" &&
+        node?.valueType === "runtimeDisplay"
+      )
+    )
+    .map(node => {
+      if (!node || typeof node !== "object") {
+        return node;
+      }
+
+      const normalized = { ...node };
+      delete normalized.layoutItemIds;
+      delete normalized.layoutItemMetadata;
+
+      if (Array.isArray(node.children)) {
+        normalized.children =
+          graphCodegenOutlineFingerprintNodes(
+            node.children
+          );
+      }
+
+      if (Array.isArray(node.options)) {
+        normalized.options =
+          node.options.map(option => ({
+            ...option,
+            children:
+              graphCodegenOutlineFingerprintNodes(
+                option?.children
+              )
+          }));
+      }
+
+      return normalized;
+    });
 }
 
 function largeGraphCodegenKey(
@@ -5338,6 +5304,13 @@ function graphCodegenCollectRequirement(
   const registered =
     window.RMLModNodeRegistry
       ?.getNodeDefinition?.(operatorId);
+  const catalogBoundOperator = Boolean(
+    operatorId.startsWith("api.") ||
+    registered?.catalogGenerated === true ||
+    registered?.unavailableApiContract === true ||
+    registered?.legacyCatalogAlias === true
+  );
+  if (!catalogBoundOperator) return;
   const registry =
     window.RMLModNodeRegistry;
   const integratedNode =
@@ -6887,8 +6860,14 @@ function announceGraphCodegenSettlement(
           normalizedSettlement.revision,
         key: normalizedSettlement.key || "",
         ok: normalizedSettlement.ok === true,
-        stale:
+      stale:
           normalizedSettlement.stale === true,
+        invalidation:
+          normalizedSettlement.invalidation ||
+          null,
+        replacementKey:
+          normalizedSettlement.replacementKey ||
+          "",
         error:
           normalizedSettlement.error || ""
       });
@@ -6913,6 +6892,7 @@ function resetGraphCodegenForProjectReplacement() {
   graphCodegenWorkerCachedResult = null;
   graphCodegenWorkerLastError = null;
   graphCodegenWorkerFailedKey = "";
+  graphCodegenWorkerWaitingCatalogBuild = null;
   pendingImportedGraphAnalysisCertificate = null;
 }
 
@@ -6936,7 +6916,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&null-fallback=3&portable-types=1&specializations=1&open-generic-identity=3",
+      "../workers/graph_codegen_worker.js?v=1.25.04-export-folder-events&null-fallback=3&portable-types=1&specializations=1&open-generic-identity=3&outline-optional=1&factory=49&type-identity=2&language-catalog-separation=11&stable-contract-index=1&integrity-certificate=1",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -7081,6 +7061,14 @@ function ensureGraphCodegenWorker() {
           active.projectEpoch,
         key: active.key,
         ok: completedResponse.ok === true,
+        error:
+          completedResponse.ok === true
+            ? ""
+            : graphCodegenWorkerLastError?.message ||
+              completedResponse.error?.message ||
+              window.RMLI18n.t(
+                "startup.readiness.background_codegen_failed"
+              ),
         transport:
           active.transport || null
       });
@@ -7145,23 +7133,35 @@ async function pumpGraphCodegenWorkerQueue() {
       terminateGraphCodegenWorker();
     }
     const worker = ensureGraphCodegenWorker();
-    const current = () => Boolean(
-      graphCodegenWorker === worker &&
-      graphCodegenWorkerActiveBuild === build &&
-      graphCodegenCatalogKey(
-        window.RMLResoniteApiCatalog ||
-        window.RMLFrooxComponentCatalog ||
-        null
-      ) === build.catalogKey &&
-      build.sourceKey ===
+    const current = () => {
+      const currentSourceKey =
         largeGraphCodegenSourceKey(
           state.extensions?.typedNodeGraph
-        ) &&
-      build.projectEpoch ===
-        graphCodegenProjectEpoch &&
-      build.applicationProjectEpoch ===
-        projectApplicationEpoch
-    );
+        );
+      const checks = {
+        worker:
+          graphCodegenWorker === worker,
+        active:
+          graphCodegenWorkerActiveBuild === build,
+        source:
+          build.sourceKey === currentSourceKey,
+        codegenProjectEpoch:
+          build.projectEpoch ===
+            graphCodegenProjectEpoch,
+        applicationProjectEpoch:
+          build.applicationProjectEpoch ===
+            projectApplicationEpoch
+      };
+      const valid = Object.values(checks).every(Boolean);
+      if (!valid) {
+        build.invalidation = Object.freeze({
+          checks: Object.freeze(checks),
+          expectedSourceKey: build.sourceKey,
+          currentSourceKey
+        });
+      }
+      return valid;
+    };
     const requirements = new Map();
     const payload = {
       state: build.state,
@@ -7228,22 +7228,29 @@ async function pumpGraphCodegenWorkerQueue() {
         )
       );
     setPhase("catalog-projection");
-    const projection =
-      await graphCodegenVerifiedCatalogProjection(
+    const verifiedCatalogAvailable =
+      graphCodegenCatalogIndexMatches(
         build.catalog,
-        requirementList,
         build.catalogIndex,
-        portableTypeContracts
+        build.catalogIndex?.report || null
       );
-    if (
-      !projection &&
-      projectedRequirements.length > 0
-    ) {
-      throw new Error(
-        "The verified API catalog snapshot cannot project the Runtime Graph contracts."
-      );
-    }
-    if (projection) {
+    let projection = null;
+    if (verifiedCatalogAvailable) {
+      projection =
+        await graphCodegenVerifiedCatalogProjection(
+          build.catalog,
+          requirementList,
+          build.catalogIndex,
+          portableTypeContracts
+        );
+      if (
+        !projection &&
+        projectedRequirements.length > 0
+      ) {
+        throw new Error(
+          "The verified API catalog snapshot cannot project the Runtime Graph contracts."
+        );
+      }
       requirementList =
         requirementList.map(requirement =>
           requirement.availability ===
@@ -7254,6 +7261,22 @@ async function pumpGraphCodegenWorkerQueue() {
               }
             : requirement
         );
+    } else {
+      setPhase("waiting-catalog");
+      graphCodegenWorkerActiveBuild = null;
+      graphCodegenWorkerRunning = false;
+      terminateGraphCodegenWorker();
+      if (!graphCodegenWorkerQueuedBuild) {
+        graphCodegenWorkerWaitingCatalogBuild =
+          build;
+      }
+      queueMicrotask(
+        resumeGraphCodegenAfterCatalogPublication
+      );
+      if (graphCodegenWorkerQueuedBuild) {
+        void pumpGraphCodegenWorkerQueue();
+      }
+      return;
     }
     if (!current()) {
       throw graphCodegenStaleError(
@@ -7299,9 +7322,32 @@ async function pumpGraphCodegenWorkerQueue() {
     ) {
       return;
     }
-    const stale =
+    let stale =
       error?.code ===
         "RML_GRAPH_CODEGEN_STALE";
+    const extensionState = stale
+      ? state.extensions?.typedNodeGraph
+      : null;
+    const replacementKey = extensionState
+      ? largeGraphCodegenKey(extensionState)
+      : "";
+    const cachedReplacement = Boolean(
+      replacementKey &&
+      graphCodegenWorkerCachedResult &&
+      graphCodegenWorkerCachedKey ===
+        replacementKey
+    );
+    if (
+      stale &&
+      build.invalidation &&
+      replacementKey === build.key &&
+      !cachedReplacement
+    ) {
+      stale = false;
+      error = new Error(
+        "Background graph code generation invalidated an unchanged immutable input snapshot."
+      );
+    }
     graphCodegenWorkerLastError =
       stale
         ? null
@@ -7321,21 +7367,31 @@ async function pumpGraphCodegenWorkerQueue() {
       key: build.key,
       ok: false,
       stale,
+      invalidation:
+        build.invalidation || null,
+      replacementKey,
       error:
         graphCodegenWorkerLastError?.message ||
         window.RMLI18n.t("ui.literal.8e58a97c7028")
     });
-    if (stale) {
-      const extensionState =
-        state.extensions?.typedNodeGraph;
-      if (extensionState) {
-        requestLargeGraphCodegen(
-          extensionState,
-          largeGraphCodegenKey(
-            extensionState
-          )
-        );
-      }
+    if (stale && cachedReplacement) {
+      announceGraphCodegenSettlement({
+        projectEpoch:
+          projectApplicationEpoch,
+        codegenProjectEpoch:
+          graphCodegenProjectEpoch,
+        key: replacementKey,
+        ok: true,
+        cached: true
+      });
+    } else if (
+      stale && extensionState &&
+      replacementKey
+    ) {
+      requestLargeGraphCodegen(
+        extensionState,
+        replacementKey
+      );
     }
     queueGraphCodegenOutputRefresh();
     void pumpGraphCodegenWorkerQueue();
@@ -7346,6 +7402,26 @@ function requestLargeGraphCodegen(
   extensionState,
   key
 ) {
+  if (
+    graphCodegenWorkerWaitingCatalogBuild
+      ?.key === key
+  ) {
+    return;
+  }
+  if (
+    graphCodegenWorkerWaitingCatalogBuild &&
+    graphCodegenWorkerWaitingCatalogBuild
+      .key !== key
+  ) {
+    graphCodegenWorkerWaitingCatalogBuild =
+      null;
+  }
+  if (
+    graphCodegenWorkerCachedResult &&
+    graphCodegenWorkerCachedKey === key
+  ) {
+    return;
+  }
   if (
     graphCodegenWorkerActiveBuild?.key ===
       key
@@ -7432,6 +7508,162 @@ function requestLargeGraphCodegen(
   graphCodegenWorkerLastError = null;
   void pumpGraphCodegenWorkerQueue();
 }
+
+function resumeGraphCodegenAfterCatalogPublication(event = null) {
+  const extensionState =
+    state.extensions?.typedNodeGraph;
+  if (
+    !largeGraphUsesBackgroundCodegen(
+      extensionState
+    )
+  ) {
+    graphCodegenWorkerWaitingCatalogBuild =
+      null;
+    return false;
+  }
+
+  const waitingBuild =
+    graphCodegenWorkerWaitingCatalogBuild;
+  const activeBuildNeedsCatalog = Boolean(
+    graphCodegenWorkerActiveBuild &&
+      !graphCodegenCatalogIndexMatches(
+        graphCodegenWorkerActiveBuild.catalog,
+        graphCodegenWorkerActiveBuild
+          .catalogIndex,
+        graphCodegenWorkerActiveBuild
+          .catalogIndex?.report || null
+      )
+  );
+  if (!waitingBuild && !activeBuildNeedsCatalog) {
+    return false;
+  }
+
+  if (waitingBuild) {
+    const replacementKey = largeGraphCodegenKey(
+      extensionState
+    );
+    if (
+      waitingBuild.projectEpoch !==
+        graphCodegenProjectEpoch ||
+      waitingBuild.applicationProjectEpoch !==
+        projectApplicationEpoch ||
+      waitingBuild.sourceKey !==
+        largeGraphCodegenSourceKey(
+          extensionState
+        )
+    ) {
+      graphCodegenWorkerWaitingCatalogBuild =
+        null;
+      announceGraphCodegenSettlement({
+        projectEpoch:
+          waitingBuild.applicationProjectEpoch,
+        codegenProjectEpoch:
+          waitingBuild.projectEpoch,
+        key: waitingBuild.key,
+        ok: false,
+        stale: true,
+        replacementKey,
+        error: ""
+      });
+      queueGraphCodegenOutputRefresh();
+      return false;
+    }
+  }
+
+  const catalog =
+    window.RMLResoniteApiCatalog ||
+    window.RMLFrooxComponentCatalog ||
+    null;
+  const catalogPublicationCompleted = Boolean(
+    event?.type === "rml-catalog:loaded" &&
+    event.detail === catalog
+  );
+  const settleCompletedCatalogFailure = error => {
+    if (
+      !catalogPublicationCompleted ||
+      !waitingBuild ||
+      graphCodegenWorkerWaitingCatalogBuild !==
+        waitingBuild
+    ) {
+      return false;
+    }
+    const failure = error instanceof Error
+      ? error
+      : new Error(String(error));
+    graphCodegenWorkerWaitingCatalogBuild = null;
+    graphCodegenWorkerLastError = failure;
+    graphCodegenWorkerFailedKey = waitingBuild.key;
+    announceGraphCodegenSettlement({
+      projectEpoch:
+        waitingBuild.applicationProjectEpoch,
+      codegenProjectEpoch:
+        waitingBuild.projectEpoch,
+      key: waitingBuild.key,
+      ok: false,
+      stale: false,
+      error: failure.message
+    });
+    queueGraphCodegenOutputRefresh();
+    return true;
+  };
+  let catalogIndex = null;
+  try {
+    catalogIndex =
+      graphCodegenCatalogIndex(catalog);
+  } catch (error) {
+    settleCompletedCatalogFailure(error);
+    return false;
+  }
+  if (
+    !graphCodegenCatalogIndexMatches(
+      catalog,
+      catalogIndex,
+      catalogIndex?.report || null
+    )
+  ) {
+    settleCompletedCatalogFailure(
+      new Error(
+        window.RMLI18n.t(
+          "ui.literal.eb342c11a169"
+        )
+      )
+    );
+    return false;
+  }
+
+  if (waitingBuild) {
+    graphCodegenWorkerWaitingCatalogBuild =
+      null;
+  }
+
+  const key = largeGraphCodegenKey(
+    extensionState
+  );
+  if (
+    graphCodegenWorkerCachedKey === key ||
+    graphCodegenWorkerActiveBuild?.key === key ||
+    graphCodegenWorkerQueuedBuild?.key === key
+  ) {
+    return true;
+  }
+
+  graphCodegenWorkerLastError = null;
+  graphCodegenWorkerFailedKey = "";
+  requestLargeGraphCodegen(
+    extensionState,
+    key
+  );
+  return true;
+}
+
+document.addEventListener(
+  "rml-catalog:loaded",
+  resumeGraphCodegenAfterCatalogPublication
+);
+window.addEventListener(
+  "rml-api-node-factory-ready",
+  resumeGraphCodegenAfterCatalogPublication
+);
 
 function pendingLargeGraphContribution() {
   const rawErrorMessage = String(
@@ -10776,15 +11008,10 @@ function getTypedNodeGraphContribution() {
       ? state.extensions.typedNodeGraph
       : null;
 
-  const hasPackedRuntimeGraph =
-    Boolean(
-      extensionState &&
-      extensionState.configSnapshot &&
-      typeof extensionState.configSnapshot === "object" &&
-      Array.isArray(extensionState.configSnapshot.nodes)
-    );
+  const hasActiveRuntimeGraph =
+    extensionState?.active === true;
 
-  if (!hasPackedRuntimeGraph) {
+  if (!hasActiveRuntimeGraph) {
     return null;
   }
 
@@ -11092,6 +11319,8 @@ function generateCode() {
       entry.node.kind === "setting" ||
       entry.node.kind === "controller"
   );
+  const hasConfigurationEntries =
+    entries.length > 0;
   const layoutRows = outlineEntries.filter(
     entry =>
       entry.node.kind === LAYOUT_ROW_KIND
@@ -11303,7 +11532,9 @@ function generateCode() {
     )
     .join("\n");
   const implementedInterfaces = [
-    window.RMLI18n.t("ui.literal.5a724d0dbfde"),
+    ...(hasConfigurationEntries
+      ? [window.RMLI18n.t("ui.literal.5a724d0dbfde")]
+      : []),
     ...(hasControllers ||
       usesRuntimeConfigurationMenu
       ? [
@@ -11315,7 +11546,8 @@ function generateCode() {
           window.RMLI18n.t("ui.literal.47b398f84a2f")
         ]
       : []),
-    ...(layoutRows.length > 0
+    ...(hasConfigurationEntries &&
+      layoutRows.length > 0
       ? [
           window.RMLI18n.t("ui.literal.356fa7424bba")
         ]
@@ -11621,7 +11853,31 @@ ${statements
           ).trim()
         : "";
 
-    runtimeBlock = globalThis.RMLCodeTemplates.text("configuration", "source_003", [runtimeValueDeclarations,
+    if (
+      graphRuntimeActive &&
+      !hasConfigurationEntries &&
+      !usesRuntimeConfigurationMenu
+    ) {
+      const graphOnlyStatements = [
+        graphInitializeStatement,
+        graphEngineInitializedStatement
+      ]
+        .filter(Boolean)
+        .map(statement =>
+          indentGeneratedStatement(
+            statement,
+            8
+          )
+        )
+        .join("\n\n");
+
+      runtimeBlock = `    public override void OnEngineInit()
+    {
+${graphOnlyStatements}
+    }
+`;
+    } else {
+      runtimeBlock = globalThis.RMLCodeTemplates.text("configuration", "source_003", [runtimeValueDeclarations,
 graphInitializeStatement
     ? `\n${indentGeneratedStatement(
         graphInitializeStatement,
@@ -11662,6 +11918,7 @@ ${changedBranches}
     : "",
 applyMethods,
 runtimeMenuValueSupport]);
+    }
   } else {
     runtimeBlock = `    public override void OnEngineInit()
     {
@@ -11703,7 +11960,8 @@ ${runtimeOrder}
     )
     .join("\n\n");
 
-  const orderBlock = `
+  const orderBlock = hasConfigurationEntries
+    ? `
     public int GetConfigurationKeyOrder(
         ModConfigurationKey key)
     {
@@ -11711,7 +11969,8 @@ ${orderBranches}
 
         return int.MaxValue;
     }
-`;
+`
+    : "";
 
   let visibilityBlock = "";
   if (
@@ -11838,6 +12097,7 @@ graphRuntimeClassName]);
       : "";
 
   const layoutProviderBlock =
+    hasConfigurationEntries &&
     layoutRows.length > 0
       ? (() => {
           const layoutItems =
@@ -13099,14 +13359,10 @@ function getDiagnostics() {
 
   const typedGraphState =
     state.extensions?.typedNodeGraph;
-  const packedRuntimeGraph = Boolean(
-    typedGraphState?.configSnapshot &&
-    Array.isArray(
-      typedGraphState.configSnapshot.nodes
-    )
-  );
+  const activeRuntimeGraph =
+    typedGraphState?.active === true;
   if (
-    packedRuntimeGraph &&
+    activeRuntimeGraph &&
     typedNodeGraphModulesState ===
       "pending"
   ) {
@@ -14302,7 +14558,7 @@ function mergePackedConfigurationNodes(
       existingIdentity.type !== "node"
     ) {
       throw new Error(
-        `Packed configuration ID '${node.id}' is used by both a node and a section option.`
+        `Configuration snapshot ID '${node.id}' is used by both a node and a section option.`
       );
     }
 
@@ -14324,7 +14580,7 @@ function mergePackedConfigurationNodes(
           optionIdentity.type !== "option"
         ) {
           throw new Error(
-            `Packed configuration ID '${option.id}' is used by both a section option and a node.`
+            `Configuration snapshot ID '${option.id}' is used by both a section option and a node.`
           );
         }
         identityById.set(
@@ -14434,7 +14690,7 @@ function mergePackedConfigurationNodes(
           )
         ) {
           throw new Error(
-            `Packed configuration ID '${fallbackNode.id}' changes between a node and a section option.`
+            `Configuration snapshot ID '${fallbackNode.id}' changes between a node and a section option.`
           );
         }
         current = clone(fallbackNode);
@@ -14457,7 +14713,7 @@ function mergePackedConfigurationNodes(
           fallbackNode.kind
       ) {
         throw new Error(
-          `Packed configuration node '${fallbackNode.id}' changes kind from '${current.kind}' to '${fallbackNode.kind}'.`
+          `Configuration snapshot node '${fallbackNode.id}' changes kind from '${current.kind}' to '${fallbackNode.kind}'.`
         );
       }
 
@@ -14493,7 +14749,7 @@ function mergePackedConfigurationNodes(
               )
             ) {
               throw new Error(
-                `Packed configuration ID '${fallbackOption.id}' changes between a section option and a node.`
+                `Configuration snapshot ID '${fallbackOption.id}' changes between a section option and a node.`
               );
             }
             currentOption =
@@ -14705,7 +14961,7 @@ function reconcilePackedGraphConfiguration(
     const connection =
       invalidConnections[0];
     throw new Error(
-      `Packed Runtime Graph connection '${connection.id || "unnamed"}' references configuration port '${connection.fromPort}' which exists neither in the Configuration Outline nor in the packed snapshot.`
+      `Runtime Graph connection '${connection.id || "unnamed"}' references configuration port '${connection.fromPort}' which exists neither in the Configuration Outline nor in the saved configuration snapshot.`
     );
   }
 
@@ -14717,9 +14973,7 @@ function reconcilePackedGraphConfiguration(
 
   if (
     Array.isArray(graph.nodes) &&
-    graph.nodes.some(node =>
-      node?.kind === "configuration"
-    ) &&
+    graph.nodes.length > 0 &&
     Array.isArray(graph.connections)
   ) {
     graph.active = true;
@@ -23897,11 +24151,11 @@ function settingInspectorMarkup(node) {
           node.hidden ? " checked" : ""
         }>
       </div>
-      <div class="inspector-note">
-        After Pack into Node, this item appears on Start / Configuration as a
-        direct Impulse output. Every click in the RML mod menu emits exactly
-        one pulse. Preview clicks remain local and never call Resonite.
-      </div>
+      <div class="inspector-note">${escapeHtml(
+        window.RMLI18n.t(
+          "configuration_outline.button.runtime_graph_note"
+        )
+      )}</div>
     </div>`;
   }
 
@@ -24112,9 +24366,11 @@ function layoutRowInspectorMarkup(node) {
           : ""
       }>
     </div>
-    <div class="inspector-note">
-      Drag settings into this row in Configuration Outline. The packed graph exposes the row on Configuration Menu Instance; Set Configuration Layout can switch it at runtime.
-    </div>
+    <div class="inspector-note">${escapeHtml(
+      window.RMLI18n.t(
+        "configuration_outline.layout_row.runtime_graph_note"
+      )
+    )}</div>
   </div>`;
 }
 
@@ -31315,18 +31571,25 @@ async function copyGeneratedCodeForCurrentView(button) {
   await copyText(String(artifact.content ?? ""), button);
 }
 
+const downloadObjectUrls = new Set();
+
+window.addEventListener("pagehide", () => {
+  for (const objectUrl of downloadObjectUrls) {
+    URL.revokeObjectURL(objectUrl);
+  }
+  downloadObjectUrls.clear();
+});
+
 function downloadBlob(blob, filename) {
   const link = document.createElement("a");
   const objectUrl = URL.createObjectURL(blob);
+  downloadObjectUrls.add(objectUrl);
   link.href = objectUrl;
   link.download = filename;
   link.hidden = true;
   document.body.appendChild(link);
   link.click();
-  window.setTimeout(() => {
-    link.remove();
-    URL.revokeObjectURL(objectUrl);
-  }, 1000);
+  link.remove();
 }
 
 Object.defineProperty(
@@ -32456,6 +32719,8 @@ function validateRuntimeGraphViewsFast(
     projectRuntimeGraphViews(graph)) {
     const result = validator({
       state: {
+        metadata: state.metadata,
+        nodes: state.nodes,
         extensions: {
           typedNodeGraph:
             view.graph
@@ -32496,6 +32761,26 @@ function runtimeCatalogResolutionEpochToken() {
     factoryFingerprint: String(
       window.RMLApiNodeFactoryReport
         ?.catalogFingerprint || ""
+    ),
+    factoryLiveVerified:
+      window.RMLApiNodeFactoryReport
+        ?.liveCatalogVerified === true,
+    catalogDemandPartial:
+      window.RMLResoniteApiCatalog
+        ?.catalogDemandPartial === true,
+    scannerSessionFingerprint: String(
+      window.RMLScannerHealthSession
+        ?.fingerprint || ""
+    ),
+    scannerCatalogReady:
+      window.RMLScannerHealthSession
+        ?.health?.catalogReady === true,
+    scannerCatalogAvailable:
+      window.RMLScannerHealthSession
+        ?.health?.catalogAvailable === true,
+    proxyState: String(
+      document.documentElement.dataset
+        .rmlCatalogProxyState || ""
     )
   });
 }
@@ -32534,6 +32819,26 @@ function runtimeCatalogResolutionBatchEpochToken() {
     factoryFingerprint: String(
       window.RMLApiNodeFactoryReport
         ?.catalogFingerprint || ""
+    ),
+    factoryLiveVerified:
+      window.RMLApiNodeFactoryReport
+        ?.liveCatalogVerified === true,
+    catalogDemandPartial:
+      window.RMLResoniteApiCatalog
+        ?.catalogDemandPartial === true,
+    scannerSessionFingerprint: String(
+      window.RMLScannerHealthSession
+        ?.fingerprint || ""
+    ),
+    scannerCatalogReady:
+      window.RMLScannerHealthSession
+        ?.health?.catalogReady === true,
+    scannerCatalogAvailable:
+      window.RMLScannerHealthSession
+        ?.health?.catalogAvailable === true,
+    proxyState: String(
+      document.documentElement.dataset
+        .rmlCatalogProxyState || ""
     )
   });
 }
@@ -32707,6 +33012,12 @@ function projectRequiredCatalogNodes(
         );
       const definition =
         definitions[operatorId];
+      const catalogBoundOperator = Boolean(
+        operatorId.startsWith("api.") ||
+        definition?.catalogGenerated === true ||
+        definition?.unavailableApiContract === true ||
+        definition?.legacyCatalogAlias === true
+      );
       const integratedNode =
         typeof registry
           ?.isIntegratedNode ===
@@ -32735,6 +33046,7 @@ function projectRequiredCatalogNodes(
 
       if (
         integratedNode ||
+        !catalogBoundOperator ||
         node?.kind !== "operator"
       ) {
         continue;
@@ -33416,6 +33728,8 @@ async function ensureProjectRuntimePrerequisites(
     progressMapper = null
   } = {}
 ) {
+  const prerequisiteProject =
+    structuredClone(project);
   const mapPrerequisiteProgress = value =>
     typeof progressMapper === "function"
       ? progressMapper(value)
@@ -33441,7 +33755,7 @@ async function ensureProjectRuntimePrerequisites(
     requestedCatalogPreflight;
   const graph =
     projectTypedRuntimeGraph(
-      project
+      prerequisiteProject
     );
 
   if (!graph) {
@@ -33491,8 +33805,8 @@ async function ensureProjectRuntimePrerequisites(
   );
 
   const modulesReady =
-    window.RMLBaseModNodesReady ||
-    window.RMLModNodesReady;
+    window.RMLModNodesReady ||
+    window.RMLBaseModNodesReady;
   if (
     !modulesReady ||
     typeof modulesReady.then !==
@@ -33538,7 +33852,7 @@ async function ensureProjectRuntimePrerequisites(
     catalogPreflight
       ?.structuralRepairability ||
     await validateProjectStructureForRepair(
-      project,
+      prerequisiteProject,
       {
         onProgress(detail) {
           const completed = Math.max(
@@ -33720,7 +34034,7 @@ async function ensureProjectRuntimePrerequisites(
 
   requiredCatalogNodes =
     projectRequiredCatalogNodes(
-      project
+      prerequisiteProject
     );
 
   const importCatalogGate =
@@ -33759,7 +34073,8 @@ async function ensureProjectRuntimePrerequisites(
       );
       await paintBuilderUi();
       try {
-        await importCatalogGate
+        const synchronized =
+          await importCatalogGate
           .synchronizeLive({
             silent: true,
             showWork: false,
@@ -33831,6 +34146,17 @@ async function ensureProjectRuntimePrerequisites(
               );
             }
           });
+        if (
+          synchronized !== true &&
+          document.documentElement.dataset
+            .rmlCatalogProxyState === "available"
+        ) {
+          throw new Error(
+            window.RMLI18n.t(
+              "import.catalog.live_authority_incomplete"
+            )
+          );
+        }
       } catch (error) {
         importCatalogSyncError = error;
         if (
@@ -34065,6 +34391,20 @@ async function ensureProjectRuntimePrerequisites(
       }
 
       if (!catalogResult) {
+        if (
+          document.documentElement.dataset
+            .rmlCatalogProxyState === "available"
+        ) {
+          throw (
+            cachePreparationError ||
+            livePreparationError ||
+            new Error(
+              window.RMLI18n.t(
+                "import.catalog.live_authority_incomplete"
+              )
+            )
+          );
+        }
         const failureMessage = [
           cachePreparationError
             ? `cache: ${String(cachePreparationError?.message || cachePreparationError)}`
@@ -34204,6 +34544,15 @@ async function ensureProjectRuntimePrerequisites(
         ?.ready === true;
 
     if (unresolvedRequirements.length > 0) {
+      if (
+        catalogResult?.live !== true
+      ) {
+        throw new Error(
+          window.RMLI18n.t(
+            "import.catalog.replacement_requires_live_authority"
+          )
+        );
+      }
       if (false) {
         const planner =
           portableImportPlanner;
@@ -34424,8 +34773,23 @@ async function ensureProjectRuntimePrerequisites(
           });
       } catch (error) {
         console.error(
-          "[RML BUILDER INTERNAL FAILURE] The bounded replacement-owner hydration failed. Existing catalog candidates remain available.",
+          "[RML BUILDER INTERNAL FAILURE] Replacement-owner hydration did not preserve live catalog authority.",
           error
+        );
+        throw new Error(
+          window.RMLI18n.t(
+            "import.catalog.replacement_requires_live_authority"
+          )
+        );
+      }
+
+      if (
+        nativeHydrationResult?.live !== true
+      ) {
+        throw new Error(
+          window.RMLI18n.t(
+            "import.catalog.replacement_requires_live_authority"
+          )
         );
       }
 
@@ -34437,25 +34801,44 @@ async function ensureProjectRuntimePrerequisites(
           unresolvedRequirements,
           nativeHydrationResult
         );
-      if (
-        Array.isArray(
+      catalogResult = Object.freeze({
+        ...catalogResult,
+        verified:
+          unresolvedRequirements.length === 0,
+        unresolved:
+          unresolvedRequirements.length,
+        unresolvedRequirements:
+          Object.freeze([
+            ...unresolvedRequirements
+          ]),
+        live: true,
+        replacementAuthoritative:
           nativeHydrationResult
-            ?.resolvedRequirementKeys
-        ) &&
+            .replacementAuthoritative === true,
+        catalogFingerprint: String(
+          nativeHydrationResult
+            .catalogFingerprint ||
+          catalogResult?.catalogFingerprint ||
+          ""
+        ),
+        engineVersion: String(
+          nativeHydrationResult
+            .engineVersion ||
+          catalogResult?.engineVersion ||
+          ""
+        )
+      });
+
+      if (
+        unresolvedRequirements.length > 0 &&
         nativeHydrationResult
-          .resolvedRequirementKeys.length > 0
+          .replacementAuthoritative !== true
       ) {
-        catalogResult = Object.freeze({
-          ...catalogResult,
-          verified:
-            unresolvedRequirements.length === 0,
-          unresolved:
-            unresolvedRequirements.length,
-          unresolvedRequirements:
-            Object.freeze([
-              ...unresolvedRequirements
-            ])
-        });
+        throw new Error(
+          window.RMLI18n.t(
+            "import.catalog.replacement_requires_live_authority"
+          )
+        );
       }
 
       const graphHost =
@@ -35590,14 +35973,14 @@ async function ensureProjectRuntimePrerequisites(
     }
   }
 
-  preserveCustomCSharpImportConnectionPorts(project.extensions?.typedNodeGraph);
+  preserveCustomCSharpImportConnectionPorts(prerequisiteProject.extensions?.typedNodeGraph);
 
   const graphValidation =
     compatibilityMode
       ? null
       : window.RMLTypedNodeGraphGenerator
           .validateDocument?.({
-            state: project
+            state: prerequisiteProject
           });
   const graphValidationDiagnostics =
     Array.isArray(
@@ -35609,7 +35992,7 @@ async function ensureProjectRuntimePrerequisites(
   const importFatalGraphDiagnostics =
     importDiagnosticsForCatalog(
       graphValidationDiagnostics,
-      project.extensions
+      prerequisiteProject.extensions
         ?.typedNodeGraph,
       catalogResult
     );
@@ -36307,6 +36690,21 @@ function waitForGraphCodegenSettlement(
       return !expectedKey ||
         detail?.key === expectedKey;
     };
+    const matchesCurrentSettlement = detail => {
+      if (
+        !detail ||
+        Number(detail?.revision) <= 0 ||
+        (
+          Number(expectedProjectEpoch) > 0 &&
+          Number(detail?.projectEpoch) !==
+            Number(expectedProjectEpoch)
+        )
+      ) {
+        return false;
+      }
+      return !expectedKey ||
+        detail?.key === expectedKey;
+    };
     const handleSettled = event => {
       const detail =
         event.detail || {};
@@ -36341,7 +36739,7 @@ function waitForGraphCodegenSettlement(
       handleReplacement
     );
     if (
-      matchesSettlement(
+      matchesCurrentSettlement(
         graphCodegenLastSettlement
       )
     ) {
@@ -36369,22 +36767,154 @@ function startupReadinessFailure(
   return error;
 }
 
-async function waitForStartupGeneratedPublication(
-  startupWork
+function startupCatalogAuthorityVerified() {
+  const catalog =
+    window.RMLResoniteApiCatalog ||
+    window.RMLFrooxComponentCatalog ||
+    null;
+  try {
+    const index =
+      graphCodegenCatalogIndex(catalog);
+    return graphCodegenCatalogIndexMatches(
+      catalog,
+      index,
+      index?.report || null
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function ensureStartupCatalogAuthority(
+  startupWork,
+  startupGraph
 ) {
-  const expectedProjectEpoch =
-    projectApplicationEpoch;
+  if (startupGraph?.active !== true) {
+    return false;
+  }
+
+  const requiresCatalog =
+    largeGraphUsesBackgroundCodegen(
+      startupGraph
+    ) ||
+    projectRequiredCatalogNodes(state)
+      .length > 0;
+  if (
+    !requiresCatalog ||
+    startupCatalogAuthorityVerified()
+  ) {
+    return requiresCatalog;
+  }
+
+  const catalogGate =
+    window.RMLCatalogImportGate;
+  if (
+    typeof catalogGate?.synchronizeLive !==
+      "function"
+  ) {
+    throw startupReadinessFailure(
+      window.RMLI18n.t(
+        "import.catalog.scanner_gate_unavailable"
+      )
+    );
+  }
+
+  startupWork.update({
+    title:
+      window.RMLI18n.t("ui.auto.e11c62ea5c13"),
+    message:
+      window.RMLI18n.t("ui.auto.ef5bac1920fc"),
+    detail:
+      window.RMLI18n.t(
+        "import.work.catalog_health_sweep"
+      )
+  });
+  await paintBuilderUi();
+  await catalogGate.synchronizeLive({
+    silent: true,
+    showWork: false,
+    forceRetry: true,
+    throwOnFailure: true,
+    trigger: "startup",
+    onProgress(detail) {
+      const fraction = clamp(
+        Number(detail?.progress) || 0,
+        0,
+        1
+      );
+      const completed = Math.max(
+        0,
+        Number(detail?.completed) || 0
+      );
+      const total = Math.max(
+        0,
+        Number(detail?.total) || 0
+      );
+      startupWork.update({
+        progress: 94 + fraction * 3,
+        detail: total > 0
+          ? window.RMLI18n.format(
+              "import.work.catalog_progress",
+              {
+                completed:
+                  completed.toLocaleString(
+                    window.RMLI18n?.language || undefined
+                  ),
+                total:
+                  total.toLocaleString(
+                    window.RMLI18n?.language || undefined
+                  ),
+                unit: window.RMLI18n.t(
+                  detail?.unit === "records"
+                    ? "import.work.catalog_records"
+                    : "import.work.catalog_units"
+                )
+              }
+            )
+          : window.RMLI18n.t(
+              "import.work.catalog_synchronization"
+            )
+      });
+    }
+  });
+
+  if (!startupCatalogAuthorityVerified()) {
+    throw startupReadinessFailure(
+      window.RMLI18n.t(
+        "import.catalog.live_authority_incomplete"
+      )
+    );
+  }
+
+  resumeGraphCodegenAfterCatalogPublication();
+  return true;
+}
+
+async function waitForGeneratedPublication(
+  work,
+  {
+    expectedProjectEpoch =
+      projectApplicationEpoch,
+    createFailure =
+      startupReadinessFailure,
+    ensureGuidance = true
+  } = {}
+) {
+  const fail = (
+    message,
+    cause = null
+  ) => createFailure(message, cause);
 
   if (
     typeof window.RMLCodeTemplates
       ?.ensureFor !== "function"
   ) {
-    throw startupReadinessFailure(
+    throw fail(
       window.RMLI18n.t("startup.readiness.template_registry_unavailable")
     );
   }
 
-  startupWork.update({
+  work.update({
     title: window.RMLI18n.t("startup.generated.title"),
     message:
       window.RMLI18n.t("startup.generated.message"),
@@ -36395,13 +36925,16 @@ async function waitForStartupGeneratedPublication(
     state
   );
 
-  if (state.metadata?.includeGuide === true) {
+  if (
+    ensureGuidance &&
+    state.metadata?.includeGuide === true
+  ) {
     await ensureLazyScriptBundle("guidance");
     if (
       typeof window.RMLGuidance?.ensureFor !==
         "function"
     ) {
-      throw startupReadinessFailure(
+      throw fail(
         window.RMLI18n.t("startup.readiness.guidance_registry_unavailable")
       );
     }
@@ -36413,7 +36946,7 @@ async function waitForStartupGeneratedPublication(
       expectedProjectEpoch !==
         projectApplicationEpoch
     ) {
-      throw startupReadinessFailure(
+      throw fail(
         window.RMLI18n.t("startup.readiness.project_changed")
       );
     }
@@ -36433,7 +36966,7 @@ async function waitForStartupGeneratedPublication(
     const afterRevision =
       graphCodegenSettlementRevision;
 
-    startupWork.update({
+    work.update({
       detail: usesBackgroundCodegen
         ? window.RMLI18n.t("startup.generated.runtime_graph_detail")
         : window.RMLI18n.t("startup.generated.project_detail")
@@ -36464,7 +36997,7 @@ async function waitForStartupGeneratedPublication(
         continue;
       }
       if (settlement?.ok !== true) {
-        throw startupReadinessFailure(
+        throw fail(
           String(
             settlement?.error ||
             window.RMLI18n.t("startup.readiness.background_codegen_failed")
@@ -36482,7 +37015,7 @@ async function waitForStartupGeneratedPublication(
     ]
       .map(value => String(value || "").trim())
       .filter(Boolean);
-    throw startupReadinessFailure(
+    throw fail(
       diagnostics[0] ||
       window.RMLI18n.t("startup.readiness.snapshot_not_published")
     );
@@ -36549,6 +37082,11 @@ async function waitForStartupProjectReadiness({
     );
   }
   await window.RMLModNodesReady;
+
+  await ensureStartupCatalogAuthority(
+    startupWork,
+    startupGraph
+  );
 
   renderAll();
   await paintBuilderUi();
@@ -36617,7 +37155,7 @@ async function waitForStartupProjectReadiness({
     );
   }
 
-  await waitForStartupGeneratedPublication(
+  await waitForGeneratedPublication(
     startupWork
   );
   await paintBuilderUi();
@@ -37531,17 +38069,6 @@ async function applyLoadedProjectWithFeedback(
           : {}),
         activePage: "configuration-outline"
       };
-      if (
-        isPlainObject(
-          project.extensions?.typedNodeGraph
-        )
-      ) {
-        project.extensions.typedNodeGraph = {
-          ...project.extensions.typedNodeGraph,
-          lastOpenPage:
-            "configuration-outline"
-        };
-      }
     }
 
     const typedGraph =
@@ -38019,6 +38546,41 @@ async function applyLoadedProjectWithFeedback(
       await window.RMLGuidance.ensureFor(state);
     }
 
+    await waitForGeneratedPublication(
+      {
+        update(changes = {}) {
+          return updateBuilderWork(
+            session,
+            changes
+          );
+        }
+      },
+      {
+        expectedProjectEpoch:
+          importedProjectEpoch,
+        ensureGuidance: false,
+        createFailure(
+          message,
+          cause = null
+        ) {
+          const error = new Error(
+            String(
+              message ||
+              window.RMLI18n.t(
+                "startup.readiness.project_not_usable"
+              )
+            )
+          );
+          error.code =
+            "RML_IMPORT_GENERATION_FAILED";
+          if (cause) {
+            error.cause = cause;
+          }
+          return error;
+        }
+      }
+    );
+
     if (
       !(
         prerequisites.graph &&
@@ -38296,83 +38858,119 @@ async function applyLoadedProjectWithFeedback(
         }
       );
     }
-    if (projectApplicationStarted) {
-      let rollbackError = null;
+    if (portableRegistryTransaction) {
       try {
-        portableRegistryTransaction
-          ?.rollback?.();
+        await Promise.resolve(
+          portableRegistryTransaction
+            .rollback?.()
+        );
+      } catch (rollbackError) {
+        reportNonBlockingImportValidation(
+          "Portable catalog transaction recovery reported a diagnostic",
+          [
+            rollbackError instanceof Error
+              ? rollbackError.stack ||
+                rollbackError.message
+              : String(rollbackError)
+          ]
+        );
+      } finally {
         portableRegistryTransaction = null;
-        if (!previousProject) {
-          throw new Error(
-            window.RMLI18n.t(
-              "import.error.previous_snapshot_unavailable"
-            )
-          );
-        }
-        applyLoadedProject(
-          previousProject,
-          {
-            render: false,
-            reason:
-              "failed-project-import-rollback",
-            useJsonPageAssociation: false
-          }
-        );
-        renderMetadata();
-        renderPalette();
-        renderAll();
-        await paintBuilderUi();
-      } catch (rollbackFailure) {
-        rollbackError =
-          rollbackFailure instanceof Error
-            ? rollbackFailure
-            : new Error(
-                String(rollbackFailure)
-              );
       }
-      const cause =
-        error instanceof Error
-          ? error
-          : new Error(String(error));
-      if (rollbackError) {
-        throw new AggregateError(
-          [cause, rollbackError],
-          "Project import failed and the previous project could not be restored completely."
+    }
+    const importDiagnostic =
+      error instanceof Error
+        ? error.stack || error.message
+        : String(error);
+    reportNonBlockingImportValidation(
+      "Project import completed with runtime diagnostics",
+      [importDiagnostic]
+    );
+    if (!projectApplicationStarted) {
+      if (forceConfigurationPage) {
+        project.workspace = {
+          ...(isPlainObject(project.workspace)
+            ? project.workspace
+            : {}),
+          activePage: "configuration-outline"
+        };
+      }
+      projectApplicationStarted = true;
+      try {
+        applyLoadedProject(project, {
+          render: false,
+          useJsonPageAssociation:
+            !forceConfigurationPage
+        });
+      } catch (applicationError) {
+        reportNonBlockingImportValidation(
+          "Project application reported a runtime diagnostic",
+          [applicationError instanceof Error
+            ? applicationError.stack || applicationError.message
+            : String(applicationError)]
         );
       }
-      const failure = new Error(
-        `Project import failed; the previous project was restored: ${cause.message}`,
-        { cause }
-      );
-      failure.code =
-        "RML_PROJECT_IMPORT_ROLLED_BACK";
-      throw failure;
+    }
+    for (const renderImportedProject of [
+      renderMetadata,
+      renderPalette,
+      renderAll
+    ]) {
+      try {
+        renderImportedProject();
+      } catch (renderError) {
+        reportNonBlockingImportValidation(
+          "Imported project rendering reported a diagnostic",
+          [renderError instanceof Error
+            ? renderError.stack || renderError.message
+            : String(renderError)]
+        );
+      }
     }
     try {
-      portableRegistryTransaction
-        ?.rollback?.();
-      portableRegistryTransaction = null;
-    } catch (rollbackFailure) {
-      throw new AggregateError(
-        [
-          error instanceof Error
-            ? error
-            : new Error(String(error)),
-          rollbackFailure instanceof Error
-            ? rollbackFailure
-            : new Error(
-                String(rollbackFailure)
-              )
-        ],
-        "Project import failed and its staged API contracts could not be rolled back completely."
+      await commitSuccessfulProjectStorage(
+        previousProject?.projectId,
+        `loaded-with-diagnostics:${displayName}`
+      );
+    } catch (storageError) {
+      reportNonBlockingImportValidation(
+        "Imported project persistence reported a diagnostic",
+        [storageError instanceof Error
+          ? storageError.stack || storageError.message
+          : String(storageError)]
       );
     }
-    reportNonBlockingImportValidation(
-      "Import processing failed before project application",
-      [error instanceof Error ? error.stack || error.message : String(error)]
-    );
-    throw error;
+    return Object.freeze({
+      ready: false,
+      presentationError:
+        error instanceof Error
+          ? error.message
+          : String(error),
+      importValidationDiagnostics:
+        Object.freeze([importDiagnostic])
+    });
+
   } finally {
+    if (portableRegistryTransaction) {
+      try {
+        await Promise.resolve(
+          portableRegistryTransaction
+            .rollback?.()
+        );
+      } catch (rollbackError) {
+        reportNonBlockingImportValidation(
+          "Portable catalog transaction cleanup reported a diagnostic",
+          [
+            rollbackError instanceof Error
+              ? rollbackError.stack ||
+                rollbackError.message
+              : String(rollbackError)
+          ]
+        );
+      } finally {
+        portableRegistryTransaction = null;
+      }
+    }
     releaseImportedGraphPresentationWork(
       importedPresentationWork
     );
@@ -39687,9 +40285,16 @@ async function loadProjectJsonFile(
       }
     }
 
-    assertProjectDocumentEnvelope(
-      projectSource
-    );
+    try {
+      assertProjectDocumentEnvelope(
+        projectSource
+      );
+    } catch (error) {
+      reportNonBlockingImportValidation(
+        "Project envelope validation reported a diagnostic",
+        [error instanceof Error ? error.message : String(error)]
+      );
+    }
 
     setProjectLoadProgress(
       true,
@@ -39751,15 +40356,23 @@ async function loadProjectJsonFile(
       });
 
     try {
-      const prerequisites =
-        await ensureProjectRuntimePrerequisites(
-          projectSource,
-          workSession,
-          {
-            catalogOnly: true,
-            allowAutomaticLiveRetry: true
-          }
+      let prerequisites = null;
+      try {
+        prerequisites =
+          await ensureProjectRuntimePrerequisites(
+            projectSource,
+            workSession,
+            {
+              catalogOnly: true,
+              allowAutomaticLiveRetry: true
+            }
+          );
+      } catch (error) {
+        reportNonBlockingImportValidation(
+          "Project prerequisite analysis reported a diagnostic",
+          [error instanceof Error ? error.stack || error.message : String(error)]
         );
+      }
 
       updateBuilderWork(
         workSession,
@@ -39769,22 +40382,31 @@ async function loadProjectJsonFile(
           title:
             window.RMLI18n.t("ui.auto.6e404a3c0705"),
           message:
-            prerequisites.compatibilityMode
+            prerequisites?.compatibilityMode
               ? window.RMLI18n.t("ui.literal.3479122351c5")
               : window.RMLI18n.t("ui.literal.afc4f665c6b9"),
           detail:
             window.RMLI18n.t("ui.literal.24a8fc950f72"),
           progress:
-            prerequisites.progressProfile
+            prerequisites?.progressProfile
               ?.prerequisitesEnd ?? 36
         }
       );
       await paintBuilderUi();
 
+      const importSource = isPlainObject(projectSource)
+        ? structuredClone(projectSource)
+        : {};
+      const importedExtensions =
+        isPlainObject(importSource.extensions)
+          ? importSource.extensions
+          : {};
+      delete importSource.format;
+      delete importSource.formatVersion;
+      importSource.extensions = {};
       const project =
-        parseProjectDocument(
-          projectSource
-        );
+        parseProjectDocument(importSource);
+      project.extensions = importedExtensions;
       Object.defineProperty(
         project,
         "__rmlJsonFingerprint",
@@ -39821,13 +40443,20 @@ async function loadProjectJsonFile(
           ? prerequisites.importValidationDiagnostics
           : [];
       void importWarnings;
-      setProjectFileStatus(
-        window.RMLI18n.format(
-          "project.file.load_success",
-          { filename: file.name }
-        ),
-        "success"
-      );
+      if (importResult?.ready === false) {
+        setProjectFileStatus(
+          `Project '${file.name}' was loaded with diagnostics: ${String(importResult.presentationError || "runtime validation failed")}`,
+          "error"
+        );
+      } else {
+        setProjectFileStatus(
+          window.RMLI18n.format(
+            "project.file.load_success",
+            { filename: file.name }
+          ),
+          "success"
+        );
+      }
     } catch (error) {
       throw error;
     } finally {
@@ -41488,10 +42117,7 @@ function requestBrowserCompilerInputFiles(
     const cleanup = () => {
       input.removeEventListener("change", changed);
       input.removeEventListener("cancel", cancelled);
-      signal?.removeEventListener(
-        "abort",
-        cancelled
-      );
+      signal?.removeEventListener("abort", aborted);
     };
     const finish = files => {
       if (settled) return;
@@ -41500,30 +42126,34 @@ function requestBrowserCompilerInputFiles(
       input.value = "";
       resolve(files);
     };
+    const fail = error => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      input.value = "";
+      reject(error);
+    };
     const changed = () => finish(
       [...(input.files || [])]
     );
     const cancelled = () => finish([]);
+    const aborted = () => fail(
+      signal?.reason || exportDeliveryCancelled()
+    );
 
     input.value = "";
     input.addEventListener("change", changed);
     input.addEventListener("cancel", cancelled);
-    signal?.addEventListener(
-      "abort",
-      cancelled,
-      { once: true }
-    );
+    signal?.addEventListener("abort", aborted, {
+      once: true
+    });
     if (signal?.aborted) {
-      cancelled();
+      aborted();
       return;
     }
     try {
       input.click();
     } catch (error) {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      input.value = "";
       const failure = new Error(
         window.RMLI18n.format(
           "export.compiler_references.file_chooser_failed",
@@ -41534,7 +42164,7 @@ function requestBrowserCompilerInputFiles(
         )
       );
       failure.code = "RML_FILE_CHOOSER_NOT_ALLOWED";
-      reject(failure);
+      fail(failure);
     }
   });
 }
@@ -41568,10 +42198,10 @@ async function chooseBrowserCompilerReferenceDirectory() {
   browserCompilerUserSelectionAbortController =
     controller;
   browserCompilerReferenceSearchRunning = true;
-  updateExportDialog();
 
   let selectionError = null;
   try {
+    refreshExportDialogSafely();
     const directoryFiles = await selectionPromise;
     if (directoryFiles.length === 0) return [];
 
@@ -41624,8 +42254,10 @@ async function chooseBrowserCompilerReferenceDirectory() {
     }
     return directoryDllFiles;
   } catch (error) {
-    selectionError = error;
-    return [];
+    selectionError = expectedExportCancellation(error)
+      ? null
+      : error;
+    throw error;
   } finally {
     if (
       browserCompilerUserSelectionPromise ===
@@ -41636,7 +42268,7 @@ async function chooseBrowserCompilerReferenceDirectory() {
         null;
     }
     browserCompilerReferenceSearchRunning = false;
-    updateExportDialog();
+    refreshExportDialogSafely();
     if (selectionError) {
       elements.exportDownloadHint.textContent =
         uiSanitizeMachineText(
@@ -41855,9 +42487,9 @@ async function browserCompilerReferenceDrop(event) {
   }
 
   browserCompilerReferenceSearchRunning = true;
-  updateExportDialog();
   let dropError = null;
   try {
+    refreshExportDialogSafely();
     const dropped =
       await collectBrowserCompilerDroppedFiles(
         capture
@@ -41901,7 +42533,7 @@ async function browserCompilerReferenceDrop(event) {
     dropError = error;
   } finally {
     browserCompilerReferenceSearchRunning = false;
-    updateExportDialog();
+    refreshExportDialogSafely();
     if (dropError) {
       elements.exportDownloadHint.textContent =
         uiSanitizeMachineText(
@@ -41939,11 +42571,10 @@ async function ensureBrowserCompilerReferences(
   if (missing.length === 0) return;
 
   browserCompilerReferenceSearchRunning = true;
-  setBrowserCompilerSearchStatus(
-    window.RMLI18n.t("js.presentation.13b772bea046")
-  );
-
   try {
+    setBrowserCompilerSearchStatus(
+      window.RMLI18n.t("js.presentation.13b772bea046")
+    );
     if (browserCompilerDirectoryFiles.length > 0) {
       assertCurrent();
       const cachedResult = selectBrowserCompilerFiles(
@@ -42060,9 +42691,7 @@ async function ensureBrowserCompilerReferences(
     }
   } finally {
     browserCompilerReferenceSearchRunning = false;
-    if (elements.exportDialog?.open) {
-      updateExportDialog();
-    }
+    refreshExportDialogSafely();
   }
 }
 
@@ -42897,7 +43526,7 @@ async function compileGeneratedBrowserDlls(
     initialReferenceFiles;
   browserCompilerBuildReferenceIdentities =
     initialReferenceIdentities;
-  updateExportDialog();
+  refreshExportDialogSafely();
 
   const buildPromise = (async () => {
     let result = null;
@@ -43146,7 +43775,6 @@ async function compileGeneratedBrowserDlls(
   })();
   const trackedPromise =
     buildPromise.finally(() => {
-      retainSelectedBrowserCompilerDirectoryFiles();
       if (
         browserCompilerBuildPromise ===
           trackedPromise
@@ -43159,9 +43787,11 @@ async function compileGeneratedBrowserDlls(
         browserCompilerBuildProjectSources = null;
         browserCompilerBuildReferenceFiles = null;
         browserCompilerBuildReferenceIdentities = null;
-        if (elements.exportDialog?.open) {
-          updateExportDialog();
-        }
+      }
+      try {
+        retainSelectedBrowserCompilerDirectoryFiles();
+      } finally {
+        refreshExportDialogSafely();
       }
     });
   browserCompilerBuildPromise =
@@ -43336,6 +43966,18 @@ function brieflyRevealExportApiCompatibilityWarning() {
   } catch {}
 }
 
+function refreshExportDialogSafely() {
+  if (!elements?.exportDialog?.open) return;
+  try {
+    updateExportDialog();
+  } catch (error) {
+    console.error(
+      "[RML BUILDER INTERNAL FAILURE] The export dialog could not refresh its current state.",
+      error
+    );
+  }
+}
+
 function updateExportDialog() {
   setExportPreflightStage(exportPreflightStage);
   setExportControlAvailability(
@@ -43369,7 +44011,8 @@ function updateExportDialog() {
   }
 
   if (elements.exportCompilerReferenceStatus) {
-    elements.exportCompilerReferenceStatus.hidden = false;
+    elements.exportCompilerReferenceStatus.hidden =
+      !includeCompiled;
   }
   const publication =
     currentValidatedGeneratedPublication();
@@ -43436,9 +44079,22 @@ function updateExportDialog() {
     includeCompiled &&
     includeCsproj &&
     !pathAvailable;
-  updateBrowserCompilerStatus(
-    completeCatalog
-  );
+  if (includeCompiled) {
+    updateBrowserCompilerStatus(
+      completeCatalog
+    );
+  } else {
+    browserCompilerBuildStatusText = "";
+    browserCompilerSelectionState =
+      Object.freeze({
+        includeCompiled: false,
+        available: false,
+        missingCount: 0,
+        cacheReady: false,
+        building: false,
+        searching: false
+      });
+  }
   const sourceCount =
     completeCatalog.artifacts.filter(
       artifact =>
@@ -43513,12 +44169,22 @@ function updateExportDialog() {
   const exportUiState = deriveExportUiState({
     readinessPhase: exportReadiness.phase,
     explicitStage: exportPreflightStage,
-    preflightActive: Boolean(exportPreflightRequest),
-    deliveryActive: exportDeliveryBusy,
+    preflightActive: Boolean(
+      includeCompiled &&
+      exportPreflightRequest
+    ),
+    deliveryActive:
+      exportDeliveryActiveForMode(
+        includeCompiled
+      ),
     referenceActive: Boolean(
+      includeCompiled &&
       browserCompilerReferenceSearchRunning
     ),
-    compilerActive: Boolean(browserCompilerBuilding),
+    compilerActive: Boolean(
+      includeCompiled &&
+      browserCompilerBuilding
+    ),
     generationPending: Boolean(
       generatedOutputRefreshPendingBeforeDom ||
       generatedOutputRefreshPendingForEditorEdits
@@ -43706,7 +44372,19 @@ function syncExportOptions({
 
 async function handleExportOptionChange() {
   const sequence = ++exportSelectionValidationSequence;
-  syncExportOptions();
+  const changed = syncExportOptions({
+    refreshDialog: false
+  });
+  if (changed) {
+    const message =
+      "The export selection changed.";
+    cancelExportPreflight(message);
+    cancelBrowserCompilerUserSelection(
+      null,
+      message
+    );
+    cancelExportDelivery(message);
+  }
   if (!elements.exportDialog?.open) return;
   updateExportDialog();
   refreshUnifiedExportStatus();
@@ -43835,9 +44513,10 @@ async function commitExportDialogPresentation(sequence) {
     if (sequence !== exportDialogOpenSequence) return false;
     const snapshot = exportDialogPresentationSnapshot();
     if (!snapshot.valid) {
-      if (typeof dialog.close === "function") dialog.close();
-      else dialog.removeAttribute("open");
-      return false;
+      console.error(
+        "[RML BUILDER INTERNAL FAILURE] The export dialog layout did not pass its presentation check.",
+        snapshot
+      );
     }
     dialog.classList.remove("export-presentation-pending");
     stabilizeDialogFocus(dialog);
@@ -43943,58 +44622,60 @@ function closeExportDialog() {
 async function downloadSelectedExport() {
   if (exportDeliveryBusy) return;
   syncExportOptions({ refreshDialog: false });
+  const exportOptions =
+    currentExportOptionsSnapshot();
   const requireSemantic =
-    state.exportOptions.includeCompiled === true;
-  const publication =
-    currentValidatedGeneratedPublication();
-  const missingCompilerReferences =
-    requireSemantic && publication
-      ? missingBrowserCompilerReferences(
-          publication.catalog
-        )
-      : [];
-  const projectFolderSelectionNeeded = Boolean(
-    requireSemantic &&
-    publication &&
-    state.exportOptions.includeCsproj === true &&
-    !String(
-      state.exportOptions.resonitePath || ""
-    ).trim() &&
-    browserCompilerDirectoryFiles.length === 0
+    exportOptions.includeCompiled;
+  const originalLabel =
+    elements.exportDownloadSelected.textContent;
+  const job = beginExportDelivery(
+    exportOptions
   );
-  const compilerFolderSelectionNeeded = Boolean(
-    requireSemantic &&
-    publication &&
-    (
-      missingCompilerReferences.length > 0 ||
-      projectFolderSelectionNeeded
-    )
-  );
-  exportDeliveryBusy = true;
-  updateExportDialog();
-  let checked;
+  let nonBlockingCompilationFailure = "";
+
   try {
+    refreshExportDialogSafely();
+    assertExportDeliveryCurrent(job);
+    const publication =
+      currentValidatedGeneratedPublication();
+    const missingCompilerReferences =
+      requireSemantic && publication
+        ? missingBrowserCompilerReferences(
+            publication.catalog
+          )
+        : [];
+    const compilerFolderSelectionNeeded =
+      Boolean(
+        requireSemantic &&
+        publication &&
+        missingCompilerReferences.length > 0
+      );
+
     if (compilerFolderSelectionNeeded) {
       backgroundSemanticExportFailure = "";
       const directoryFiles =
         await chooseBrowserCompilerReferenceDirectory();
+      assertExportDeliveryCurrent(job);
       if (directoryFiles.length === 0) {
-        const error =
-          browserCompilerReferenceSelectionError(
-            window.RMLI18n.t(
-              "ui.literal.7475400470fe"
-            )
+        elements.exportDownloadHint.textContent =
+          window.RMLI18n.t(
+            "ui.literal.7475400470fe"
           );
-        backgroundSemanticExportFailure =
-          error.message;
-        throw error;
+        elements.exportDownloadHint.classList.remove(
+          "error"
+        );
+        return;
       }
     }
-    checked = requireSemantic
-      ? await requestExportPreflight({
-          requireSyntax: false,
-          requireSemantic: true
-        })
+
+    const checked = requireSemantic
+      ? await awaitExportDelivery(
+          job,
+          requestExportPreflight({
+            requireSyntax: false,
+            requireSemantic: true
+          })
+        )
       : (() => {
           const blindPublication =
             currentBlindGeneratedExportPublication();
@@ -44007,34 +44688,8 @@ async function downloadSelectedExport() {
               })
             : null;
         })();
-  } catch (error) {
-    if (
-      requireSemantic &&
-      !backgroundSemanticExportFailure &&
-      !expectedExportCancellation(error)
-    ) {
-      backgroundSemanticExportFailure =
-        uiSanitizeMachineText(
-          error instanceof Error
-            ? error.message
-            : String(error)
-        );
-    }
-    exportDeliveryBusy = false;
-    updateExportDialog();
-    return;
-  }
-  if (!checked) {
-    exportDeliveryBusy = false;
-    updateExportDialog();
-    return;
-  }
-  exportDeliveryBusy = false;
-  const job = beginExportDelivery();
-  const originalLabel =
-    elements.exportDownloadSelected.textContent;
-  let nonBlockingCompilationFailure = "";
-  try {
+    if (!checked) return;
+
     assertExportDeliveryCurrent(job);
     if (requireSemantic) {
       assertExportRequestCurrent(
@@ -44044,13 +44699,13 @@ async function downloadSelectedExport() {
     }
     const completeCatalog = checked.catalog;
     const includeCs =
-      state.exportOptions.includeCs === true;
+      exportOptions.includeCs;
     const includeCsproj =
-      state.exportOptions.includeCsproj === true;
+      exportOptions.includeCsproj;
     const includeNodeIndex =
-      state.exportOptions.includeNodeIndex === true;
+      exportOptions.includeNodeIndex;
     const includeCompiled =
-      state.exportOptions.includeCompiled === true;
+      exportOptions.includeCompiled;
     const baseName = String(
       completeCatalog.projects.find(project =>
         project.id === "main-mod"
@@ -44143,6 +44798,18 @@ async function downloadSelectedExport() {
       `${baseName}-RML-Project.zip`
     );
   } catch (error) {
+    if (
+      requireSemantic &&
+      !backgroundSemanticExportFailure &&
+      !expectedExportCancellation(error)
+    ) {
+      backgroundSemanticExportFailure =
+        uiSanitizeMachineText(
+          error instanceof Error
+            ? error.message
+            : String(error)
+        );
+    }
     if (expectedExportCancellation(error)) {
       if (!requireSemantic) {
         setExportReadiness(
@@ -44192,9 +44859,7 @@ async function downloadSelectedExport() {
       }
 
       applyPrimaryExportAvailability([]);
-      if (elements.exportDialog?.open) {
-        updateExportDialog();
-      }
+      refreshExportDialogSafely();
     }
   }
 }
@@ -51300,7 +51965,11 @@ async function initialize() {
   );
   elements.exportSelectCompilerDirectory.addEventListener(
     "click",
-    chooseBrowserCompilerReferenceDirectory
+    () => {
+      chooseBrowserCompilerReferenceDirectory().catch(
+        () => {}
+      );
+    }
   );
   elements.exportCompilerReferenceStatus.addEventListener(
     "dragenter",

@@ -167,8 +167,9 @@
     return result;
   }
   const forState = state => {
-    const graph = state?.extensions?.typedNodeGraph?.configSnapshot;
-    return graph && Array.isArray(graph.nodes)
+    const graphActive =
+      state?.extensions?.typedNodeGraph?.active === true;
+    return graphActive
       ? ["configuration", "runtime", "nodes", "api"] : ["configuration"];
   };
   function install(name, pack) {

@@ -194,6 +194,8 @@ let bridge = null;
 
 let graph = null;
 
+let codegenConfigurationSnapshot = null;
+
 let customCSharpEditor = null;
 
 let apiCompositeEditor = null;
@@ -1296,7 +1298,10 @@ function fallbackTypeForDefinition(definition) {
         ? definition.defaultType
         : allowed[0]);
 
-    return allowed.includes(fallback)
+    return graphTypeCollectionIncludes(
+      allowed,
+      fallback
+    )
       ? fallback
       : allowed[0] || "float";
   }
@@ -1783,9 +1788,87 @@ function typeMatchesConstraint(
       );
   }
 
-  function graphPortCsTypeIdentity(
+  const graphPortableTypeContractIndexes =
+    new WeakMap();
+
+  function graphPortableTypeContractIndex(
+    sourceGraph = graph
+  ) {
+    const contracts = Array.isArray(
+      sourceGraph?.portableTypeContracts
+    )
+      ? sourceGraph.portableTypeContracts
+      : null;
+    if (!contracts) {
+      return null;
+    }
+
+    let index =
+      graphPortableTypeContractIndexes.get(
+        contracts
+      );
+    if (!index) {
+      index = new Map();
+      for (const contract of contracts) {
+        const graphType = String(
+          contract?.graphType || ""
+        ).trim();
+        if (graphType && !index.has(graphType)) {
+          index.set(graphType, contract);
+        }
+      }
+      graphPortableTypeContractIndexes.set(
+        contracts,
+        index
+      );
+    }
+    return index;
+  }
+
+  function graphPortableTypeContract(
     type,
-    specification = null
+    sourceGraph = graph
+  ) {
+    const raw = String(type || "").trim();
+    if (!raw) return null;
+    const index =
+      graphPortableTypeContractIndex(
+        sourceGraph
+      );
+    if (!index) return null;
+
+    const canonical =
+      canonicalGraphType(raw);
+    const base = typeBase(raw);
+    for (const candidate of [
+      raw,
+      canonical,
+      base
+    ]) {
+      if (candidate && index.has(candidate)) {
+        return index.get(candidate);
+      }
+    }
+    return null;
+  }
+
+  function graphTypeInformation(type) {
+    const raw = String(type || "").trim();
+    if (!raw) return null;
+    const canonical =
+      canonicalGraphType(raw);
+    return (
+      TYPE_INFO[raw] ||
+      TYPE_INFO[canonical] ||
+      TYPE_INFO[typeBase(raw)] ||
+      null
+    );
+  }
+
+  function graphPortDeclaredCsType(
+    type,
+    specification = null,
+    sourceGraph = graph
   ) {
     const explicit = String(
       specification?.apiCsType ||
@@ -1793,29 +1876,159 @@ function typeMatchesConstraint(
       ""
     ).trim();
     if (explicit) {
-      return graphExactCsTypeIdentity(
-        explicit
-      );
+      return explicit;
     }
 
-    const canonical = canonicalGraphType(type);
     const information =
-      TYPE_INFO[type] ||
-      TYPE_INFO[canonical] ||
-      TYPE_INFO[typeBase(type)] ||
-      null;
-    return information?.csType
-      ? graphExactCsTypeIdentity(
-          information.csType
+      graphTypeInformation(type);
+    const registered = String(
+      information?.csType || ""
+    ).trim();
+    if (registered) {
+      return registered;
+    }
+
+    return String(
+      graphPortableTypeContract(
+        type,
+        sourceGraph
+      )?.csType || ""
+    ).trim();
+  }
+
+  function graphPortCsTypeIdentity(
+    type,
+    specification = null,
+    sourceGraph = graph
+  ) {
+    return graphExactCsTypeIdentity(
+      graphPortDeclaredCsType(
+        type,
+        specification,
+        sourceGraph
+      )
+    );
+  }
+
+  function graphTypesHaveExactIdentity(
+    leftType,
+    rightType,
+    leftSpecification = null,
+    rightSpecification = null,
+    sourceGraph = graph
+  ) {
+    const left = String(
+      leftType || ""
+    ).trim();
+    const right = String(
+      rightType || ""
+    ).trim();
+    if (!left || !right) {
+      return false;
+    }
+
+    const leftIdentity =
+      graphPortCsTypeIdentity(
+        left,
+        leftSpecification,
+        sourceGraph
+      );
+    const rightIdentity =
+      graphPortCsTypeIdentity(
+        right,
+        rightSpecification,
+        sourceGraph
+      );
+    if (leftIdentity && rightIdentity) {
+      return leftIdentity === rightIdentity;
+    }
+
+    return canonicalGraphType(left) ===
+      canonicalGraphType(right);
+  }
+
+  function graphTypeCollectionMatch(
+    values,
+    candidateType,
+    candidateSpecification = null,
+    sourceGraph = graph
+  ) {
+    if (
+      !values ||
+      typeof values[Symbol.iterator] !==
+        "function"
+    ) {
+      return null;
+    }
+    for (const value of values) {
+      if (
+        graphTypesHaveExactIdentity(
+          value,
+          candidateType,
+          null,
+          candidateSpecification,
+          sourceGraph
         )
-      : "";
+      ) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  function graphTypeCollectionIncludes(
+    values,
+    candidateType,
+    candidateSpecification = null,
+    sourceGraph = graph
+  ) {
+    return graphTypeCollectionMatch(
+      values,
+      candidateType,
+      candidateSpecification,
+      sourceGraph
+    ) !== null;
+  }
+
+  function graphPortableAssignableToIdentity(
+    fromType,
+    toType,
+    toSpecification = null,
+    sourceGraph = graph
+  ) {
+    const targetIdentity =
+      graphPortCsTypeIdentity(
+        toType,
+        toSpecification,
+        sourceGraph
+      );
+    if (!targetIdentity) {
+      return false;
+    }
+    const contract =
+      graphPortableTypeContract(
+        fromType,
+        sourceGraph
+      );
+    return (
+      Array.isArray(
+        contract?.assignableToCsTypes
+      ) &&
+      contract.assignableToCsTypes.some(
+        csType =>
+          graphExactCsTypeIdentity(
+            csType
+          ) === targetIdentity
+      )
+    );
   }
 
   function connectionTypesCompatible(
     fromType,
     toType,
     fromSpecification = null,
-    toSpecification = null
+    toSpecification = null,
+    sourceGraph = graph
   ) {
     if (customCSharpEditor) {
       return true;
@@ -1827,12 +2040,14 @@ function typeMatchesConstraint(
     const fromPortCsType =
       graphPortCsTypeIdentity(
         fromType,
-        fromSpecification
+        fromSpecification,
+        sourceGraph
       );
     const toPortCsType =
       graphPortCsTypeIdentity(
         toType,
-        toSpecification
+        toSpecification,
+        sourceGraph
       );
     if (
       fromPortCsType &&
@@ -1847,10 +2062,20 @@ function typeMatchesConstraint(
       fromPortCsType !== toPortCsType
     );
 
+    const declaredFromType = fromType;
+    const declaredToType = toType;
     fromType = canonicalGraphType(fromType);
     toType = canonicalGraphType(toType);
 
-    if (fromType === toType) {
+    if (
+      graphTypesHaveExactIdentity(
+        declaredFromType,
+        declaredToType,
+        fromSpecification,
+        toSpecification,
+        sourceGraph
+      )
+    ) {
       return !resolvedIdentityConflict;
     }
 
@@ -1863,13 +2088,23 @@ function typeMatchesConstraint(
       return true;
     }
 
-    const fromBase = typeBase(fromType);
-    const toBase = typeBase(toType);
-    const fromInformation = TYPE_INFO[fromBase] || {};
-    const toInformation = TYPE_INFO[toBase] || {};
+    const fromInformation =
+      graphTypeInformation(
+        declaredFromType
+      ) || {};
+    const toInformation =
+      graphTypeInformation(
+        declaredToType
+      ) || {};
 
     if (
-      toBase === "object" &&
+      graphTypesHaveExactIdentity(
+        declaredToType,
+        "object",
+        toSpecification,
+        null,
+        sourceGraph
+      ) &&
       fromType !== "impulse"
     ) {
       return true;
@@ -1884,9 +2119,22 @@ function typeMatchesConstraint(
 
     if (
       Array.isArray(fromInformation.assignableTo) &&
-      (
-        fromInformation.assignableTo.includes(toType) ||
-        fromInformation.assignableTo.includes(toBase)
+      graphTypeCollectionIncludes(
+        fromInformation.assignableTo,
+        declaredToType,
+        toSpecification,
+        sourceGraph
+      )
+    ) {
+      return true;
+    }
+
+    if (
+      graphPortableAssignableToIdentity(
+        declaredFromType,
+        declaredToType,
+        toSpecification,
+        sourceGraph
       )
     ) {
       return true;
@@ -1894,32 +2142,25 @@ function typeMatchesConstraint(
 
     if (
       Array.isArray(toInformation.acceptsTypes) &&
-      (
-        toInformation.acceptsTypes.includes(fromType) ||
-        toInformation.acceptsTypes.includes(fromBase)
+      graphTypeCollectionIncludes(
+        toInformation.acceptsTypes,
+        declaredFromType,
+        fromSpecification,
+        sourceGraph
       )
     ) {
       return true;
     }
 
-    const fromCsType = String(
-      fromInformation.csType || ""
-    )
+    const toCsType =
+      graphPortDeclaredCsType(
+        declaredToType,
+        toSpecification,
+        sourceGraph
+      )
       .replace(/global::/g, "")
+      .replace(/\s+/g, "")
       .trim();
-    const toCsType = String(
-      toInformation.csType || ""
-    )
-      .replace(/global::/g, "")
-      .trim();
-
-    if (
-      fromCsType &&
-      toCsType &&
-      fromCsType === toCsType
-    ) {
-      return true;
-    }
 
     if (
       fromInformation.collectorCollection ===
@@ -1930,7 +2171,11 @@ function typeMatchesConstraint(
           "System.Collections.IEnumerable",
           "System.Collections.ICollection",
           "System.Collections.IList"
-        ].includes(toCsType)
+        ].some(csType =>
+          graphExactCsTypeIdentity(
+            csType
+          ) === toPortCsType
+        )
       ) {
         return true;
       }
@@ -1964,10 +2209,18 @@ function typeMatchesConstraint(
             covariant
               ? connectionTypesCompatible(
                   fromElementType,
-                  toElementType
+                  toElementType,
+                  null,
+                  null,
+                  sourceGraph
                 )
-              : fromElementType ===
-                  toElementType
+              : graphTypesHaveExactIdentity(
+                  fromElementType,
+                  toElementType,
+                  null,
+                  null,
+                  sourceGraph
+                )
           )
         ) {
           return true;
@@ -1993,7 +2246,8 @@ function enumerableElementType(type) {
 function genericCollectionRelationCompatible(
     relation,
     collectionType,
-    itemType
+    itemType,
+    sourceGraph = graph
   ) {
     const elementType =
       enumerableElementType(
@@ -2005,10 +2259,19 @@ function genericCollectionRelationCompatible(
     }
 
     return relation?.exact === true
-      ? elementType === itemType
+      ? graphTypesHaveExactIdentity(
+          elementType,
+          itemType,
+          null,
+          null,
+          sourceGraph
+        )
       : connectionTypesCompatible(
           elementType,
-          itemType
+          itemType,
+          null,
+          null,
+          sourceGraph
         );
   }
 
@@ -6017,7 +6280,8 @@ function repairVisualFunctionConnectionsInGraph(
             fromPort.type,
             toPort.type,
             fromPort,
-            toPort
+            toPort,
+            targetGraph
           );
         if (!missing && !incompatible) {
           return true;
@@ -7314,9 +7578,38 @@ function hashText(value) {
       .padStart(8, "0");
   }
 
+function synchronizeCodegenConfigurationSnapshot(
+    state
+  ) {
+    const source =
+      state &&
+      typeof state === "object"
+        ? state
+        : null;
+    codegenConfigurationSnapshot =
+      source
+        ? {
+            metadata:
+              nodeGraphClone(
+                source.metadata || {}
+              ),
+            nodes:
+              nodeGraphClone(
+                Array.isArray(source.nodes)
+                  ? source.nodes
+                  : []
+              )
+          }
+        : null;
+    return codegenConfigurationSnapshot;
+  }
+
 function snapshotFromBuilder() {
     const state =
-      bridge.getStateSnapshot();
+      bridge?.getStateSnapshot?.() ||
+      codegenConfigurationSnapshot ||
+      graph?.configSnapshot ||
+      {};
 
     return {
       metadata:
@@ -7397,7 +7690,6 @@ function configurationValueType(node) {
 
 function configurationDefinition() {
     const snapshot =
-      graph.configSnapshot ||
       snapshotFromBuilder();
 
     const metadata =
@@ -7468,10 +7760,9 @@ function configurationDefinition() {
 
     return {
       title:
-        `Start · ${
-          metadata.modName ||
-          window.RMLI18n.t("js.presentation.da5ee0698fa0")
-        }`,
+        metadata.modName
+          ? `${window.RMLI18n.t("js.presentation.da5ee0698fa0")} · ${metadata.modName}`
+          : window.RMLI18n.t("js.presentation.da5ee0698fa0"),
       group: window.RMLI18n.t("js.presentation.da5ee0698fa0"),
       symbol: "§",
       description:
@@ -7488,7 +7779,6 @@ function configurationMenuDefinition() {
         "configuration.menuInstance"
       ] || {};
     const snapshot =
-      graph.configSnapshot ||
       snapshotFromBuilder();
     const outputs = [
       ...(Array.isArray(
@@ -7578,6 +7868,117 @@ function isConfigurationReactionConnection(
       toRef?.direction === "input" &&
       toRef.spec?.type === "impulse"
     );
+  }
+
+function legacyLanguageTypeDefinition(
+    node,
+    definition
+  ) {
+    if (
+      definition?.unavailableApiContract !==
+        true
+    ) {
+      return definition;
+    }
+    const contract = [
+      definition?.preservedApiContract,
+      node?.apiContract,
+      definition?.apiVerification
+    ].find(value =>
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      String(value.kind || "") === "type"
+    );
+    const contracts =
+      window.RMLCSharpContracts;
+    if (
+      !contract ||
+      !contracts ||
+      typeof contracts
+        .typeRefFromPortableContract !==
+        "function" ||
+      typeof contracts.emitTypeSyntax !==
+        "function"
+    ) {
+      return definition;
+    }
+    let typeSyntax = "";
+    let displayType = "";
+    try {
+      const typeRef =
+        contracts.typeRefFromPortableContract(
+          contract,
+          {
+            nodeParameters:
+              node?.parameters || {}
+          }
+        );
+      typeSyntax = contracts.emitTypeSyntax(
+        typeRef
+      );
+      displayType = contracts.emitTypeSyntax(
+        typeRef,
+        { global: false }
+      );
+    } catch {
+      return definition;
+    }
+    const availableInputs = (
+      Array.isArray(definition.inputs)
+        ? definition.inputs
+        : []
+    ).map(port => ({
+      ...port,
+      unavailableApiPort: false
+    }));
+    const availableOutputs = (
+      Array.isArray(definition.outputs)
+        ? definition.outputs
+        : []
+    ).map(port => ({
+      ...port,
+      unavailableApiPort: false
+    }));
+    return {
+      ...definition,
+      title: `Type · ${displayType}`,
+      group:
+        OPERATOR_DEFINITIONS[
+          "csharp.typeOf"
+        ]?.group || "C# Language",
+      symbol: "typeof",
+      description:
+        `Exact System.Type constant for ${displayType}.`,
+      expertOnly: false,
+      catalogGenerated: false,
+      scannerCatalogGenerated: false,
+      unavailableApiContract: false,
+      portableApiExecutableContract: true,
+      apiVerification: contract,
+      preservedApiContract: contract,
+      requiredAssemblyReferences:
+        Array.isArray(
+          contract.requiredAssemblyReferences
+        )
+          ? contract.requiredAssemblyReferences
+          : [],
+      inputs: availableInputs,
+      outputs: availableOutputs,
+      resolveDefinition() {
+        return {
+          inputs: availableInputs,
+          outputs: availableOutputs
+        };
+      },
+      codegenCollect() {},
+      codegenExpression() {
+        return `typeof(${typeSyntax})`;
+      },
+      codegenAction() {
+        return "";
+      }
+    };
   }
 
 function resolveNodeDefinition(node) {
@@ -7702,6 +8103,12 @@ function resolveNodeDefinition(node) {
         parameters: []
       };
     }
+
+    definition =
+      legacyLanguageTypeDefinition(
+        node,
+        definition
+      );
 
     if (
       node.operatorId ===
@@ -8990,8 +9397,11 @@ function graphAnalysisFromCertificate(
               definition.configurableTypes
             ) &&
             definition.allowRegisteredTypes !== true &&
-            !definition.configurableTypes.includes(
-              type
+            !graphTypeCollectionIncludes(
+              definition.configurableTypes,
+              type,
+              null,
+              graph
             )
           ) ||
           !specs.every(spec =>
@@ -9148,9 +9558,11 @@ function analyzeConnectionsCore(
         const explicitType =
           configured &&
           configured !== "auto" &&
-          allowed.some(type =>
-            canonicalGraphType(type) ===
-            configured
+          graphTypeCollectionIncludes(
+            allowed,
+            configured,
+            null,
+            graph
           )
             ? configured
             : null;
@@ -14803,6 +15215,9 @@ function resolveCatalogReloadUseSite(
 function buildTypedNodeGraphCSharpContribution(
     request = {}
   ) {
+    synchronizeCodegenConfigurationSnapshot(
+      request.state
+    );
     if (
       (customCSharpEditor ||
         apiCompositeEditor) &&
@@ -14830,9 +15245,7 @@ function buildTypedNodeGraphCSharpContribution(
       );
     }
 
-    if (
-      !graph?.configSnapshot
-    ) {
+    if (graph?.active !== true) {
       pendingGraphAnalysisCertificate = null;
       return {
         active: false,
@@ -14856,9 +15269,22 @@ function buildTypedNodeGraphCSharpContribution(
       request.state ||
       bridge?.getStateSnapshot?.() ||
       {};
+    const configurationSnapshot =
+      codegenConfigurationSnapshot ||
+      (
+        graph.configSnapshot &&
+        typeof graph.configSnapshot === "object" &&
+        Array.isArray(graph.configSnapshot.nodes)
+          ? graph.configSnapshot
+          : null
+      ) ||
+          {
+            metadata: {},
+            nodes: []
+          };
     const metadata =
       stateSnapshot.metadata ||
-      graph.configSnapshot.metadata ||
+      configurationSnapshot.metadata ||
       {};
     const includeGuideComments =
       metadata.includeGuide === true;
@@ -14873,6 +15299,12 @@ function buildTypedNodeGraphCSharpContribution(
     const cacheKey =
       JSON.stringify({
         metadata,
+        configurationFingerprint:
+          hashText(
+            JSON.stringify(
+              configurationSnapshot.nodes || []
+            )
+          ),
         graphCodegenRevision,
         graphNodeCount:
           graph.nodes.length,
@@ -15361,7 +15793,12 @@ function buildTypedNodeGraphCSharpContribution(
       `${className}.NodeGraph.cs`;
     const configurationEntries =
       flattenConfiguration(
-        graph.configSnapshot.nodes || []
+        configurationSnapshot.nodes || []
+      );
+    const hasConfigurationEntries =
+      configurationEntries.some(entry =>
+        entry?.node?.kind === "setting" ||
+        entry?.node?.kind === "controller"
       );
 
     const configurationValueEntries =
@@ -17021,6 +17458,18 @@ ${body}
           }`
         );
       }
+    }
+
+    if (
+      !hasConfigurationEntries &&
+      extensionRequirements
+        .usesRuntimeConfigurationMenu
+    ) {
+      diagnostics.push(
+        window.RMLI18n.t(
+          "graph.codegen.runtime_configuration_requires_outline"
+        )
+      );
     }
 
     const csharpBraceDelta = (
@@ -19032,6 +19481,9 @@ generatedRuntimeMembersCode ? `\n\n${generatedRuntimeMembersCode}` : ""]);
 function validateTypedNodeGraphDocument(
     request = {}
   ) {
+    synchronizeCodegenConfigurationSnapshot(
+      request.state
+    );
     const requestedGraph =
       request.state?.extensions?.[
         EXTENSION_NAME
@@ -19093,9 +19545,7 @@ function validateTypedNodeGraphDocument(
     for (const node of candidate.nodes) {
       if (
         node.kind === "operator" &&
-        !OPERATOR_DEFINITIONS[
-          node.operatorId
-        ]
+        !resolveNodeDefinition(node)
       ) {
         diagnostics.push(
           `Node '${generatedHumanNodeName(node)}' uses an unavailable operator.`

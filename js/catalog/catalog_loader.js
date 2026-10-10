@@ -84,10 +84,6 @@
     "catalog-demand-stream:";
   const STREAM_DEMAND_MAX_LINE_BYTES =
     1024 * 1024;
-  const STREAM_DEMAND_MAX_TOTAL_BYTES =
-    1024 * 1024 * 1024;
-  const STREAM_DEMAND_MAX_RECORDS =
-    5_000_000;
   const STREAM_DEMAND_MAX_JSON_DEPTH = 32;
   const STREAM_DEMAND_MAX_JSON_NODES = 250_000;
   const STREAM_DEMAND_BATCH_RECORDS = 256;
@@ -129,8 +125,6 @@
     2 * 1024 * 1024;
   const STREAM_DEMAND_PROGRESS_RECORDS = 1024;
   const STREAM_DEMAND_QUERY_LIMIT = 240;
-  const STREAM_DEMAND_EPHEMERAL_OWNER_CAP = 256;
-  const STREAM_DEMAND_DEPENDENCY_OWNER_CAP = 2048;
   const REQUIRED_API_FACTORY_VERSION = 41;
   const REQUIRED_API_VERIFICATION_SCHEMA_VERSION = 4;
 
@@ -158,7 +152,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.25.00-canonical-type-reconciliation-startup-recovery&factory=41&schema=4&portable-types=1&specializations=2&inherited-demand=1&i18n-rev=1",
+    "api_nodes.js?v=1.25.04-export-folder-events&factory=49&schema=4&portable-types=1&specializations=2&inherited-demand=1&i18n-rev=1&stable-contract-index=1&integrity-certificate=1",
     scriptUrl
   ).href;
 
@@ -725,14 +719,20 @@
   async function yieldCatalogCacheWork() {
     await new Promise(resolve => {
       if (
+        document.visibilityState === "visible" &&
         typeof requestAnimationFrame ===
           "function"
       ) {
         requestAnimationFrame(() =>
           resolve()
         );
-      } else {
+      } else if (
+        typeof window.RMLScheduleTask ===
+          "function"
+      ) {
         window.RMLScheduleTask(resolve);
+      } else {
+        queueMicrotask(resolve);
       }
     });
   }
@@ -1513,6 +1513,7 @@
   let catalogHealthSweepSequence = 0;
   let catalogHealthSweepRequestEpoch = 0;
   let catalogHealthSweepPublishedEpoch = 0;
+  let catalogHealthSweepPromise = null;
   let latestCatalogHealthSweepDiagnostics = null;
   let cachedCatalogRecord = null;
   let cachedCatalogStatus = null;
@@ -1526,6 +1527,10 @@
     new WeakMap();
   let catalogDemandHydrationPromise =
     Promise.resolve();
+  const catalogStreamDemandInFlight =
+    new Map();
+  const catalogStreamDemandSatisfactionByState =
+    new WeakMap();
   let catalogDemandIndexWritePromise = null;
   let catalogDemandPaletteManifest = null;
   let catalogDemandPalettePublication =
@@ -2673,8 +2678,7 @@
     database,
     prefix,
     visit,
-    maximumRecords =
-      STREAM_DEMAND_MAX_RECORDS
+    maximumRecords = Number.POSITIVE_INFINITY
   ) {
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -2945,6 +2949,124 @@
       }
     }
     return deleted;
+  }
+
+  function revokeCatalogStreamDemandGeneration(
+    database,
+    expectedGeneration,
+    expectedManifestId
+  ) {
+    const generation = String(
+      expectedGeneration || ""
+    );
+    const manifestId = String(
+      expectedManifestId || ""
+    );
+    if (!generation || !manifestId) {
+      return Promise.resolve(false);
+    }
+    return new Promise((resolve, reject) => {
+      let revoked = false;
+      let settled = false;
+      const transaction = database.transaction(
+        CACHE_STORE_NAME,
+        "readwrite"
+      );
+      const store = transaction.objectStore(
+        CACHE_STORE_NAME
+      );
+      const activeRequest = store.get(
+        STREAM_DEMAND_ACTIVE_KEY
+      );
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        callback(value);
+      };
+      const fail = error => finish(
+        reject,
+        error || transaction.error ||
+          new Error(
+            "The incomplete streamed catalog generation could not be revoked."
+          )
+      );
+      activeRequest.onsuccess = () => {
+        const active = activeRequest.result;
+        if (
+          String(active?.generation || "") !==
+            generation ||
+          String(active?.manifestId || "") !==
+            manifestId
+        ) {
+          return;
+        }
+        revoked = true;
+        store.delete(STREAM_DEMAND_ACTIVE_KEY);
+        store.delete(manifestId);
+        store.delete(STREAM_DEMAND_STAGING_KEY);
+      };
+      activeRequest.onerror = () =>
+        fail(activeRequest.error);
+      transaction.onerror = () =>
+        fail(transaction.error);
+      transaction.onabort = () =>
+        fail(transaction.error);
+      transaction.oncomplete = () =>
+        finish(resolve, revoked);
+    });
+  }
+
+  async function discardIncompleteCatalogStreamGeneration(
+    database,
+    manifest
+  ) {
+    const generation = String(
+      manifest?.generation || ""
+    );
+    const manifestId = String(
+      manifest?.id || ""
+    );
+    const revoked =
+      await revokeCatalogStreamDemandGeneration(
+        database,
+        generation,
+        manifestId
+      );
+    if (!revoked) return false;
+
+    if (
+      String(
+        catalogDemandState?.generation || ""
+      ) === generation
+    ) {
+      publishCatalogDemandState(
+        null,
+        { streamManifest: null }
+      );
+    } else if (
+      String(
+        catalogStreamDemandManifest?.generation ||
+        ""
+      ) === generation
+    ) {
+      catalogStreamDemandManifest = null;
+    }
+    if (
+      String(
+        cachedCatalogRecord?.generation || ""
+      ) === generation
+    ) {
+      cachedCatalogRecord = null;
+      cachedCatalogReadPromise = null;
+    }
+
+    await deleteCatalogCachePrefixBatches(
+      database,
+      catalogStreamDemandGenerationPrefix(
+        generation
+      )
+    );
+    return true;
   }
 
   async function reclaimObsoleteCatalogStorage(
@@ -4782,14 +4904,6 @@
     const targetOwners = pinned
       ? pinnedOwners
       : ephemeralOwners;
-    if (
-      !pinned &&
-      !targetOwners.has(owner) &&
-      targetOwners.size >=
-        STREAM_DEMAND_EPHEMERAL_OWNER_CAP
-    ) {
-      return false;
-    }
     targetOwners.add(owner);
     return true;
   }
@@ -5499,16 +5613,12 @@
       !Array.isArray(manifest.root) &&
       Number.isInteger(manifest.recordCount) &&
       manifest.recordCount >= 2 &&
-      manifest.recordCount <=
-        STREAM_DEMAND_MAX_RECORDS &&
       Number.isInteger(manifest.operatorCount) &&
       manifest.operatorCount >= 0 &&
       Number.isInteger(
         manifest.ownerChunkCount
       ) &&
       manifest.ownerChunkCount >= 0 &&
-      manifest.ownerChunkCount <=
-        STREAM_DEMAND_MAX_RECORDS &&
       Number.isInteger(
         manifest.rootChunkCount
       ) &&
@@ -5519,8 +5629,6 @@
       manifest.operatorShardCount === 0 &&
       manifest.operatorIndexKind ===
         "owner-multientry-v1" &&
-      manifest.operatorShardCount <=
-        STREAM_DEMAND_MAX_RECORDS &&
       Array.isArray(
         manifest.operatorShardCounts
       ) &&
@@ -5543,8 +5651,6 @@
         manifest.paletteShardCount
       ) &&
       manifest.paletteShardCount >= 0 &&
-      manifest.paletteShardCount <=
-        STREAM_DEMAND_MAX_RECORDS &&
       Array.isArray(
         manifest.paletteShardCounts
       ) &&
@@ -5563,8 +5669,6 @@
         manifest.searchShardCount
       ) &&
       manifest.searchShardCount >= 0 &&
-      manifest.searchShardCount <=
-        STREAM_DEMAND_MAX_RECORDS &&
       Array.isArray(manifest.groupCounts) &&
       manifest.groupCounts.every(entry =>
         Array.isArray(entry) &&
@@ -5847,6 +5951,7 @@
       return null;
     }
     let database;
+    let candidateManifest = null;
     try {
       database = await openCatalogCache();
       const active = await readCatalogCacheValue(
@@ -5865,6 +5970,7 @@
         database,
         active.manifestId
       );
+      candidateManifest = manifest;
       if (
         !validCatalogStreamDemandManifest(manifest) ||
         !catalogStreamRecordMatchesManifest(
@@ -5880,13 +5986,68 @@
       ) {
         return null;
       }
+      const verified =
+        await verifiedCatalogStreamDemandRecord(
+          database
+        );
+      if (
+        !verified ||
+        String(verified.generation || "") !==
+          String(manifest.generation || "") ||
+        String(verified.fingerprint || "") !==
+          expected
+      ) {
+        throw catalogStreamStructuralIntegrityError(
+          new Error(
+            "The same-fingerprint streamed catalog generation could not reproduce its verified scanner contract."
+          ),
+          createCatalogStreamDemandState(
+            manifest
+          )
+        );
+      }
       return Object.freeze(manifest);
     } catch (error) {
+      if (
+        isCatalogStreamStructuralIntegrityError(
+          error
+        ) &&
+        candidateManifest
+      ) {
+        const discarded =
+          await discardIncompleteCatalogStreamGeneration(
+            database,
+            candidateManifest
+          );
+        const ownerTypes = Array.isArray(
+          error.ownerTypes
+        )
+          ? error.ownerTypes
+          : [];
+        console.error(
+          "[RML API Catalog] A structurally incomplete same-fingerprint stream generation was discarded before one scanner demand-stream ingest.",
+          {
+            generation: String(
+              candidateManifest.generation || ""
+            ),
+            catalogFingerprint: expected,
+            ownerTypes,
+            discarded
+          },
+          error
+        );
+        if (!discarded) {
+          throw catalogDemandStaleError(
+            "The structurally incomplete streamed catalog generation changed before it could be discarded."
+          );
+        }
+        return null;
+      }
       console.error(
-        "[RML BUILDER INTERNAL FAILURE] The cross-tab catalog cache recheck failed; the authorized stream import will continue without reusing it.",
+        "[RML BUILDER INTERNAL FAILURE] The cross-tab catalog cache recheck failed without a structural-integrity diagnosis; no scanner demand-stream retry was started.",
         error
       );
-      return null;
+      throw error;
     } finally {
       database?.close?.();
     }
@@ -6728,14 +6889,6 @@
           recordCount += 1;
           diagnosticCounts.recordCount =
             recordCount;
-          if (
-            recordCount >
-              STREAM_DEMAND_MAX_RECORDS
-          ) {
-            throw new Error(
-              "The scanner demand stream exceeded its record bound."
-            );
-          }
           const kind = String(
             record?.record || ""
           );
@@ -7416,14 +7569,6 @@
           totalBytes += next.value.byteLength;
           diagnosticCounts.totalBytes =
             totalBytes;
-          if (
-            totalBytes >
-              STREAM_DEMAND_MAX_TOTAL_BYTES
-          ) {
-            throw new Error(
-              "The scanner demand stream exceeds the total transfer bound."
-            );
-          }
           buffer += decoder.decode(
             next.value,
             { stream: true }
@@ -8482,6 +8627,23 @@
     return output;
   }
 
+  function scannerCatalogContractOwner(
+    contract
+  ) {
+    if (
+      !contract ||
+      typeof contract !== "object" ||
+      Array.isArray(contract) ||
+      String(contract.kind || "").trim() ===
+        "type"
+    ) {
+      return "";
+    }
+    return catalogContractType(
+      contract.ownerType || ""
+    );
+  }
+
   function currentCatalogDemandRequirements() {
     const result = {
       operatorIds: new Set(),
@@ -8497,31 +8659,44 @@
     }
     const visited = new WeakSet();
     const stack = [graph];
-    let inspected = 0;
     while (stack.length > 0) {
       const value = stack.pop();
       if (
         !value ||
         typeof value !== "object" ||
-        visited.has(value)
+        Array.isArray(value) ||
+        visited.has(value) ||
+        !Array.isArray(value.nodes) ||
+        !Array.isArray(value.connections)
       ) {
         continue;
       }
       visited.add(value);
-      inspected += 1;
-      if (inspected > 2_000_000) {
-        throw new Error(
-          window.RMLI18n.t("ui.literal.aa632855d555")
-        );
-      }
-      const operatorId = String(
-        value.operatorId || ""
-      ).trim();
-      const owner = catalogContractType(
-        value.apiContract?.ownerType || ""
-      );
-      if (operatorId.startsWith("api.")) {
+      for (const node of value.nodes) {
+        if (
+          !node ||
+          typeof node !== "object" ||
+          Array.isArray(node) ||
+          node.kind !== "operator"
+        ) {
+          continue;
+        }
+        const operatorId = String(
+          node.operatorId || ""
+        ).trim();
+        const contractKind = String(
+          node.apiContract?.kind || ""
+        ).trim();
+        if (
+          !operatorId.startsWith("api.") ||
+          contractKind === "type"
+        ) {
+          continue;
+        }
         result.operatorIds.add(operatorId);
+        const owner = scannerCatalogContractOwner(
+          node.apiContract
+        );
         if (owner) {
           result.portableOwners.set(
             operatorId,
@@ -8529,12 +8704,20 @@
           );
         }
       }
-      for (const child of
-        Array.isArray(value)
-          ? value
-          : Object.values(value)) {
-        if (child && typeof child === "object") {
-          stack.push(child);
+      for (const collection of [
+        value.customCSharpFiles,
+        value.apiCompositeGraphs
+      ]) {
+        if (
+          !collection ||
+          typeof collection !== "object" ||
+          Array.isArray(collection)
+        ) {
+          continue;
+        }
+        for (const nested of
+          Object.values(collection)) {
+          stack.push(nested);
         }
       }
     }
@@ -9124,6 +9307,60 @@
     };
   }
 
+  function catalogStreamStructuralIntegrityError(
+    error,
+    state,
+    ownerTypes = []
+  ) {
+    const failure = error instanceof Error
+      ? error
+      : new Error(String(error ||
+          "The streamed catalog generation is structurally incomplete."));
+    const owners = [...new Set([
+      ...(Array.isArray(failure.ownerTypes)
+        ? failure.ownerTypes
+        : []),
+      ...(Array.isArray(ownerTypes)
+        ? ownerTypes
+        : [])
+    ].map(owner =>
+      catalogStreamNormalizeCsType(owner)
+    ).filter(Boolean))];
+    failure.catalogStreamIntegrityFailure = true;
+    failure.catalogStreamGeneration = String(
+      state?.generation ||
+      state?.manifest?.generation ||
+      ""
+    );
+    failure.catalogStreamFingerprint = String(
+      state?.manifest?.catalogFingerprint || ""
+    );
+    failure.ownerTypes = Object.freeze(owners);
+    if (!failure.code) {
+      failure.code =
+        "RML_CATALOG_STREAM_GENERATION_INCOMPLETE";
+    }
+    if (
+      owners.length > 0 &&
+      !String(failure.message || "").includes(
+        "Incomplete owner types:"
+      )
+    ) {
+      failure.message =
+        `${String(failure.message ||
+          "The streamed catalog generation is structurally incomplete.")} ` +
+        `Incomplete owner types: ${owners.join(", ")}.`;
+    }
+    return failure;
+  }
+
+  function isCatalogStreamStructuralIntegrityError(
+    error
+  ) {
+    return error?.catalogStreamIntegrityFailure ===
+      true;
+  }
+
   async function readCatalogStreamRecord(
     database,
     state,
@@ -9145,8 +9382,11 @@
       String(record.generation || "") !==
         state.generation
     ) {
-      throw new Error(
-        "A streamed catalog cache record does not belong to the active generation."
+      throw catalogStreamStructuralIntegrityError(
+        new Error(
+          "A streamed catalog cache record does not belong to the active generation."
+        ),
+        state
       );
     }
     return record;
@@ -9266,8 +9506,12 @@
         if (!chunk) continue;
         const chunkId = String(chunk.id || "");
         if (!chunkId) {
-          throw new Error(
-            "A streamed operator owner chunk has no stable cache identity."
+          throw catalogStreamStructuralIntegrityError(
+            new Error(
+              "A streamed operator owner chunk has no stable cache identity."
+            ),
+            state,
+            [chunk?.owner]
           );
         }
         if (!grouped.has(chunkId)) {
@@ -9283,42 +9527,51 @@
       }
       for (const group of grouped.values()) {
         catalogStreamThrowIfAborted(signal);
-        const chunk = await decodeCatalogStreamOwnerChunk(
-          group.chunk
-        );
-        const indexed =
-          catalogStreamOperatorRowsFromOwnerChunk(
-            state,
-            chunk
-          );
-        for (const request of group.requests) {
-          const selected = indexed.get(
-            request.wantedId
-          );
-          if (
-            !selected ||
-            !chunk.operatorStageKeys.includes(
-              request.key
-            )
-          ) {
-            throw new Error(
-              "A streamed operator index points to the wrong owner chunk."
+        try {
+          const chunk =
+            await decodeCatalogStreamOwnerChunk(
+              group.chunk
             );
+          const indexed =
+            catalogStreamOperatorRowsFromOwnerChunk(
+              state,
+              chunk
+            );
+          for (const request of group.requests) {
+            const selected = indexed.get(
+              request.wantedId
+            );
+            if (
+              !selected ||
+              !chunk.operatorStageKeys.includes(
+                request.key
+              )
+            ) {
+              throw new Error(
+                "A streamed operator index points to the wrong owner chunk."
+              );
+            }
+            found.set(request.wantedId, {
+              format: state.manifest.format,
+              schemaVersion:
+                state.manifest.schemaVersion,
+              generation: state.generation,
+              kind: "operator",
+              operatorId: request.wantedId,
+              owner:
+                catalogStreamNormalizeCsType(
+                  selected[1]
+                ),
+              locator: selected[2],
+              definition: selected[3]
+            });
           }
-          found.set(request.wantedId, {
-            format: state.manifest.format,
-            schemaVersion:
-              state.manifest.schemaVersion,
-            generation: state.generation,
-            kind: "operator",
-            operatorId: request.wantedId,
-            owner:
-              catalogStreamNormalizeCsType(
-                selected[1]
-              ),
-            locator: selected[2],
-            definition: selected[3]
-          });
+        } catch (error) {
+          throw catalogStreamStructuralIntegrityError(
+            error,
+            state,
+            [group.chunk?.owner]
+          );
         }
       }
       if (
@@ -9960,16 +10213,24 @@
         !batch.lastKey ||
         batch.lastKey === afterKey
       ) {
-        throw new Error(
-          "The streamed generic-owner cache cursor stopped making progress."
+        throw catalogStreamStructuralIntegrityError(
+          new Error(
+            "The streamed generic-owner cache cursor stopped making progress."
+          ),
+          state,
+          [normalizedOwner]
         );
       }
       afterKey = batch.lastKey;
       for (const record of batch.records) {
         chunkCount += 1;
         if (chunkCount > maximumChunks) {
-          throw new Error(
-            "The streamed generic-owner cache exceeded its manifest chunk bound."
+          throw catalogStreamStructuralIntegrityError(
+            new Error(
+              "The streamed generic-owner cache exceeded its manifest chunk bound."
+            ),
+            state,
+            [normalizedOwner]
           );
         }
         if (
@@ -9981,8 +10242,12 @@
             state.generation ||
           record?.kind !== "owner-chunk"
         ) {
-          throw new Error(
-            "A streamed generic-owner record belongs to another cache generation."
+          throw catalogStreamStructuralIntegrityError(
+            new Error(
+              "A streamed generic-owner record belongs to another cache generation."
+            ),
+            state,
+            [normalizedOwner, record?.owner]
           );
         }
         const candidate =
@@ -10058,33 +10323,67 @@
         !batch.lastKey ||
         batch.lastKey === afterKey
       ) {
-        throw new Error(
-          "The streamed owner cache cursor stopped making progress."
+        throw catalogStreamStructuralIntegrityError(
+          new Error(
+            "The streamed owner cache cursor stopped making progress."
+          ),
+          state,
+          [normalizedOwner]
         );
       }
       afterKey = batch.lastKey;
       for (let chunk of batch.records) {
         chunkCount += 1;
         if (chunkCount > maximumChunks) {
-          throw new Error(
-            "The streamed owner cache exceeded its manifest chunk bound."
+          throw catalogStreamStructuralIntegrityError(
+            new Error(
+              "The streamed owner cache exceeded its manifest chunk bound."
+            ),
+            state,
+            [normalizedOwner]
           );
         }
-        chunk = await decodeCatalogStreamOwnerChunk(
-          chunk
-        );
-        applyCatalogStreamOwnerChunk(
-          hydration,
-          chunk
-        );
+        try {
+          chunk =
+            await decodeCatalogStreamOwnerChunk(
+              chunk
+            );
+          applyCatalogStreamOwnerChunk(
+            hydration,
+            chunk
+          );
+        } catch (error) {
+          throw catalogStreamStructuralIntegrityError(
+            error,
+            state,
+            [normalizedOwner]
+          );
+        }
       }
       if (batch.records.length < 8) break;
       await yieldCatalogCacheWork();
     }
-    const entry =
-      finishCatalogStreamOwnerHydration(
+    let entry;
+    try {
+      entry = finishCatalogStreamOwnerHydration(
         hydration
       );
+    } catch (error) {
+      throw catalogStreamStructuralIntegrityError(
+        error,
+        state,
+        [normalizedOwner]
+      );
+    }
+    if (!entry && chunkCount > 0) {
+      throw catalogStreamStructuralIntegrityError(
+        new Error(
+          `The streamed owner '${normalizedOwner}' has indexed chunks but no readable type or enum header.`
+        ),
+        state,
+        [normalizedOwner]
+      );
+    }
     if (!entry) return null;
     return entry;
   }
@@ -10229,12 +10528,6 @@
         /[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_+]*)+/g
       ) || [];
       for (const match of matches) {
-        if (
-          output.size >=
-            STREAM_DEMAND_DEPENDENCY_OWNER_CAP
-        ) {
-          break;
-        }
         output.add(
           catalogStreamNormalizeCsType(match)
         );
@@ -10258,12 +10551,6 @@
         output,
         visited
       );
-      if (
-        output.size >=
-          STREAM_DEMAND_DEPENDENCY_OWNER_CAP
-      ) {
-        break;
-      }
     }
     return output;
   }
@@ -10371,21 +10658,6 @@
       ) {
         return;
       }
-      if (
-        queued.size >=
-          STREAM_DEMAND_DEPENDENCY_OWNER_CAP
-      ) {
-        const error = new Error(
-          `The streamed catalog inheritance closure exceeds its ${STREAM_DEMAND_DEPENDENCY_OWNER_CAP}-owner safety bound; no partial inheritance snapshot was published.`
-        );
-        error.code =
-          "RML_CATALOG_INHERITANCE_TRUNCATED";
-        error.ownerTypes = Object.freeze([
-          ...queued,
-          baseType
-        ]);
-        throw error;
-      }
       queued.add(baseType);
       pending.push(baseType);
     };
@@ -10399,9 +10671,10 @@
       );
     }
 
-    while (pending.length > 0) {
+    let pendingIndex = 0;
+    while (pendingIndex < pending.length) {
       catalogStreamThrowIfAborted(signal);
-      const requestedOwner = pending.shift();
+      const requestedOwner = pending[pendingIndex++];
       const entry = await readCatalogStreamOwner(
         database,
         state,
@@ -10480,12 +10753,10 @@
     const acceptedIds = new Set();
     const pinnedOwners = new Set();
     const ephemeralOwners = new Set();
+    const indexedOperatorOwners = new Set();
     const nextOperatorRows = new Map();
     const completeOwners = new Set();
-    const addCompleteOwner = (
-      rawOwner,
-      operatorId = ""
-    ) => {
+    const addCompleteOwner = rawOwner => {
       const owner =
         catalogStreamNormalizeCsType(
           rawOwner
@@ -10493,37 +10764,23 @@
       if (!owner || completeOwners.has(owner)) {
         return owner;
       }
-      if (
-        completeOwners.size >=
-          STREAM_DEMAND_EPHEMERAL_OWNER_CAP
-      ) {
-        const error = new Error(
-          `The streamed catalog demand contains more than ${STREAM_DEMAND_EPHEMERAL_OWNER_CAP} declaring types; no truncated verification snapshot was published.`
-        );
-        error.code =
-          "RML_CATALOG_COMPLETE_OWNER_LIMIT";
-        error.ownerTypes = Object.freeze([
-          ...completeOwners,
-          owner
-        ]);
-        error.operatorIds = operatorId
-          ? Object.freeze([operatorId])
-          : Object.freeze([]);
-        throw error;
-      }
       completeOwners.add(owner);
       ephemeralOwners.add(owner);
       ownerLocators.set(owner, []);
       return owner;
     };
 
-    if (hydratePortableOwners === true) {
-      const requestedCompleteOwners =
+    const requestedCompleteOwners = new Set(
+      [...(
         completePortableOwners instanceof Set
           ? completePortableOwners
-          : new Set();
-      for (const rawOwner of
-        requestedCompleteOwners) {
+          : new Set()
+      )]
+        .map(catalogStreamNormalizeCsType)
+        .filter(Boolean)
+    );
+    if (hydratePortableOwners === true) {
+      for (const rawOwner of requestedCompleteOwners) {
         addCompleteOwner(rawOwner);
       }
     }
@@ -10560,8 +10817,12 @@
               state.generation
           )
         ) {
-          throw new Error(
-            "A streamed operator route belongs to another cache generation."
+          throw catalogStreamStructuralIntegrityError(
+            new Error(
+              "A streamed operator route belongs to another cache generation."
+            ),
+            state,
+            [record?.owner]
           );
         }
         const portableOwner =
@@ -10578,10 +10839,16 @@
           unresolved.push(operatorId);
           continue;
         }
-        addCompleteOwner(
-          portableOwner || owner,
-          operatorId
-        );
+        const demandedOwner =
+          catalogStreamNormalizeCsType(
+            portableOwner || owner
+          );
+        if (
+          !record ||
+          requestedCompleteOwners.has(demandedOwner)
+        ) {
+          addCompleteOwner(demandedOwner);
+        }
         if (!record) {
           unresolved.push(operatorId);
           if (!completeOwners.has(owner)) {
@@ -10605,6 +10872,14 @@
           ephemeralOwners.delete(owner);
         }
         if (record) {
+          indexedOperatorOwners.add(owner);
+          if (portableOwner) {
+            indexedOperatorOwners.add(
+              catalogStreamNormalizeCsType(
+                portableOwner
+              )
+            );
+          }
           acceptedIds.add(operatorId);
           nextOperatorRows.set(
             operatorId,
@@ -10668,6 +10943,21 @@
           }
         );
       if (!entry) {
+        if (indexedOperatorOwners.has(owner)) {
+          throw catalogStreamStructuralIntegrityError(
+            new Error(
+              `The streamed operator index references declaring type '${owner}', but that owner has no readable stream entry.`
+            ),
+            state,
+            [owner]
+          );
+        }
+        completeOwners.delete(owner);
+        pinnedOwners.delete(owner);
+        ephemeralOwners.delete(owner);
+        state.seedOwners.delete(owner);
+        state.pinnedOwners.delete(owner);
+        state.ephemeralOwners.delete(owner);
         unresolved.push(
           ...[...nextOperatorRows]
             .filter(([, row]) =>
@@ -10709,14 +10999,16 @@
       }
     }
     if (incompleteOwners.length > 0) {
-      const error = new Error(
-        `The streamed catalog did not fully hydrate ${incompleteOwners.length} required declaring type(s); no partial verification snapshot was published.`
-      );
+      const error =
+        catalogStreamStructuralIntegrityError(
+          new Error(
+            `The streamed catalog did not fully hydrate ${incompleteOwners.length} required declaring type(s); no partial verification snapshot was published.`
+          ),
+          state,
+          incompleteOwners
+        );
       error.code =
         "RML_CATALOG_COMPLETE_OWNER_UNRESOLVED";
-      error.ownerTypes = Object.freeze([
-        ...incompleteOwners
-      ]);
       throw error;
     }
 
@@ -10758,50 +11050,21 @@
       }
     }
 
-    const boundedPending = [];
-    const boundedQueued = new Set();
-    const queueBounded = owner => {
+    const dependencyPending = [];
+    const dependencyQueued = new Set();
+    const queueDependency = owner => {
       if (
         !owner ||
         state.rows.has(owner) ||
-        boundedQueued.has(owner)
+        dependencyQueued.has(owner)
       ) {
         return;
       }
-      if (
-        boundedQueued.size >=
-          STREAM_DEMAND_DEPENDENCY_OWNER_CAP
-      ) {
-        const error = new Error(
-          `The streamed catalog dependency closure exceeds its ${STREAM_DEMAND_DEPENDENCY_OWNER_CAP}-owner safety bound; no truncated verification snapshot was published.`
-        );
-        error.code =
-          "RML_CATALOG_DEPENDENCY_TRUNCATED";
-        error.ownerTypes = Object.freeze([
-          ...boundedQueued,
-          owner
-        ]);
-        throw error;
-      }
-      boundedQueued.add(owner);
-      boundedPending.push(owner);
+      dependencyQueued.add(owner);
+      dependencyPending.push(owner);
     };
 
     let directLoaded = 0;
-    if (
-      pinnedDirect.size >
-        STREAM_DEMAND_DEPENDENCY_OWNER_CAP
-    ) {
-      const error = new Error(
-        `The streamed catalog direct dependency set exceeds its ${STREAM_DEMAND_DEPENDENCY_OWNER_CAP}-owner safety bound; no truncated verification snapshot was published.`
-      );
-      error.code =
-        "RML_CATALOG_DEPENDENCY_TRUNCATED";
-      error.ownerTypes = Object.freeze([
-        ...pinnedDirect
-      ]);
-      throw error;
-    }
     for (const owner of pinnedDirect) {
       catalogStreamThrowIfAborted(signal);
       if (state.rows.has(owner)) continue;
@@ -10819,7 +11082,7 @@
         collectCatalogStreamDirectReferences(
           entry
         )) {
-        queueBounded(reference);
+        queueDependency(reference);
       }
       directLoaded += 1;
       if (directLoaded % 32 === 0) {
@@ -10833,7 +11096,7 @@
         collectCatalogStreamDirectReferences(
           entry
         )) {
-        queueBounded(reference);
+        queueDependency(reference);
       }
     }
     for (const owner of state.bootstrapOwners) {
@@ -10842,14 +11105,15 @@
         collectCatalogStreamDirectReferences(
           entry
         )) {
-        queueBounded(reference);
+        queueDependency(reference);
       }
     }
 
-    let boundedLoaded = 0;
-    while (boundedPending.length > 0) {
+    let dependencyLoaded = 0;
+    let dependencyPendingIndex = 0;
+    while (dependencyPendingIndex < dependencyPending.length) {
       catalogStreamThrowIfAborted(signal);
-      const owner = boundedPending.shift();
+      const owner = dependencyPending[dependencyPendingIndex++];
       if (state.rows.has(owner)) continue;
       const entry =
         await readCatalogStreamOwner(
@@ -10861,14 +11125,14 @@
         );
       if (!entry) continue;
       state.dependencyOwners.add(owner);
-      boundedLoaded += 1;
+      dependencyLoaded += 1;
       for (const reference of
         collectCatalogStreamDirectReferences(
           entry
         )) {
-        queueBounded(reference);
+        queueDependency(reference);
       }
-      if (boundedLoaded % 32 === 0) {
+      if (dependencyLoaded % 32 === 0) {
         await yieldCatalogCacheWork();
       }
     }
@@ -11090,7 +11354,16 @@
             state
           );
         if (!strictCachedScannerContract(raw)) {
-          return null;
+          throw catalogStreamStructuralIntegrityError(
+            new Error(
+              "The streamed catalog generation did not produce a complete scanner contract."
+            ),
+            state,
+            [
+              ...state.seedOwners,
+              ...state.bootstrapOwners
+            ]
+          );
         }
         publishCatalogDemandState(
           state,
@@ -11352,15 +11625,11 @@
       }
     }
 
-    while (pending.length > 0) {
-      const owner = pending.shift();
+    let pendingIndex = 0;
+    while (pendingIndex < pending.length) {
+      const owner = pending[pendingIndex++];
       if (visited.has(owner)) continue;
       visited.add(owner);
-      if (visited.size > 100_000) {
-        throw new Error(
-          window.RMLI18n.t("ui.literal.984408e4bcda")
-        );
-      }
       const entry =
         await loadCatalogDemandOwner(
           database,
@@ -11566,11 +11835,247 @@
     return statusCatalog();
   }
 
-  async function ensureCatalogStreamDemandOperators(
+  function catalogStreamDemandDescriptor(
+    state,
+    operatorIds,
+    options = {}
+  ) {
+    const requirements =
+      currentCatalogDemandRequirements();
+    const ids = [...new Set([
+      ...requirements.operatorIds,
+      ...(Array.isArray(operatorIds)
+        ? operatorIds
+        : [])
+    ].map(value =>
+      String(value || "").trim()
+    ).filter(value =>
+      value.startsWith("api.")
+    ))].sort((left, right) =>
+      left.localeCompare(right)
+    );
+    const completeOwners = [
+      ...(options?.hydratePortableOwners === true &&
+      options?.completePortableOwners instanceof Set
+        ? options.completePortableOwners
+        : new Set())
+    ].map(catalogStreamNormalizeCsType)
+      .filter(Boolean)
+      .sort((left, right) =>
+        left.localeCompare(right)
+      );
+    const portableOwners = options?.portableOwners instanceof
+      Map
+        ? [...options.portableOwners]
+            .filter(([operatorId]) =>
+              ids.includes(
+                String(operatorId || "").trim()
+              )
+            )
+            .map(([operatorId, owner]) => [
+              String(operatorId || "").trim(),
+              catalogStreamNormalizeCsType(owner)
+            ])
+            .sort((left, right) =>
+              left[0].localeCompare(right[0]) ||
+              left[1].localeCompare(right[1])
+            )
+        : [];
+    const fingerprint = String(
+      state?.manifest?.catalogFingerprint || ""
+    );
+    const revision = Math.max(
+      0,
+      Number(state?.hydrationRevision) || 0
+    );
+    return Object.freeze({
+      ids: Object.freeze(ids),
+      completeOwners:
+        Object.freeze(completeOwners),
+      key: JSON.stringify({
+        fingerprint,
+        revision,
+        ids,
+        completeOwners,
+        portableOwners,
+        ephemeral:
+          options?.ephemeral === true
+      })
+    });
+  }
+
+  function catalogStreamDemandIsSatisfied(
+    state,
+    descriptor
+  ) {
+    if (
+      !state?.streamV1 ||
+      !descriptor ||
+      descriptor.ids.some(operatorId =>
+        !state.requiredOperatorIds.has(operatorId)
+      ) ||
+      descriptor.completeOwners.some(owner => {
+        const actualOwner =
+          state.genericOwnerAliases.get(owner) ||
+          owner;
+        return !state.completeMemberOwners.has(
+          actualOwner
+        );
+      })
+    ) {
+      return false;
+    }
+    const activeCatalog = statusCatalog();
+    const report = window.RMLApiNodeFactoryReport;
+    const fingerprint = String(
+      state.manifest?.catalogFingerprint || ""
+    );
+    return Boolean(
+      activeCatalog &&
+      String(
+        activeCatalog.catalogFingerprint || ""
+      ) === fingerprint &&
+      String(
+        activeCatalog.catalogDemandRevision || ""
+      ) ===
+        `${fingerprint}:${Math.max(
+          0,
+          Number(state.hydrationRevision) || 0
+        )}` &&
+      factoryMatchesCatalog(
+        activeCatalog,
+        report
+      )
+    );
+  }
+
+  function catalogStreamDemandSatisfiedResult(
+    state
+  ) {
+    return Object.freeze({
+      available: true,
+      full: false,
+      loaded: 0,
+      unresolvedOperatorIds:
+        Object.freeze([]),
+      inheritanceBoundaryOwners:
+        Object.freeze([
+          ...state.inheritanceBoundaryOwners
+        ])
+    });
+  }
+
+  function ensureCatalogStreamDemandOperators(
+    operatorIds,
+    options = {}
+  ) {
+    const state = catalogDemandState;
+    if (!state?.streamV1) {
+      return ensureCatalogStreamDemandOperatorsCore(
+        operatorIds,
+        options
+      );
+    }
+    const descriptor =
+      catalogStreamDemandDescriptor(
+        state,
+        operatorIds,
+        options
+      );
+    const satisfaction =
+      catalogStreamDemandSatisfactionByState
+        .get(state);
+    if (
+      catalogStreamDemandIsSatisfied(
+        state,
+        descriptor
+      )
+    ) {
+      const stored = satisfaction?.get(
+        descriptor.key
+      );
+      if (stored) return Promise.resolve(stored);
+      const result =
+        catalogStreamDemandSatisfiedResult(state);
+      const next = satisfaction || new Map();
+      next.set(descriptor.key, result);
+      if (!satisfaction) {
+        catalogStreamDemandSatisfactionByState.set(
+          state,
+          next
+        );
+      }
+      return Promise.resolve(result);
+    }
+
+    const inFlightKey = [
+      catalogAuthorityObjectId(state),
+      descriptor.key
+    ].join("|");
+    const existing =
+      catalogStreamDemandInFlight.get(inFlightKey);
+    if (existing) return existing;
+
+    const pending =
+      ensureCatalogStreamDemandOperatorsCore(
+        operatorIds,
+        options
+      ).then(result => {
+        const activeState = catalogDemandState;
+        if (activeState?.streamV1) {
+          const completedDescriptor =
+            catalogStreamDemandDescriptor(
+              activeState,
+              operatorIds,
+              options
+            );
+          if (
+            catalogStreamDemandIsSatisfied(
+              activeState,
+              completedDescriptor
+            )
+          ) {
+            let completed =
+              catalogStreamDemandSatisfactionByState
+                .get(activeState);
+            if (!completed) {
+              completed = new Map();
+              catalogStreamDemandSatisfactionByState
+                .set(activeState, completed);
+            }
+            completed.set(
+              completedDescriptor.key,
+              catalogStreamDemandSatisfiedResult(
+                activeState
+              )
+            );
+          }
+        }
+        return result;
+      }).finally(() => {
+        if (
+          catalogStreamDemandInFlight.get(
+            inFlightKey
+          ) === pending
+        ) {
+          catalogStreamDemandInFlight.delete(
+            inFlightKey
+          );
+        }
+      });
+    catalogStreamDemandInFlight.set(
+      inFlightKey,
+      pending
+    );
+    return pending;
+  }
+
+  async function ensureCatalogStreamDemandOperatorsCore(
     operatorIds,
     options = {}
   ) {
     let lastStaleError = null;
+    let structuralRecoveryAttempted = false;
     const seenAuthorities = new Set();
     while (true) {
       const state = catalogDemandState;
@@ -11776,6 +12281,102 @@
         });
       } catch (error) {
         if (
+          isCatalogStreamStructuralIntegrityError(
+            error
+          )
+        ) {
+          if (structuralRecoveryAttempted) {
+            throw error;
+          }
+          structuralRecoveryAttempted = true;
+          const manifest = state.manifest;
+          const demandUrl = String(
+            manifest?.demandUrl || ""
+          ).trim();
+          const expectedFingerprint = String(
+            manifest?.catalogFingerprint || ""
+          ).trim().toLowerCase();
+          if (
+            !demandUrl ||
+            !/^[a-f0-9]{64}$/.test(
+              expectedFingerprint
+            )
+          ) {
+            throw error;
+          }
+
+          await discardIncompleteCatalogStreamGeneration(
+            database,
+            manifest
+          );
+          database?.close?.();
+          database = null;
+
+          const recoveredManifest =
+            await ingestCatalogDemandStream(
+              demandUrl,
+              {
+                expectedFingerprint,
+                expectedRecordCount:
+                  Number(
+                    manifest.recordCount || 0
+                  ) || 0,
+                sourceUrl: String(
+                  manifest.sourceUrl || ""
+                ),
+                signal: options?.signal || null
+              }
+            );
+          if (
+            String(
+              recoveredManifest
+                ?.catalogFingerprint || ""
+            ).trim().toLowerCase() !==
+              expectedFingerprint
+          ) {
+            throw catalogStreamStructuralIntegrityError(
+              new Error(
+                "The scanner re-ingest did not reproduce the structurally rejected catalog fingerprint."
+              ),
+              createCatalogStreamDemandState(
+                recoveredManifest || manifest
+              ),
+              error.ownerTypes
+            );
+          }
+
+          let recoveryDatabase;
+          try {
+            recoveryDatabase =
+              await openCatalogCache();
+            const recovered =
+              await verifiedCatalogStreamDemandRecord(
+                recoveryDatabase
+              );
+            if (
+              !recovered?.catalog ||
+              String(
+                recovered.fingerprint || ""
+              ).trim().toLowerCase() !==
+                expectedFingerprint
+            ) {
+              throw catalogStreamStructuralIntegrityError(
+                new Error(
+                  "The scanner re-ingest could not be reopened as one verified catalog generation."
+                ),
+                createCatalogStreamDemandState(
+                  recoveredManifest
+                ),
+                error.ownerTypes
+              );
+            }
+          } finally {
+            recoveryDatabase?.close?.();
+          }
+          await yieldCatalogCacheWork();
+          continue;
+        }
+        if (
           isCatalogDemandStaleError(error) ||
           lease.controller.signal.aborted
         ) {
@@ -11844,6 +12445,59 @@
           value.startsWith("api.")
         )
     )];
+    const currentState = catalogDemandState;
+    const activeCatalog = statusCatalog();
+    const activeReport =
+      window.RMLApiNodeFactoryReport;
+    if (ids.length === 0) {
+      return Promise.resolve(
+        Object.freeze({
+          available: true,
+          full: Boolean(
+            !currentState ||
+            currentState.fullActive ||
+            activeCatalog
+              ?.catalogDemandPartial !== true
+          ),
+          loaded: 0
+        })
+      );
+    }
+    if (currentState?.streamV1) {
+      const descriptor =
+        catalogStreamDemandDescriptor(
+          currentState,
+          ids,
+          options
+        );
+      if (
+        catalogStreamDemandIsSatisfied(
+          currentState,
+          descriptor
+        )
+      ) {
+        return Promise.resolve(
+          catalogStreamDemandSatisfiedResult(
+            currentState
+          )
+        );
+      }
+    } else if (
+      activeCatalog &&
+      activeCatalog.catalogDemandPartial !== true &&
+      factoryMatchesCatalog(
+        activeCatalog,
+        activeReport
+      )
+    ) {
+      return Promise.resolve(
+        Object.freeze({
+          available: true,
+          full: true,
+          loaded: 0
+        })
+      );
+    }
     const run = async () => {
       const state = catalogDemandState;
       if (state?.streamV1) {
@@ -13958,6 +14612,9 @@
     const report =
       window.RMLApiNodeFactoryReport ||
       null;
+    const projectionCertificate =
+      window.RMLApiCatalogProjectionIndex
+        ?.integrityCertificate;
     return JSON.stringify({
       catalogFingerprint: String(
         catalog?.catalogFingerprint || ""
@@ -13968,11 +14625,19 @@
       registry: catalogAuthorityObjectId(
         registry
       ),
+      definitions: catalogAuthorityObjectId(
+        definitions
+      ),
       definitionCount:
-        definitions &&
-        typeof definitions === "object"
-          ? Object.keys(definitions).length
-          : 0,
+        projectionCertificate
+          ?.definitions === definitions
+          ? Number(
+              projectionCertificate
+                .totalGeneratedNodes
+            ) || 0
+          : Number(
+              report?.totalGeneratedNodes
+            ) || 0,
       definitionRevision: Number(
         window.__RMLNodeDefinitionRevision
       ) || 0,
@@ -14458,7 +15123,7 @@
     return diagnostics;
   }
 
-  async function discoverBuilderCatalogSession(
+  async function discoverBuilderCatalogSessionOnce(
     signal = null
   ) {
     const requestEpoch =
@@ -14603,6 +15268,25 @@
           BUILDER_SCANNER_DEMAND_PATH
         )}?port=${encodeURIComponent(port)}`
     });
+  }
+
+  async function discoverBuilderCatalogSession(
+    signal = null
+  ) {
+    if (catalogHealthSweepPromise) {
+      return catalogHealthSweepPromise;
+    }
+
+    const pending =
+      discoverBuilderCatalogSessionOnce(signal);
+    catalogHealthSweepPromise = pending;
+    try {
+      return await pending;
+    } finally {
+      if (catalogHealthSweepPromise === pending) {
+        catalogHealthSweepPromise = null;
+      }
+    }
   }
 
   function currentScannerConnection() {
@@ -14848,6 +15532,99 @@
     return 0.985;
   }
 
+  async function awaitScannerCatalogReady(
+    session,
+    signal,
+    sessionKey
+  ) {
+    let health = session?.health || null;
+    while (
+      health?.catalogReady !== true ||
+      health?.catalogAvailable !== true
+    ) {
+      const requestedGeneration = Math.max(
+        0,
+        Number(
+          health?.catalogRequestedGeneration
+        ) || 0
+      );
+      const completedGeneration = Math.max(
+        0,
+        Number(
+          health?.catalogCompletedGeneration
+        ) || 0
+      );
+      const successfulGeneration = Math.max(
+        0,
+        Number(
+          health?.catalogSuccessfulGeneration
+        ) || 0
+      );
+      if (
+        requestedGeneration > 0 &&
+        completedGeneration ===
+          requestedGeneration &&
+        successfulGeneration !==
+          requestedGeneration
+      ) {
+        const error = new Error(
+          String(
+            health?.catalogLastScanError ||
+            "The scanner completed the current catalog generation without publishing a catalog."
+          )
+        );
+        error.code =
+          "RML_SCANNER_CATALOG_GENERATION_FAILED";
+        throw error;
+      }
+
+      publishScannerCheckProgress(
+        sessionKey,
+        {
+          branch: "checking",
+          phase: String(
+            health?.catalogScanPhase ||
+            "catalog-generation"
+          ),
+          progress: 0.02,
+          phaseProgress: 0
+        }
+      );
+
+      try {
+        await fetchJson(
+          `${session.scannerBaseUrl}/catalog/ready`,
+          signal
+        );
+      } catch (error) {
+        if (signal?.aborted === true) {
+          throw error;
+        }
+        if (
+          !/^503\b/.test(
+            String(error?.message || error)
+          )
+        ) {
+          throw error;
+        }
+      }
+
+      health = await fetchJson(
+        `${session.scannerBaseUrl}/health`,
+        signal
+      );
+      if (health?.ok !== true) {
+        const error = new Error(
+          "The selected scanner stopped reporting a healthy session while its catalog was being generated."
+        );
+        error.code =
+          "RML_SCANNER_SESSION_LOST";
+        throw error;
+      }
+    }
+    return health;
+  }
+
   async function synchronizeScannerStatus(options = {}) {
     const session =
       options.session ||
@@ -14929,10 +15706,36 @@
         scannerCheckPromise
       );
     }
+    const activeCatalog = statusCatalog();
+    const activeReport =
+      window.RMLApiNodeFactoryReport;
+    const activeCatalogFingerprint = String(
+      activeCatalog?.catalogFingerprint || ""
+    ).trim().toLowerCase();
+    const currentLiveAuthority = Boolean(
+      session.health?.catalogReady === true &&
+      session.health?.catalogAvailable === true &&
+      document.documentElement.dataset
+        .rmlCatalogProxyState === "available" &&
+      lastScannerFingerprintSync.liveReached === true &&
+      lastScannerFingerprintSync.cacheFallback !== true &&
+      activeReport?.liveCatalogVerified === true &&
+      activeCatalog &&
+      factoryMatchesCatalog(
+        activeCatalog,
+        activeReport
+      ) &&
+      sessionFingerprint &&
+      activeCatalogFingerprint === sessionFingerprint &&
+      String(
+        activeReport?.catalogFingerprint || ""
+      ).trim().toLowerCase() ===
+        activeCatalogFingerprint
+    );
     if (
       scannerCheckGeneration === sessionKey &&
       lastScannerFingerprintSync.liveReached === true &&
-      window.RMLApiNodeFactoryReport?.liveCatalogVerified === true &&
+      currentLiveAuthority &&
       sessionFingerprint &&
       String(
         lastScannerFingerprintSync.fingerprint || ""
@@ -15048,49 +15851,53 @@
       let cacheWriteFailed = false;
       try {
         assertSession();
-        const scannerHealth = session.health;
-
-        const fingerprintContract = scannerFingerprintContract(scannerHealth);
-        const legacyFingerprint = legacyScannerFingerprint(scannerHealth);
+        let scannerHealth = session.health;
         if (
           scannerHealth?.catalogReady !== true ||
           scannerHealth?.catalogAvailable !== true
         ) {
-          const existing =
-            statusCatalog() ||
-            cachedCatalogStatus ||
-            cachedCatalogRecord?.catalog ||
-            null;
-          lastScannerFingerprintSync =
-            Object.freeze({
-              liveReached: false,
-              fingerprintMatchedCache: false,
-              cacheUpdatedFromLive: false,
-              cacheFallback: Boolean(existing),
-              fingerprint: String(
-                catalogIdentity(existing) || ""
-              ),
-              deferredDemandOnly: true,
-              error: ""
-            });
-          document.documentElement.dataset
-            .rmlCatalogSyncError = "";
-          catalogAvailabilityKnown = true;
-          catalogAvailable = Boolean(existing);
-          updateStatus();
+          demoteLiveFactoryReport();
+          scannerHealth =
+            await awaitScannerCatalogReady(
+              session,
+              signal,
+              sessionKey
+            );
+          if (builderProxySession) {
+            const refreshedSession =
+              Object.freeze({
+                ...session,
+                health: Object.freeze({
+                  ...scannerHealth
+                }),
+                fingerprint: String(
+                  scannerFingerprintContract(
+                    scannerHealth
+                  )?.fingerprint ||
+                  legacyScannerFingerprint(
+                    scannerHealth
+                  ) ||
+                  ""
+                )
+              });
+            window.RMLScannerHealthSession =
+              refreshedSession;
+            document.documentElement.dataset
+              .rmlCatalogProxyFingerprint =
+                refreshedSession.fingerprint;
+          }
           publishScannerCheckProgress(
             sessionKey,
             {
-              branch: "fallback",
-              phase: "catalog-unavailable",
-              progress: 1,
-              phaseProgress: 1,
-              cacheAvailable:
-                Boolean(existing)
+              branch: "checking",
+              phase: "catalog-ready",
+              progress: 0.03,
+              phaseProgress: 1
             }
           );
-          return Boolean(existing);
         }
+        const fingerprintContract = scannerFingerprintContract(scannerHealth);
+        const legacyFingerprint = legacyScannerFingerprint(scannerHealth);
         const catalogFetchUrl =
           session.catalogFetchUrl ||
           `${session.scannerBaseUrl}/resonite_api_catalog.json`;
@@ -15887,14 +16694,15 @@
       const id = String(
         operatorId || ""
       ).trim();
-      const hasPortableApiIdentity =
-        apiContract &&
-        typeof apiContract === "object" &&
-        !Array.isArray(apiContract) &&
-        Boolean(
-          String(apiContract.ownerType || "").trim() &&
-          String(apiContract.kind || "").trim()
+      const portableApiOwner =
+        scannerCatalogContractOwner(
+          apiContract
         );
+      const hasPortableApiIdentity =
+        Boolean(portableApiOwner);
+      const portableTypeBoundary =
+        String(apiContract?.kind || "").trim() ===
+          "type";
 
       if (
         !id.startsWith("api.") &&
@@ -15930,7 +16738,8 @@
             missingCatalogObject ===
               true,
           catalogScope:
-            catalogScope === "all"
+            catalogScope === "all" ||
+            portableTypeBoundary
               ? "all"
               : "api",
           nodeParameters:
@@ -16099,6 +16908,234 @@
   }
 
   let factoryRegistryIntegrityCache = null;
+  let factoryRegistryLegacyIntegrityAudit = null;
+
+  function yieldFactoryIntegrityWork() {
+    if (
+      globalThis.scheduler &&
+      typeof globalThis.scheduler.yield ===
+        "function"
+    ) {
+      return globalThis.scheduler.yield();
+    }
+    if (typeof MessageChannel === "function") {
+      return new Promise(resolve => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = () => {
+          channel.port1.close();
+          channel.port2.close();
+          resolve();
+        };
+        channel.port2.postMessage(0);
+      });
+    }
+    if (
+      document.visibilityState === "visible" &&
+      typeof requestAnimationFrame === "function"
+    ) {
+      return new Promise(resolve => {
+        requestAnimationFrame(() => resolve());
+      });
+    }
+    return Promise.resolve();
+  }
+
+  function matchingFactoryIntegrityCertificate(
+    catalog,
+    report,
+    registry,
+    definitions,
+    definitionRevision
+  ) {
+    const index =
+      window.RMLApiCatalogProjectionIndex;
+    const certificate =
+      index?.integrityCertificate;
+    const expectedGenerated = Math.max(
+      0,
+      Number(report?.totalGeneratedNodes) || 0
+    );
+    if (
+      Number(index?.version) < 2 ||
+      index?.catalog !== catalog ||
+      index?.report !== report ||
+      String(index?.catalogFingerprint || "") !==
+        String(catalog?.catalogFingerprint || "") ||
+      String(index?.engineVersion || "") !==
+        String(catalog?.engineVersion || "") ||
+      Number(index?.revision) !==
+        Number(report?.catalogProjectionRevision) ||
+      Number(index?.definitionRevision) !==
+        definitionRevision ||
+      !certificate ||
+      Number(certificate.version) !== 1 ||
+      certificate.registry !== registry ||
+      certificate.definitions !== definitions ||
+      certificate.catalog !== catalog ||
+      certificate.report !== report ||
+      String(
+        certificate.catalogFingerprint || ""
+      ) !==
+        String(catalog?.catalogFingerprint || "") ||
+      String(certificate.engineVersion || "") !==
+        String(catalog?.engineVersion || "") ||
+      Number(certificate.projectionRevision) !==
+        Number(report?.catalogProjectionRevision) ||
+      Number(certificate.definitionRevision) !==
+        definitionRevision ||
+      Number(certificate.totalGeneratedNodes) !==
+        expectedGenerated ||
+      certificate.generatedOperatorIds !==
+        index.generatedOperatorIds ||
+      certificate.availableOperatorIds !==
+        index.availableOperatorIds ||
+      Number(
+        certificate.generatedOperatorIds?.size
+      ) !== expectedGenerated ||
+      typeof certificate.generatedOperatorIds?.has !==
+        "function" ||
+      typeof certificate.availableOperatorIds?.has !==
+        "function"
+    ) {
+      return null;
+    }
+    return certificate;
+  }
+
+  function scheduleLegacyFactoryIntegrityAudit({
+    catalog,
+    report,
+    registry,
+    definitions,
+    definitionRevision,
+    catalogFingerprint,
+    engineVersion,
+    metadataValid
+  }) {
+    if (
+      factoryRegistryLegacyIntegrityAudit &&
+      factoryRegistryLegacyIntegrityAudit.registry ===
+        registry &&
+      factoryRegistryLegacyIntegrityAudit.definitions ===
+        definitions &&
+      factoryRegistryLegacyIntegrityAudit.report ===
+        report &&
+      factoryRegistryLegacyIntegrityAudit.catalog ===
+        catalog &&
+      factoryRegistryLegacyIntegrityAudit.definitionRevision ===
+        definitionRevision
+    ) {
+      return;
+    }
+
+    const audit = {
+      registry,
+      definitions,
+      report,
+      catalog,
+      definitionRevision,
+      publicationValid: metadataValid,
+      generatedDefinitions: 0
+    };
+    factoryRegistryLegacyIntegrityAudit = audit;
+    factoryRegistryIntegrityCache = {
+      ...audit,
+      catalogIdentity:
+        `${catalogFingerprint}|${engineVersion}`
+    };
+    const entries = (function* () {
+      for (const id in definitions || {}) {
+        if (
+          Object.prototype.hasOwnProperty.call(
+            definitions,
+            id
+          )
+        ) {
+          yield [id, definitions[id]];
+        }
+      }
+    })();
+
+    void (async () => {
+      let complete = false;
+      while (!complete) {
+        if (
+          window.RMLModNodeRegistry !== registry ||
+          registry?.getNodeDefinitions?.() !==
+            definitions ||
+          (Number(
+            window.__RMLNodeDefinitionRevision
+          ) || 0) !== definitionRevision
+        ) {
+          return;
+        }
+        for (let index = 0; index < 512; index += 1) {
+          const next = entries.next();
+          if (next.done) {
+            complete = true;
+            break;
+          }
+          const [id, definition] = next.value;
+          if (
+            definition?.catalogGenerated !== true ||
+            definition?.legacyCatalogAlias === true
+          ) {
+            continue;
+          }
+          audit.generatedDefinitions += 1;
+          const contract = definition.apiVerification;
+          if (
+            definition.unavailableApiContract === true ||
+            !contract ||
+            typeof contract !== "object" ||
+            Number(contract.schemaVersion) !==
+              REQUIRED_API_VERIFICATION_SCHEMA_VERSION ||
+            String(contract.nodeId || "") !== id ||
+            String(
+              contract.catalogFingerprint || ""
+            ) !== catalogFingerprint ||
+            String(contract.engineVersion || "") !==
+              engineVersion ||
+            !String(
+              contract.contractFingerprint || ""
+            ).trim()
+          ) {
+            audit.publicationValid = false;
+          }
+        }
+        if (!complete) {
+          await yieldFactoryIntegrityWork();
+        }
+      }
+      if (
+        audit.generatedDefinitions !==
+          Number(report?.totalGeneratedNodes)
+      ) {
+        audit.publicationValid = false;
+      }
+      if (
+        factoryRegistryLegacyIntegrityAudit === audit &&
+        window.RMLModNodeRegistry === registry &&
+        registry?.getNodeDefinitions?.() ===
+          definitions &&
+        (Number(
+          window.__RMLNodeDefinitionRevision
+        ) || 0) === definitionRevision
+      ) {
+        factoryRegistryIntegrityCache = {
+          ...audit,
+          catalogIdentity:
+            `${catalogFingerprint}|${engineVersion}`
+        };
+      }
+    })().finally(() => {
+      if (
+        factoryRegistryLegacyIntegrityAudit === audit
+      ) {
+        factoryRegistryLegacyIntegrityAudit = null;
+      }
+    });
+  }
 
   function factoryRegistryIntegrity(
     catalog,
@@ -16147,6 +17184,27 @@
     const definitionRevision = Number(
       window.__RMLNodeDefinitionRevision
     ) || 0;
+    const metadataValid = Boolean(
+      registry &&
+      definitions &&
+      typeof definitions === "object" &&
+      !Array.isArray(definitions) &&
+      catalogFingerprint &&
+      report &&
+      report.verificationPassed === true &&
+      Number(report.factoryVersion) ===
+        REQUIRED_API_FACTORY_VERSION &&
+      Number(
+        report.verificationSchemaVersion
+      ) ===
+        REQUIRED_API_VERIFICATION_SCHEMA_VERSION &&
+      String(
+        report.catalogFingerprint || ""
+      ) === catalogFingerprint &&
+      String(report.engineVersion || "") ===
+        engineVersion &&
+      Number(report.totalGeneratedNodes) > 0
+    );
     const cacheMatches = Boolean(
       factoryRegistryIntegrityCache &&
       factoryRegistryIntegrityCache.registry ===
@@ -16162,77 +17220,28 @@
       factoryRegistryIntegrityCache.definitionRevision ===
         definitionRevision
     );
-    let publicationValid = false;
-    let generatedDefinitions = 0;
+    const certificate = metadataValid
+      ? matchingFactoryIntegrityCertificate(
+          catalog,
+          report,
+          registry,
+          definitions,
+          definitionRevision
+        )
+      : null;
+    let publicationValid = Boolean(certificate);
+    let generatedDefinitions = certificate
+      ? certificate.totalGeneratedNodes
+      : 0;
 
-    if (cacheMatches) {
+    if (!certificate && cacheMatches) {
       publicationValid =
         factoryRegistryIntegrityCache
           .publicationValid;
       generatedDefinitions =
         factoryRegistryIntegrityCache
           .generatedDefinitions;
-    } else {
-      publicationValid = Boolean(
-        definitions &&
-        typeof definitions === "object" &&
-        !Array.isArray(definitions) &&
-        catalogFingerprint &&
-        report &&
-        report.verificationPassed === true &&
-        Number(report.totalGeneratedNodes) > 0
-      );
-      if (publicationValid) {
-        for (const id in definitions) {
-          if (!Object.prototype.hasOwnProperty.call(
-            definitions,
-            id
-          )) {
-            continue;
-          }
-          const definition = definitions[id];
-          if (
-            definition?.catalogGenerated !==
-              true ||
-            definition?.legacyCatalogAlias ===
-              true
-          ) {
-            continue;
-          }
-          generatedDefinitions += 1;
-          const contract =
-            definition.apiVerification;
-          if (
-            definition.unavailableApiContract ===
-              true ||
-            !contract ||
-            typeof contract !== "object" ||
-            Number(contract.schemaVersion) !==
-              REQUIRED_API_VERIFICATION_SCHEMA_VERSION ||
-            String(contract.nodeId || "") !==
-              id ||
-            String(
-              contract.catalogFingerprint || ""
-            ) !== catalogFingerprint ||
-            String(
-              contract.engineVersion || ""
-            ) !== engineVersion ||
-            !String(
-              contract.contractFingerprint || ""
-            ).trim()
-          ) {
-            publicationValid = false;
-          }
-        }
-        if (
-          generatedDefinitions !==
-            Number(
-              report.totalGeneratedNodes
-            )
-        ) {
-          publicationValid = false;
-        }
-      }
+    } else if (!certificate) {
       factoryRegistryIntegrityCache = {
         registry,
         definitions,
@@ -16243,6 +17252,31 @@
         definitionRevision,
         publicationValid,
         generatedDefinitions
+      };
+      if (metadataValid) {
+        scheduleLegacyFactoryIntegrityAudit({
+          catalog,
+          report,
+          registry,
+          definitions,
+          definitionRevision,
+          catalogFingerprint,
+          engineVersion,
+          metadataValid
+        });
+      }
+    } else {
+      factoryRegistryIntegrityCache = {
+        registry,
+        definitions,
+        report,
+        catalog,
+        catalogIdentity:
+          `${catalogFingerprint}|${engineVersion}`,
+        definitionRevision,
+        publicationValid,
+        generatedDefinitions,
+        certificate
       };
     }
 
@@ -16292,6 +17326,11 @@
             ? requirement.outputPorts
             : [];
       if (
+        (
+          certificate &&
+          !certificate.availableOperatorIds
+            ?.has?.(operatorId)
+        ) ||
         definition?.catalogGenerated !==
           true ||
         definition.unavailableApiContract ===
@@ -16501,10 +17540,25 @@
       const expectedType = String(
         expected?.type || ""
       );
+      const expectedCsType =
+        catalogGatePortCsType(
+          expected?.csType
+        );
+      const actualCsType =
+        catalogGatePortCsType(
+          actual?.apiCsType ||
+          actual?.csType ||
+          verificationById.get(id)?.csType
+        );
       if (
         expectedType &&
         String(actual?.type || "") !==
-          expectedType
+          expectedType &&
+        (
+          !expectedCsType ||
+          !actualCsType ||
+          actualCsType !== expectedCsType
+        )
       ) {
         mismatches.add(id);
         continue;
@@ -16520,16 +17574,6 @@
         mismatches.add(id);
         continue;
       }
-      const expectedCsType =
-        catalogGatePortCsType(
-          expected?.csType
-        );
-      const actualCsType =
-        catalogGatePortCsType(
-          actual?.apiCsType ||
-          actual?.csType ||
-          verificationById.get(id)?.csType
-        );
       if (
         expectedCsType &&
         actualCsType !== expectedCsType
@@ -17013,11 +18057,36 @@
     const live = Boolean(
       factoryReady &&
       report?.liveCatalogVerified === true &&
+      lastScannerFingerprintSync.liveReached === true &&
+      lastScannerFingerprintSync.cacheFallback !== true &&
+      document.documentElement.dataset
+        .rmlCatalogProxyState === "available" &&
+      window.RMLScannerHealthSession
+        ?.health?.catalogReady === true &&
+      window.RMLScannerHealthSession
+        ?.health?.catalogAvailable === true &&
       String(
         report?.catalogFingerprint || ""
       ) === String(
         catalog?.catalogFingerprint || ""
-      )
+      ) &&
+      String(
+        scannerFingerprintContract(
+          window.RMLScannerHealthSession
+            ?.health
+        )?.fingerprint ||
+        legacyScannerFingerprint(
+          window.RMLScannerHealthSession
+            ?.health
+        ) ||
+        ""
+      ).trim().toLowerCase() === String(
+        catalog?.catalogFingerprint || ""
+      ).trim().toLowerCase()
+    );
+    const replacementAuthoritative = Boolean(
+      live &&
+      catalog?.catalogDemandPartial !== true
     );
 
     if (!factoryReady) {
@@ -17038,6 +18107,7 @@
         resolvedRequirementKeys:
           Object.freeze([]),
         live: false,
+        replacementAuthoritative: false,
         cacheFallback: true,
         liveAttempted: false,
         source: "unavailable",
@@ -17105,6 +18175,7 @@
           ...resolvedRequirementKeys
         ]),
       live,
+      replacementAuthoritative,
       cacheFallback: !live,
       catalogBackedByCache: true,
       liveAttempted: false,
@@ -17680,6 +18751,9 @@
         live:
           replacementCatalog.live ===
             true,
+        replacementAuthoritative:
+          replacementCatalog
+            .replacementAuthoritative === true,
         cacheSatisfied:
           replacementCatalog.cacheFallback ===
             true,
@@ -17845,6 +18919,9 @@
           true,
       live:
         replacementCatalog.live === true,
+      replacementAuthoritative:
+        replacementCatalog
+          .replacementAuthoritative === true,
       cacheSatisfied:
         replacementCatalog.cacheFallback ===
           true,
@@ -17926,21 +19003,10 @@
         phaseProgress: 0
       }
     );
-    const healthSweepEpoch =
-      catalogHealthSweepRequestEpoch + 1;
     const proxySession =
       await discoverBuilderCatalogSession(
         options.signal || null
       );
-    if (
-      healthSweepEpoch !==
-        catalogHealthSweepRequestEpoch
-    ) {
-      return Boolean(
-        activeBuilderCatalogSessionKey ||
-        statusCatalog()
-      );
-    }
 
     if (proxySession) {
       const selectedScannerSession =
@@ -17994,7 +19060,9 @@
         ...options,
         session: proxySession,
         silent: true,
-        throwOnFailure: false,
+        throwOnFailure:
+          options.throwOnFailure === true ||
+          options.trigger === "import",
         deferScannerCheckWorkFinish:
           options.showWork === true
       });
@@ -18011,11 +19079,7 @@
               {
                 allowFullFallback: false,
                 hydratePortableOwners: true,
-                completePortableOwners:
-                  new Set(
-                    requirements.portableOwners
-                      .values()
-                  ),
+                completePortableOwners: new Set(),
                 portableOwners:
                   requirements.portableOwners,
                 signal:
